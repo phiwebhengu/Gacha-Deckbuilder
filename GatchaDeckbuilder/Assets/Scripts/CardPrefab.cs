@@ -12,12 +12,11 @@ public class CardUI : MonoBehaviour
         balatroController = GetComponent<BalatroCardController>();
     }
 
-    public IEnumerator AnimateToHand(Vector3 targetLocalPos, Quaternion targetLocalRot, float duration)
+    public IEnumerator AnimateToHand(Vector3 targetLocalPos, Quaternion targetLocalRot, Vector3 targetScale, float duration)
     {
         Vector3 startPos = rectTransform.localPosition;
         Quaternion startRot = rectTransform.localRotation;
         Vector3 startScale = rectTransform.localScale;
-        Vector3 targetScale = Vector3.one;
 
         float elapsed = 0f;
 
@@ -37,7 +36,7 @@ public class CardUI : MonoBehaviour
         rectTransform.localRotation = targetLocalRot;
         rectTransform.localScale = targetScale;
 
-        // Save new resting position for hover/selection math
+        // Save base transform for hover/selection math
         if (balatroController != null)
         {
             balatroController.SaveBaseTransform();

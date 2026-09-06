@@ -1,27 +1,30 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.UI;
 
 public class TokenSelectionManager : MonoBehaviour
 {
     [Header("Token Pool")]
     public List<TokenButton> tokenButtons = new List<TokenButton>();
-    public Transform tokenContainer; // Horizontal Layout Group container holding the buttons
+    public Transform tokenContainer;
 
-    [Header("Selection State")]
+    [Header("Selection & Staging State")]
     private int hoveredTokenCount = 0;
-    private int selectedTokenCount = 0;
+    private int stagedTokenCount = 0;
 
     [Header("Hand Reference")]
     [SerializeField] private PlayerHandManager handManager;
+
+    [SerializeField] private DrawTimerManager timerManager;
+    public int StagedTokenCount => stagedTokenCount;
+
     private void Start()
     {
         InitializeTokenButtons();
     }
 
-    private void InitializeTokenButtons()
+    public void InitializeTokenButtons()
     {
-        // If buttons are already placed under a container, register them automatically
         if (tokenContainer != null)
         {
             tokenButtons.Clear();
@@ -39,29 +42,85 @@ public class TokenSelectionManager : MonoBehaviour
         }
     }
 
-    // Highlights token 1 up to 'count'
     public void HoverTokensUpTo(int count)
     {
-        hoveredTokenCount = count;
+        hoveredTokenCount = Mathf.Clamp(count, 0, tokenButtons.Count);
         UpdateTokenVisuals();
     }
 
-    // Resets highlight when mouse leaves the UI buttons
     public void ClearHover()
     {
         hoveredTokenCount = 0;
         UpdateTokenVisuals();
     }
 
-    // Called when a button is clicked
+    // Step 1: Stage tokens (keep them highlighted until a deck is clicked)
     public void SelectTokens(int count)
     {
-        selectedTokenCount = count;
-        Debug.Log($"[Token System] Tokens Selected: {selectedTokenCount}. Dealing {selectedTokenCount} cards!");
+        stagedTokenCount = Mathf.Clamp(count, 0, tokenButtons.Count);
+        Debug.Log($"[Token System] Staged {stagedTokenCount} tokens. Select a deck to draw cards!");
+        UpdateTokenVisuals();
+    }
+
+    // Step 2: Deck clicked -> Deal cards & deplete staged tokens
+    public void OnDeckSelected(DeckButton deck)
+    {
+        if (stagedTokenCount <= 0)
+        {
+            Debug.LogWarning("[Token System] Select a token count before picking a deck!");
+            return;
+        }
+
+        int countToSpend = stagedTokenCount;
+        stagedTokenCount = 0;
 
         if (handManager != null)
         {
-            handManager.DealCardsFromTokens(selectedTokenCount);
+            handManager.DealCardsFromTokens(countToSpend, deck.DeckTransform, deck.Type);
+        }
+
+        DepleteTokens(countToSpend);
+
+        // Notify timer that player successfully drew cards
+        if (timerManager != null)
+        {
+            timerManager.NotifyCardsDrawn();
+        }
+    }
+
+    public void ForceAutoDrawSingleToken(DeckButton targetDeck)
+    {
+        if (tokenButtons.Count == 0 || targetDeck == null) return;
+
+        Debug.Log($"[Token System] Executing Penalty: Drawing 1 card from {targetDeck.Type} Deck.");
+
+        if (handManager != null)
+        {
+            handManager.DealCardsFromTokens(1, targetDeck.DeckTransform, targetDeck.Type);
+        }
+
+        DepleteTokens(1);
+    }
+
+    private void DepleteTokens(int countToDeplete)
+    {
+        ClearHover();
+
+        for (int i = countToDeplete - 1; i >= 0; i--)
+        {
+            TokenButton btnToDestroy = tokenButtons[i];
+            tokenButtons.RemoveAt(i);
+            Destroy(btnToDestroy.gameObject);
+        }
+
+        ReindexTokens();
+    }
+
+    private void ReindexTokens()
+    {
+        for (int i = 0; i < tokenButtons.Count; i++)
+        {
+            tokenButtons[i].Setup(i + 1, this);
         }
     }
 
@@ -69,8 +128,8 @@ public class TokenSelectionManager : MonoBehaviour
     {
         for (int i = 0; i < tokenButtons.Count; i++)
         {
-            // Highlight button if its index is <= the currently hovered token
-            bool shouldHighlight = (i + 1) <= hoveredTokenCount;
+            // Highlight if hovered OR if currently staged for purchase
+            bool shouldHighlight = (i + 1) <= hoveredTokenCount || (i + 1) <= stagedTokenCount;
             tokenButtons[i].Highlight(shouldHighlight);
         }
     }

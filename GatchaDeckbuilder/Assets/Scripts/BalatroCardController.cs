@@ -1,21 +1,30 @@
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
-using UnityEngine.InputSystem; // Using Unity's new Input System
+using UnityEngine.InputSystem;
 
 public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler, IPointerClickHandler
 {
     [Header("Hover Visual Settings")]
     [SerializeField] private Vector3 hoverScale = new Vector3(1.15f, 1.15f, 1f);
-    [SerializeField] private float hoverLiftAmount = 30f; // Pixels to move upward on hover
+    [SerializeField] private float hoverLiftAmount = 30f; // Pixels lifted while hovering
     [SerializeField] private Color highlightColor = new Color(1f, 0.9f, 0.4f, 1f);
     [SerializeField] private Image cardFrameOrOutline;
 
+    [Header("Selection Visual Settings")]
+    [Tooltip("Height above the resting hand position when locked in as selected")]
+    [SerializeField] private float selectedLiftAmount = 60f;
+    [SerializeField] private Vector3 selectedScale = new Vector3(1.15f, 1.15f, 1f);
+
     [Header("Balatro Tilt Settings")]
-    [SerializeField] private float maxTiltAngle = 12f; // Degrees of rotation toward cursor
+    [SerializeField] private float maxTiltAngle = 12f;
 
     [Header("Animation Tuning")]
     [SerializeField] private float lerpSpeed = 12f;
+
+    [Header("Scale Settings")]
+    [Tooltip("Base scale of the card while resting in hand (unselected)")]
+    [SerializeField] private Vector3 restingScale = new Vector3(0.7f, 0.7f, 1f);
 
     // Internal State Tracking
     private bool isHovered = false;
@@ -30,6 +39,10 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
     private Color originalColor = Color.white;
     private RectTransform rectTransform;
     private Canvas parentCanvas;
+
+    public bool IsSelected => isSelected;
+
+    public Vector3 RestingScale => restingScale;
 
     private void Awake()
     {
@@ -47,29 +60,24 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
         }
     }
 
-    private void Start()
-    {
-        SaveBaseTransform();
-    }
-
+    // Call this whenever the Hand Manager updates the fan layout positions
     public void SaveBaseTransform()
     {
         baseLocalPosition = rectTransform.localPosition;
         baseLocalRotation = rectTransform.localRotation;
-        targetLocalPosition = baseLocalPosition;
-        targetLocalRotation = baseLocalRotation;
-        targetScale = Vector3.one;
+
+        UpdateTargetVisuals();
     }
 
     private void Update()
     {
-        // Calculate dynamic cursor tilt using active pointer coordinates
+        // Dynamic Balatro tilt only occurs when hovering and NOT locked in selection
         if (isHovered && !isSelected)
         {
             CalculateCursorTilt();
         }
 
-        // Smoothly lerp position, rotation, and scale
+        // Interpolate position, rotation, and scale smoothly
         rectTransform.localPosition = Vector3.Lerp(rectTransform.localPosition, targetLocalPosition, Time.deltaTime * lerpSpeed);
         rectTransform.localRotation = Quaternion.Slerp(rectTransform.localRotation, targetLocalRotation, Time.deltaTime * lerpSpeed);
         rectTransform.localScale = Vector3.Lerp(rectTransform.localScale, targetScale, Time.deltaTime * lerpSpeed);
@@ -77,7 +85,6 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
 
     private void CalculateCursorTilt()
     {
-        // Get mouse/pointer position safely with the new Input System
         Vector2 mousePos = Vector2.zero;
 
         if (Mouse.current != null)
@@ -97,11 +104,9 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
 
         if (RectTransformUtility.ScreenPointToLocalPointInRectangle(rectTransform, mousePos, uiCamera, out Vector2 localMousePos))
         {
-            // Normalize relative to card dimensions (-0.5 to 0.5)
             float normalizedX = Mathf.Clamp(localMousePos.x / rectTransform.rect.width, -0.5f, 0.5f);
             float normalizedY = Mathf.Clamp(localMousePos.y / rectTransform.rect.height, -0.5f, 0.5f);
 
-            // Pitch and yaw angles
             float tiltX = -normalizedY * maxTiltAngle;
             float tiltY = normalizedX * maxTiltAngle;
 
@@ -112,17 +117,10 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
     public void OnPointerEnter(PointerEventData eventData)
     {
         isHovered = true;
+        UpdateTargetVisuals();
 
         if (!isSelected)
         {
-            targetLocalPosition = baseLocalPosition + (transform.up * hoverLiftAmount);
-            targetScale = hoverScale;
-
-            if (cardFrameOrOutline != null)
-            {
-                cardFrameOrOutline.color = highlightColor;
-            }
-
             transform.SetAsLastSibling();
         }
     }
@@ -130,48 +128,74 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
     public void OnPointerExit(PointerEventData eventData)
     {
         isHovered = false;
-
-        if (!isSelected)
-        {
-            targetLocalPosition = baseLocalPosition;
-            targetLocalRotation = baseLocalRotation;
-            targetScale = Vector3.one;
-
-            if (cardFrameOrOutline != null)
-            {
-                cardFrameOrOutline.color = originalColor;
-            }
-        }
+        UpdateTargetVisuals();
     }
 
+    // Direct interface click handler
     public void OnPointerClick(PointerEventData eventData)
     {
-        SetSelected(!isSelected);
+        ToggleSelection();
     }
 
-    public void SetSelected(bool select)
+    // Exposed parameterless method for standard UI Button OnClick() events
+    public void OnCardClicked()
     {
-        isSelected = select;
+        ToggleSelection();
+    }
+
+    public void ToggleSelection()
+    {
+        isSelected = !isSelected;
+        UpdateTargetVisuals();
 
         if (isSelected)
         {
-            targetLocalPosition = baseLocalPosition + (transform.up * hoverLiftAmount);
-            targetScale = hoverScale;
+            transform.SetAsLastSibling();
+            Debug.Log($"[Card System] Selected: {gameObject.name}");
+        }
+        else
+        {
+            Debug.Log($"[Card System] Deselected: {gameObject.name}");
+        }
+
+        // Notify End Turn system to update button visibility
+        EndTurnManager endTurnMgr = FindObjectOfType<EndTurnManager>();
+        if (endTurnMgr != null)
+        {
+            endTurnMgr.UpdateEndTurnButtonVisibility();
+        }
+    }
+
+    // Central state machine that determines target transforms based on (isSelected, isHovered)
+    private void UpdateTargetVisuals()
+    {
+        if (isSelected)
+        {
+            targetLocalPosition = baseLocalPosition + (transform.up * selectedLiftAmount);
             targetLocalRotation = baseLocalRotation;
+            targetScale = selectedScale;
 
             if (cardFrameOrOutline != null)
             {
                 cardFrameOrOutline.color = highlightColor;
             }
+        }
+        else if (isHovered)
+        {
+            targetLocalPosition = baseLocalPosition + (transform.up * hoverLiftAmount);
+            targetScale = hoverScale;
 
-            transform.SetAsLastSibling();
-            Debug.Log($"[Card System] Selected Card: {gameObject.name}");
+            if (cardFrameOrOutline != null)
+            {
+                cardFrameOrOutline.color = highlightColor;
+            }
         }
         else
         {
+            // Resets back to resting scale instead of Vector3.one
             targetLocalPosition = baseLocalPosition;
             targetLocalRotation = baseLocalRotation;
-            targetScale = Vector3.one;
+            targetScale = restingScale;
 
             if (cardFrameOrOutline != null)
             {

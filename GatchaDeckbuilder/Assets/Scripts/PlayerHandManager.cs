@@ -6,9 +6,8 @@ public class PlayerHandManager : MonoBehaviour
 {
     [Header("UI References")]
     [SerializeField] private GameObject cardPrefab;
-    [SerializeField] private RectTransform deckTransform;  // Position where cards spawn
     [SerializeField] private RectTransform handTransform;  // Parent object representing the hand
-    [SerializeField] private Canvas targetCanvas;          // Your main UI Canvas
+    [SerializeField] private Canvas targetCanvas;          // Main UI Canvas
 
     [Header("Fan Layout Settings")]
     [Tooltip("Maximum arc spread angle for the outer cards")]
@@ -31,7 +30,6 @@ public class PlayerHandManager : MonoBehaviour
 
     private void Awake()
     {
-        // Auto-find Canvas if not manually assigned
         if (targetCanvas == null)
         {
             targetCanvas = GetComponentInParent<Canvas>();
@@ -42,19 +40,18 @@ public class PlayerHandManager : MonoBehaviour
         }
     }
 
-    public void DealCardsFromTokens(int count)
+    public void DealCardsFromTokens(int count, RectTransform spawnDeckTransform, DeckType deckType)
     {
-        StartCoroutine(Routine_DealCards(count));
+        StartCoroutine(Routine_DealCards(count, spawnDeckTransform, deckType));
     }
 
-    private IEnumerator Routine_DealCards(int count)
+    private IEnumerator Routine_DealCards(int count, RectTransform spawnDeckTransform, DeckType deckType)
     {
         for (int i = 0; i < count; i++)
         {
-            // 1. Force instantiation directly as a child of handTransform (which must be inside Canvas)
+            // 1. Force instantiation directly as child of handTransform
             GameObject newCardObj = Instantiate(cardPrefab, handTransform, false);
 
-            // Re-parent explicitly to ensure UI rendering pipeline detects it under Canvas
             if (targetCanvas != null && !newCardObj.transform.IsChildOf(targetCanvas.transform))
             {
                 newCardObj.transform.SetParent(handTransform, false);
@@ -69,21 +66,21 @@ public class PlayerHandManager : MonoBehaviour
                 yield break;
             }
 
-            // 2. Set scale to 1 and position at Deck UI location
+            // 2. Position card at chosen Deck UI location
             cardRect.localScale = Vector3.one;
-            cardRect.position = deckTransform.position;
+            cardRect.position = spawnDeckTransform.position;
 
-            // Reset Z coordinate so it doesn't clip behind the Canvas plane
+            // Reset Z coordinate to avoid UI clipping
             Vector3 localPos = cardRect.localPosition;
             localPos.z = 0f;
             cardRect.localPosition = localPos;
 
-            // 3. Bring card to the front of the UI draw order
+            // 3. Bring card to front of canvas
             newCardObj.transform.SetAsLastSibling();
 
             cardsInHand.Add(cardScript);
 
-            // 4. Update dynamic fan positions
+            // 4. Update dynamic fan layout
             UpdateHandFanLayout();
 
             yield return new WaitForSeconds(dealDelay);
@@ -111,11 +108,64 @@ public class PlayerHandManager : MonoBehaviour
 
             Vector3 targetPosition = new Vector3(xPos, yPos, 0f);
 
-            // Animate card into hand
-            StartCoroutine(cardsInHand[i].AnimateToHand(targetPosition, targetRotation, cardMoveDuration));
+            // Scale fetch
+            BalatroCardController controller = cardsInHand[i].GetComponent<BalatroCardController>();
+            Vector3 targetScale = (controller != null) ? controller.RestingScale : Vector3.one;
 
-            // Ensure cards draw left-to-right correctly
+            // Animate into fan layout
+            StartCoroutine(cardsInHand[i].AnimateToHand(targetPosition, targetRotation, targetScale, cardMoveDuration));
+
+            // Draw order left-to-right
             cardsInHand[i].transform.SetAsLastSibling();
         }
+    }
+
+    // Helper to retrieve currently selected cards[cite: 4]
+    public List<CardUI> GetSelectedCards()
+    {
+        List<CardUI> selected = new List<CardUI>();
+        foreach (CardUI card in cardsInHand)
+        {
+            BalatroCardController controller = card.GetComponent<BalatroCardController>();
+            if (controller != null && controller.IsSelected)
+            {
+                selected.Add(card);
+            }
+        }
+        return selected;
+    }
+
+    // Moves selected cards out of the hand into the Selected Hand transform
+    public void SubmitSelectedCardsToHand(RectTransform selectedHandTarget)
+    {
+        List<CardUI> selectedCards = GetSelectedCards();
+
+        for (int i = 0; i < selectedCards.Count; i++)
+        {
+            CardUI card = selectedCards[i];
+
+            // Remove from current active hand layout list[cite: 4]
+            cardsInHand.Remove(card);
+
+            // Reparent to the Selected Hand UI area[cite: 4]
+            card.transform.SetParent(selectedHandTarget, true);
+
+            // Disable Balatro controller interactions once locked in
+            BalatroCardController controller = card.GetComponent<BalatroCardController>();
+            if (controller != null)
+            {
+                controller.enabled = false;
+            }
+
+            // Calculate horizontal offset spacing inside the selected hand area
+            float spacing = 90f;
+            float xPos = (i - (selectedCards.Count - 1) / 2f) * spacing;
+            Vector3 targetPos = new Vector3(xPos, 0f, 0f);
+
+            StartCoroutine(card.AnimateToHand(targetPos, Quaternion.identity, controller.RestingScale, cardMoveDuration));
+        }
+
+        // Re-fan the remaining cards left in the player hand[cite: 4]
+        UpdateHandFanLayout();
     }
 }
