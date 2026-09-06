@@ -26,6 +26,9 @@ public class DrawTimerManager : MonoBehaviour
     private bool playerHasDrawn = false;
     private Vector3 originalTimerScale = Vector3.one;
 
+    [Header("AI Rival Integration")]
+    [SerializeField] private AIRivalController aiRival;
+
     private void Awake()
     {
         if (timerContainer != null)
@@ -71,6 +74,12 @@ public class DrawTimerManager : MonoBehaviour
         if (tokenManager != null)
         {
             tokenManager.gameObject.SetActive(true);
+        }
+
+        // Start AI rival turn alongside player
+        if (aiRival != null)
+        {
+            aiRival.StartAIDrawPhase();
         }
 
         StartCoroutine(Routine_RunTimer());
@@ -124,7 +133,12 @@ public class DrawTimerManager : MonoBehaviour
             tokenManager.gameObject.SetActive(false);
         }
 
-        // Only penalize if 5 seconds passed without ANY draw action taken
+        // Stop AI turn actions when window closes
+        if (aiRival != null)
+        {
+            aiRival.StopAIDrawPhase();
+        }
+
         if (!playerHasDrawn)
         {
             Debug.Log("[Draw Timer] Time expired with zero selections! Executing random auto-draw penalty.");
@@ -141,9 +155,12 @@ public class DrawTimerManager : MonoBehaviour
         int randomIndex = Random.Range(0, availableDecks.Count);
         DeckButton chosenDeck = availableDecks[randomIndex];
 
+        // Enable player token manager to execute the penalty deal
         tokenManager.gameObject.SetActive(true);
         tokenManager.ForceAutoDrawSingleToken(chosenDeck);
-        tokenManager.gameObject.SetActive(false);
+
+        // NOTE: Do NOT set Active(false) here! 
+        // Setting active to false instantly kills the dealing Coroutine before cards instantiate.
     }
 
     private void UpdateTimerUI(float fillRatio, float timeRemaining)

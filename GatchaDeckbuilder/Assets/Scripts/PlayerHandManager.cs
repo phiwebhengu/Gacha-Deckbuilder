@@ -26,6 +26,12 @@ public class PlayerHandManager : MonoBehaviour
     [Tooltip("Delay between spawning consecutive cards from the deck")]
     [SerializeField] private float dealDelay = 0.15f;
 
+    [Header("Identity Config")]
+    [SerializeField] private bool isAI = false;
+
+    [Header("System References")]
+    [SerializeField] private DrawTimerManager timerManager;
+
     private List<CardUI> cardsInHand = new List<CardUI>();
 
     private void Awake()
@@ -42,6 +48,11 @@ public class PlayerHandManager : MonoBehaviour
 
     public void DealCardsFromTokens(int count, RectTransform spawnDeckTransform, DeckType deckType)
     {
+        if (!isAI && timerManager != null)
+        {
+            timerManager.NotifyCardsDrawn();
+        }
+
         StartCoroutine(Routine_DealCards(count, spawnDeckTransform, deckType));
     }
 

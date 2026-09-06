@@ -4,6 +4,10 @@ using UnityEngine;
 
 public class TokenSelectionManager : MonoBehaviour
 {
+    [Header("Identity Config")]
+    [Tooltip("Check this if this Token Manager belongs to the AI Rival")]
+    [SerializeField] private bool isAI = false;
+
     [Header("Token Pool")]
     public List<TokenButton> tokenButtons = new List<TokenButton>();
     public Transform tokenContainer;
@@ -15,7 +19,9 @@ public class TokenSelectionManager : MonoBehaviour
     [Header("Hand Reference")]
     [SerializeField] private PlayerHandManager handManager;
 
+    [Header("System References")]
     [SerializeField] private DrawTimerManager timerManager;
+
     public int StagedTokenCount => stagedTokenCount;
 
     private void Start()
@@ -54,15 +60,13 @@ public class TokenSelectionManager : MonoBehaviour
         UpdateTokenVisuals();
     }
 
-    // Step 1: Stage tokens (keep them highlighted until a deck is clicked)
     public void SelectTokens(int count)
     {
         stagedTokenCount = Mathf.Clamp(count, 0, tokenButtons.Count);
-        Debug.Log($"[Token System] Staged {stagedTokenCount} tokens. Select a deck to draw cards!");
+        Debug.Log($"[Token System] {(isAI ? "AI" : "Player")} Staged {stagedTokenCount} tokens.");
         UpdateTokenVisuals();
     }
 
-    // Step 2: Deck clicked -> Deal cards & deplete staged tokens
     public void OnDeckSelected(DeckButton deck)
     {
         if (stagedTokenCount <= 0)
@@ -81,8 +85,8 @@ public class TokenSelectionManager : MonoBehaviour
 
         DepleteTokens(countToSpend);
 
-        // Notify timer that player successfully drew cards
-        if (timerManager != null)
+        // ONLY notify the timer if this is the HUMAN player, not the AI!
+        if (!isAI && timerManager != null)
         {
             timerManager.NotifyCardsDrawn();
         }
@@ -128,7 +132,6 @@ public class TokenSelectionManager : MonoBehaviour
     {
         for (int i = 0; i < tokenButtons.Count; i++)
         {
-            // Highlight if hovered OR if currently staged for purchase
             bool shouldHighlight = (i + 1) <= hoveredTokenCount || (i + 1) <= stagedTokenCount;
             tokenButtons[i].Highlight(shouldHighlight);
         }
