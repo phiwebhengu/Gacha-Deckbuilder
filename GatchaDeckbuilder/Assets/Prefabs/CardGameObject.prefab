@@ -146,6 +146,7 @@ MonoBehaviour:
   selectedScale: {x: 1, y: 1, z: 1}
   maxTiltAngle: 24
   lerpSpeed: 12
+  restingScale: {x: 0.7, y: 0.7, z: 1}
 --- !u!1 &4070634781182985622
 GameObject:
   m_ObjectHideFlags: 0

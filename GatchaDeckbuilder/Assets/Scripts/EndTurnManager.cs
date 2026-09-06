@@ -8,8 +8,9 @@ public class EndTurnManager : MonoBehaviour
     [SerializeField] private Button endTurnButton;
     [SerializeField] private RectTransform selectedHandTransform;
 
-    [Header("Hand Reference")]
+    [Header("Player & Rival References")]
     [SerializeField] private PlayerHandManager handManager;
+    [SerializeField] private AIRivalController aiRival;
 
     private void Start()
     {
@@ -18,11 +19,9 @@ public class EndTurnManager : MonoBehaviour
             endTurnButton.onClick.AddListener(OnEndTurnClicked);
         }
 
-        // Hide button on start
         UpdateEndTurnButtonVisibility();
     }
 
-    // Call this whenever card selection changes or cards are dealt
     public void UpdateEndTurnButtonVisibility()
     {
         if (handManager == null || endTurnButton == null) return;
@@ -36,15 +35,20 @@ public class EndTurnManager : MonoBehaviour
         if (handManager == null || selectedHandTransform == null) return;
 
         List<CardUI> selectedCards = handManager.GetSelectedCards();
-
         if (selectedCards.Count == 0) return;
 
-        Debug.Log($"[End Turn] Locking in {selectedCards.Count} selected cards.");
+        Debug.Log($"[End Turn] Locking in player's {selectedCards.Count} selected cards.");
 
-        // Move selected cards to the Selected Hand UI area
+        // 1. Submit human player's cards to Selected Hand
         handManager.SubmitSelectedCardsToHand(selectedHandTransform);
 
-        // Hide button after submission
+        // 2. Submit AI Rival's cards simultaneously
+        if (aiRival != null)
+        {
+            aiRival.SubmitRivalHand();
+        }
+
+        // 3. Hide button after submission
         if (endTurnButton != null)
         {
             endTurnButton.gameObject.SetActive(false);

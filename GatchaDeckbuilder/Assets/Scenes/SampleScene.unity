@@ -3540,6 +3540,7 @@ MonoBehaviour:
   endTurnButton: {fileID: 1744962736}
   selectedHandTransform: {fileID: 1592463108}
   handManager: {fileID: 1309784093}
+  aiRival: {fileID: 1994359327}
 --- !u!1 &715612864
 GameObject:
   m_ObjectHideFlags: 0
@@ -8423,6 +8424,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::AIRivalController
   rivalTokenManager: {fileID: 438802710}
+  rivalHandManager: {fileID: 1994359325}
+  rivalSelectedHandTransform: {fileID: 1953246744}
   actionDeck: {fileID: 1701042463}
   supportDeck: {fileID: 443327276}
   minDecisionDelay: 0.8
