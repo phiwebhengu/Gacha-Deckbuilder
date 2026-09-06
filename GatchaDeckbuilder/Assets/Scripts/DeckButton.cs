@@ -14,13 +14,16 @@ public class DeckButton : MonoBehaviour, IPointerClickHandler, IPointerEnterHand
     [SerializeField] private DeckType deckType;
     [SerializeField] private RectTransform deckTransform;
 
+    [Header("Target Manager")]
+    [Tooltip("Drag the corresponding TokenSelectionManager here in the Inspector")]
+    [SerializeField] private TokenSelectionManager tokenManager;
+
     [Header("Visual Tuning")]
     [SerializeField] private Vector3 hoverScale = new Vector3(1.08f, 1.08f, 1f);
     [SerializeField] private float scaleSpeed = 12f;
 
     private Vector3 originalScale;
     private Vector3 targetScale;
-    private TokenSelectionManager tokenManager;
 
     public DeckType Type => deckType;
     public RectTransform DeckTransform => deckTransform != null ? deckTransform : GetComponent<RectTransform>();
@@ -29,7 +32,16 @@ public class DeckButton : MonoBehaviour, IPointerClickHandler, IPointerEnterHand
     {
         originalScale = transform.localScale;
         targetScale = originalScale;
-        tokenManager = FindObjectOfType<TokenSelectionManager>();
+
+        // Fallback search only if left unassigned
+        if (tokenManager == null)
+        {
+            tokenManager = GetComponentInParent<TokenSelectionManager>();
+            if (tokenManager == null)
+            {
+                tokenManager = FindObjectOfType<TokenSelectionManager>();
+            }
+        }
     }
 
     private void Update()

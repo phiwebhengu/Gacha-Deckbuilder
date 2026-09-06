@@ -63,7 +63,7 @@ public class TokenSelectionManager : MonoBehaviour
     public void SelectTokens(int count)
     {
         stagedTokenCount = Mathf.Clamp(count, 0, tokenButtons.Count);
-        Debug.Log($"[Token System] {(isAI ? "AI" : "Player")} Staged {stagedTokenCount} tokens.");
+        Debug.Log($"[Token System] {(isAI ? "AI" : "Player")} Staged {stagedTokenCount} tokens. Current staged value is: {stagedTokenCount}");
         UpdateTokenVisuals();
     }
 
