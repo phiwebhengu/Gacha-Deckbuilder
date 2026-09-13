@@ -179,4 +179,74 @@ public class PlayerHandManager : MonoBehaviour
         // Re-fan the remaining cards left in the player hand[cite: 4]
         UpdateHandFanLayout();
     }
+
+    /// <summary>
+    /// Clears and destroys all cards in a given container (e.g., Selected Hand transform) with a pop scale animation.
+    /// </summary>
+    public void ClearSubmittedCardsJuicy(RectTransform containerTransform, float delay = 0f)
+    {
+        StartCoroutine(Routine_ClearCardsJuicy(containerTransform, delay));
+    }
+
+    private IEnumerator Routine_ClearCardsJuicy(RectTransform containerTransform, float delay)
+    {
+        if (containerTransform == null) yield break;
+
+        if (delay > 0f)
+        {
+            yield return new WaitForSeconds(delay);
+        }
+
+        // Collect all CardUI instances sitting inside the selected target transform
+        List<CardUI> cardsToClear = new List<CardUI>(containerTransform.GetComponentsInChildren<CardUI>());
+
+        if (cardsToClear.Count == 0) yield break;
+
+        float popUpDuration = 0.12f;
+        float shrinkDuration = 0.18f;
+        Vector3 popScale = new Vector3(1.3f, 1.3f, 1f);
+
+        // Step 1: Scale UP (Pop)
+        float elapsed = 0f;
+        while (elapsed < popUpDuration)
+        {
+            elapsed += Time.deltaTime;
+            float t = elapsed / popUpDuration;
+
+            foreach (CardUI card in cardsToClear)
+            {
+                if (card != null)
+                {
+                    card.transform.localScale = Vector3.Lerp(Vector3.one, popScale, t);
+                }
+            }
+            yield return null;
+        }
+
+        // Step 2: Scale DOWN to Zero
+        elapsed = 0f;
+        while (elapsed < shrinkDuration)
+        {
+            elapsed += Time.deltaTime;
+            float t = elapsed / shrinkDuration;
+
+            foreach (CardUI card in cardsToClear)
+            {
+                if (card != null)
+                {
+                    card.transform.localScale = Vector3.Lerp(popScale, Vector3.zero, t);
+                }
+            }
+            yield return null;
+        }
+
+        // Step 3: Destroy GameObjects
+        foreach (CardUI card in cardsToClear)
+        {
+            if (card != null)
+            {
+                Destroy(card.gameObject);
+            }
+        }
+    }
 }

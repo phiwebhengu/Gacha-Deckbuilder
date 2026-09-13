@@ -48,6 +48,24 @@ public class TokenSelectionManager : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Resets selection states for the new round while preserving remaining tokens.
+    /// </summary>
+    public void ResetTokensForNewRound()
+    {
+        hoveredTokenCount = 0;
+        stagedTokenCount = 0;
+
+        // Clean out null references if any tokens were destroyed in previous rounds
+        tokenButtons.RemoveAll(btn => btn == null);
+
+        // Re-index remaining tokens and remove highlights
+        ReindexTokens();
+        UpdateTokenVisuals();
+
+        Debug.Log($"[Token System] {(isAI ? "AI" : "Player")} entering new round with {tokenButtons.Count} remaining tokens.");
+    }
+
     public void HoverTokensUpTo(int count)
     {
         hoveredTokenCount = Mathf.Clamp(count, 0, tokenButtons.Count);
@@ -112,9 +130,12 @@ public class TokenSelectionManager : MonoBehaviour
 
         for (int i = countToDeplete - 1; i >= 0; i--)
         {
-            TokenButton btnToDestroy = tokenButtons[i];
-            tokenButtons.RemoveAt(i);
-            Destroy(btnToDestroy.gameObject);
+            if (i < tokenButtons.Count)
+            {
+                TokenButton btnToDestroy = tokenButtons[i];
+                tokenButtons.RemoveAt(i);
+                Destroy(btnToDestroy.gameObject);
+            }
         }
 
         ReindexTokens();

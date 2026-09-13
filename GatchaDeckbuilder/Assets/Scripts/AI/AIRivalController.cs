@@ -22,6 +22,10 @@ public class AIRivalController : MonoBehaviour
 
     private Coroutine aiDecisionCoroutine;
 
+    // Public getters to safely share references with EndTurnManager
+    public RectTransform RivalSelectedHandTransform => rivalSelectedHandTransform;
+    public PlayerHandManager RivalHandManager => rivalHandManager;
+
     public void StartAIDrawPhase()
     {
         if (rivalTokenManager == null) return;
@@ -97,11 +101,9 @@ public class AIRivalController : MonoBehaviour
     {
         if (rivalHandManager == null) return;
 
-        // Convert the array returned by GetComponentsInChildren into a List<CardUI>
         List<CardUI> cardsInHand = new List<CardUI>(rivalHandManager.GetComponentsInChildren<CardUI>(includeInactive: false));
         if (cardsInHand.Count == 0) return;
 
-        // AI chooses how many cards to select (at least 1)
         int numToSelect = Random.Range(1, cardsInHand.Count + 1);
 
         for (int i = 0; i < numToSelect; i++)
@@ -109,7 +111,6 @@ public class AIRivalController : MonoBehaviour
             BalatroCardController cardController = cardsInHand[i].GetComponent<BalatroCardController>();
             if (cardController != null && !cardController.IsSelected)
             {
-                // Highlight and lift card using existing Balatro selection state
                 cardController.ToggleSelection();
             }
         }
@@ -123,6 +124,18 @@ public class AIRivalController : MonoBehaviour
         if (rivalHandManager != null && rivalSelectedHandTransform != null)
         {
             rivalHandManager.SubmitSelectedCardsToHand(rivalSelectedHandTransform);
+        }
+    }
+
+    /// <summary>
+    /// Clears and animates the destruction of cards sitting in the rival's played hand slot.
+    /// Called by EndTurnManager between rounds.
+    /// </summary>
+    public void ClearRivalSubmittedCards()
+    {
+        if (rivalHandManager != null && rivalSelectedHandTransform != null)
+        {
+            rivalHandManager.ClearSubmittedCardsJuicy(rivalSelectedHandTransform);
         }
     }
 

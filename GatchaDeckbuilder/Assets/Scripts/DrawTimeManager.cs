@@ -6,6 +6,15 @@ using TMPro;
 
 public class DrawTimerManager : MonoBehaviour
 {
+    [Header("Match & Round Settings")]
+    [SerializeField] private int maxRounds = 4;
+
+    [Header("Round Display UI References")]
+    [SerializeField] private TextMeshProUGUI roundDisplayText;
+    [SerializeField] private CanvasGroup roundDisplayCanvasGroup;
+    [SerializeField] private float roundTextFadeDuration = 0.8f;
+    [SerializeField] private float roundTextHoldDuration = 0.6f;
+
     [Header("Timer Settings")]
     [SerializeField] private float drawWindowDuration = 5f;
     [SerializeField] private float pulseSpeed = 8f;
@@ -34,13 +43,17 @@ public class DrawTimerManager : MonoBehaviour
     [SerializeField] private TokenSelectionManager tokenManager;
     [SerializeField] private List<DeckButton> availableDecks = new List<DeckButton>();
 
+    [Header("AI Rival Integration")]
+    [SerializeField] private AIRivalController aiRival;
+
+    private int currentRound = 1;
     private float currentTimer;
     private bool isTimerRunning = false;
     private bool playerHasDrawn = false;
     private Vector3 originalTimerScale = Vector3.one;
 
-    [Header("AI Rival Integration")]
-    [SerializeField] private AIRivalController aiRival;
+    public int CurrentRound => currentRound;
+    public int MaxRounds => maxRounds;
 
     private void Awake()
     {
@@ -78,6 +91,11 @@ public class DrawTimerManager : MonoBehaviour
             countdownText.gameObject.SetActive(false);
         }
 
+        if (roundDisplayCanvasGroup != null)
+        {
+            roundDisplayCanvasGroup.alpha = 0f;
+        }
+
         UpdateTimerUI(1f, drawWindowDuration);
     }
 
@@ -88,7 +106,38 @@ public class DrawTimerManager : MonoBehaviour
             startDrawButton.gameObject.SetActive(false);
         }
 
-        StartCoroutine(Routine_ExecuteCountdown());
+        StartCoroutine(Routine_StartRoundSequence());
+    }
+
+    public void TriggerNextRound()
+    {
+        currentRound++;
+        StartCoroutine(Routine_StartRoundSequence());
+    }
+
+    private IEnumerator Routine_StartRoundSequence()
+    {
+        // 1. Display and Fade-Out Round Banner Text
+        if (roundDisplayText != null && roundDisplayCanvasGroup != null)
+        {
+            roundDisplayText.text = $"ROUND {currentRound}";
+            roundDisplayCanvasGroup.alpha = 1f;
+
+            yield return new WaitForSeconds(roundTextHoldDuration);
+
+            float elapsed = 0f;
+            while (elapsed < roundTextFadeDuration)
+            {
+                elapsed += Time.deltaTime;
+                roundDisplayCanvasGroup.alpha = Mathf.Lerp(1f, 0f, elapsed / roundTextFadeDuration);
+                yield return null;
+            }
+
+            roundDisplayCanvasGroup.alpha = 0f;
+        }
+
+        // 2. Execute Ready... Set... Draw!
+        yield return StartCoroutine(Routine_ExecuteCountdown());
     }
 
     private IEnumerator Routine_ExecuteCountdown()
@@ -97,13 +146,8 @@ public class DrawTimerManager : MonoBehaviour
         {
             countdownText.gameObject.SetActive(true);
 
-            // 1. Ready
             yield return StartCoroutine(Routine_AnimateWord("READY"));
-
-            // 2. Set
             yield return StartCoroutine(Routine_AnimateWord("SET"));
-
-            // 3. Draw!
             yield return StartCoroutine(Routine_AnimateWord("DRAW!"));
 
             countdownText.gameObject.SetActive(false);
@@ -145,11 +189,14 @@ public class DrawTimerManager : MonoBehaviour
             timerContainer.gameObject.SetActive(true);
         }
 
+        // Re-enable Player Tokens for the round
         if (tokenManager != null)
         {
             tokenManager.gameObject.SetActive(true);
+            tokenManager.ResetTokensForNewRound();
         }
 
+        // Re-enable AI Tokens for the round
         if (aiRival != null)
         {
             aiRival.StartAIDrawPhase();
@@ -198,13 +245,11 @@ public class DrawTimerManager : MonoBehaviour
             timerContainer.gameObject.SetActive(false);
         }
 
-        // Hide Player's Tokens
         if (tokenManager != null)
         {
             tokenManager.gameObject.SetActive(false);
         }
 
-        // Hide AI's Tokens
         if (aiRival != null)
         {
             aiRival.StopAIDrawPhase();
@@ -226,14 +271,11 @@ public class DrawTimerManager : MonoBehaviour
         int randomIndex = Random.Range(0, availableDecks.Count);
         DeckButton chosenDeck = availableDecks[randomIndex];
 
-        // Temporarily enable token manager to fire the penalty draw logic
         tokenManager.gameObject.SetActive(true);
         tokenManager.ForceAutoDrawSingleToken(chosenDeck);
 
-        // Wait for the card instantiation and dealing animation to complete (0.5s)
         yield return new WaitForSeconds(0.5f);
 
-        // Turn off token manager to prevent further draws outside the window
         tokenManager.gameObject.SetActive(false);
     }
 
