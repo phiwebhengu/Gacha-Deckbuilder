@@ -11,6 +11,19 @@ public class DrawTimerManager : MonoBehaviour
     [SerializeField] private float pulseSpeed = 8f;
     [SerializeField] private float pulseScaleAmount = 0.15f;
 
+    [Header("Countdown Juice Settings")]
+    [Tooltip("Text component used to display Ready... Set... Draw!")]
+    [SerializeField] private TextMeshProUGUI countdownText;
+
+    [Tooltip("Time in seconds each countdown word stays on screen")]
+    [SerializeField] private float wordDisplayDuration = 0.6f;
+
+    [Tooltip("Starting scale multiplier when a word appears before shrinking back to 1.0")]
+    [SerializeField] private float popStartScaleMultiplier = 1.8f;
+
+    [Tooltip("Speed at which the word shrinks down to normal scale")]
+    [SerializeField] private float shrinkSpeed = 10f;
+
     [Header("UI References")]
     [SerializeField] private Button startDrawButton;
     [SerializeField] private Image radialTimerImage;
@@ -39,7 +52,7 @@ public class DrawTimerManager : MonoBehaviour
 
         if (startDrawButton != null)
         {
-            startDrawButton.onClick.AddListener(StartDrawPhase);
+            startDrawButton.onClick.AddListener(OnStartButtonClicked);
         }
 
         if (tokenManager == null)
@@ -47,12 +60,78 @@ public class DrawTimerManager : MonoBehaviour
             tokenManager = FindObjectOfType<TokenSelectionManager>();
         }
 
+        // Hide Player's Tokens on Start
         if (tokenManager != null)
         {
             tokenManager.gameObject.SetActive(false);
         }
 
+        // Hide AI's Tokens on Start
+        if (aiRival != null)
+        {
+            aiRival.StopAIDrawPhase();
+        }
+
+        // Hide countdown text on start
+        if (countdownText != null)
+        {
+            countdownText.gameObject.SetActive(false);
+        }
+
         UpdateTimerUI(1f, drawWindowDuration);
+    }
+
+    private void OnStartButtonClicked()
+    {
+        if (startDrawButton != null)
+        {
+            startDrawButton.gameObject.SetActive(false);
+        }
+
+        StartCoroutine(Routine_ExecuteCountdown());
+    }
+
+    private IEnumerator Routine_ExecuteCountdown()
+    {
+        if (countdownText != null)
+        {
+            countdownText.gameObject.SetActive(true);
+
+            // 1. Ready
+            yield return StartCoroutine(Routine_AnimateWord("READY"));
+
+            // 2. Set
+            yield return StartCoroutine(Routine_AnimateWord("SET"));
+
+            // 3. Draw!
+            yield return StartCoroutine(Routine_AnimateWord("DRAW!"));
+
+            countdownText.gameObject.SetActive(false);
+        }
+
+        StartDrawPhase();
+    }
+
+    private IEnumerator Routine_AnimateWord(string word)
+    {
+        countdownText.text = word;
+        RectTransform textRect = countdownText.rectTransform;
+
+        Vector3 oversizedScale = Vector3.one * popStartScaleMultiplier;
+        Vector3 targetScale = Vector3.one;
+
+        textRect.localScale = oversizedScale;
+
+        float elapsedTime = 0f;
+
+        while (elapsedTime < wordDisplayDuration)
+        {
+            elapsedTime += Time.deltaTime;
+            textRect.localScale = Vector3.Lerp(textRect.localScale, targetScale, Time.deltaTime * shrinkSpeed);
+            yield return null;
+        }
+
+        textRect.localScale = targetScale;
     }
 
     public void StartDrawPhase()
@@ -60,11 +139,6 @@ public class DrawTimerManager : MonoBehaviour
         playerHasDrawn = false;
         currentTimer = drawWindowDuration;
         isTimerRunning = true;
-
-        if (startDrawButton != null)
-        {
-            startDrawButton.gameObject.SetActive(false);
-        }
 
         if (timerContainer != null)
         {
@@ -76,7 +150,6 @@ public class DrawTimerManager : MonoBehaviour
             tokenManager.gameObject.SetActive(true);
         }
 
-        // Start AI rival turn alongside player
         if (aiRival != null)
         {
             aiRival.StartAIDrawPhase();
@@ -87,7 +160,6 @@ public class DrawTimerManager : MonoBehaviour
 
     private IEnumerator Routine_RunTimer()
     {
-        // Loop runs for the entire 5 seconds regardless of how many draws happen
         while (currentTimer > 0f)
         {
             currentTimer -= Time.deltaTime;
@@ -104,11 +176,9 @@ public class DrawTimerManager : MonoBehaviour
             yield return null;
         }
 
-        // Window closes strictly when time hits 0
         EndDrawPhase();
     }
 
-    // Called whenever cards are drawn—flags that the player used the window
     public void NotifyCardsDrawn()
     {
         if (isTimerRunning)
@@ -128,12 +198,13 @@ public class DrawTimerManager : MonoBehaviour
             timerContainer.gameObject.SetActive(false);
         }
 
+        // Hide Player's Tokens
         if (tokenManager != null)
         {
             tokenManager.gameObject.SetActive(false);
         }
 
-        // Stop AI turn actions when window closes
+        // Hide AI's Tokens
         if (aiRival != null)
         {
             aiRival.StopAIDrawPhase();
@@ -142,25 +213,28 @@ public class DrawTimerManager : MonoBehaviour
         if (!playerHasDrawn)
         {
             Debug.Log("[Draw Timer] Time expired with zero selections! Executing random auto-draw penalty.");
-            ExecuteAutoDrawPenalty();
+            StartCoroutine(Routine_ExecuteAutoDrawPenalty());
         }
 
         UpdateTimerUI(0f, 0f);
     }
 
-    private void ExecuteAutoDrawPenalty()
+    private IEnumerator Routine_ExecuteAutoDrawPenalty()
     {
-        if (tokenManager == null || availableDecks.Count == 0) return;
+        if (tokenManager == null || availableDecks.Count == 0) yield break;
 
         int randomIndex = Random.Range(0, availableDecks.Count);
         DeckButton chosenDeck = availableDecks[randomIndex];
 
-        // Enable player token manager to execute the penalty deal
+        // Temporarily enable token manager to fire the penalty draw logic
         tokenManager.gameObject.SetActive(true);
         tokenManager.ForceAutoDrawSingleToken(chosenDeck);
 
-        // NOTE: Do NOT set Active(false) here! 
-        // Setting active to false instantly kills the dealing Coroutine before cards instantiate.
+        // Wait for the card instantiation and dealing animation to complete (0.5s)
+        yield return new WaitForSeconds(0.5f);
+
+        // Turn off token manager to prevent further draws outside the window
+        tokenManager.gameObject.SetActive(false);
     }
 
     private void UpdateTimerUI(float fillRatio, float timeRemaining)

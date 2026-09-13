@@ -2,9 +2,43 @@ using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
+using TMPro; // Added for TextMeshPro references
+
+public enum CardCategory
+{
+    Attack,
+    Defense
+}
+
+public enum CardRarity
+{
+    Common,
+    Rare,
+    Legendary
+}
 
 public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler, IPointerClickHandler
 {
+    [Header("Card Category & Rarity")]
+    [SerializeField] private CardCategory category = CardCategory.Attack;
+    [SerializeField] private CardRarity rarity;
+
+    [Header("Card Value Settings")]
+    [Tooltip("The calculated numerical value of this card based on its rarity.")]
+    [SerializeField] private int cardValue;
+
+    [Header("UI References")]
+    [Tooltip("The UI Image on your button that reflects the tier's color.")]
+    [SerializeField] private Image tierImage;
+
+    [Tooltip("TextMeshPro component displaying the card's numerical value.")]
+    [SerializeField] private TextMeshProUGUI valueText;
+
+    [Header("Rarity Tier Colors")]
+    [SerializeField] private Color commonColor = new Color(0.6f, 0.6f, 0.6f, 1f);     // Gray/Silver
+    [SerializeField] private Color rareColor = new Color(0.2f, 0.6f, 1f, 1f);       // Blue
+    [SerializeField] private Color legendaryColor = new Color(1f, 0.8f, 0f, 1f);     // Gold
+
     [Header("Hover Visual Settings")]
     [SerializeField] private Vector3 hoverScale = new Vector3(1.15f, 1.15f, 1f);
     [SerializeField] private float hoverLiftAmount = 30f; // Pixels lifted while hovering
@@ -40,8 +74,10 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
     private RectTransform rectTransform;
     private Canvas parentCanvas;
 
+    public CardCategory Category => category;
+    public CardRarity Rarity => rarity;
+    public int CardValue => cardValue;
     public bool IsSelected => isSelected;
-
     public Vector3 RestingScale => restingScale;
 
     private void Awake()
@@ -57,6 +93,66 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
         if (cardFrameOrOutline != null)
         {
             originalColor = cardFrameOrOutline.color;
+        }
+
+        // Initialize category, rarity, and numerical value upon spawn
+        InitializeCardCategoryAndRarity();
+    }
+
+    /// <summary>
+    /// Assigns card category, calculates probability-based rarity, and rolls numerical value:
+    /// Common (50%): 1 to 5 | Rare (30%): 6 to 8 | Legendary (20%): 9 to 10
+    /// </summary>
+    public void InitializeCardCategoryAndRarity()
+    {
+        if (category == CardCategory.Attack)
+        {
+            float roll = Random.Range(0f, 100f);
+
+            if (roll < 50f)
+            {
+                rarity = CardRarity.Common;
+                cardValue = Random.Range(1, 6); // 1 to 5 inclusive
+            }
+            else if (roll < 80f) // 50% to 80% range (30% total)
+            {
+                rarity = CardRarity.Rare;
+                cardValue = Random.Range(6, 9); // 6 to 8 inclusive
+            }
+            else // 80% to 100% range (20% total)
+            {
+                rarity = CardRarity.Legendary;
+                cardValue = Random.Range(9, 11); // 9 to 10 inclusive
+            }
+        }
+
+        ApplyRarityColor();
+        UpdateValueTextUI();
+    }
+
+    private void ApplyRarityColor()
+    {
+        if (tierImage == null) return;
+
+        switch (rarity)
+        {
+            case CardRarity.Common:
+                tierImage.color = commonColor;
+                break;
+            case CardRarity.Rare:
+                tierImage.color = rareColor;
+                break;
+            case CardRarity.Legendary:
+                tierImage.color = legendaryColor;
+                break;
+        }
+    }
+
+    private void UpdateValueTextUI()
+    {
+        if (valueText != null)
+        {
+            valueText.text = cardValue.ToString();
         }
     }
 
@@ -151,7 +247,7 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
         if (isSelected)
         {
             transform.SetAsLastSibling();
-            Debug.Log($"[Card System] Selected: {gameObject.name}");
+            Debug.Log($"[Card System] Selected: {gameObject.name} ({rarity} {category} - Value: {cardValue})");
         }
         else
         {
