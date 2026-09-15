@@ -42,17 +42,23 @@ public static class CardLoader
             var f = rows[i];
             if (f.Count < 8) continue;
 
-            cards.Add(new ActionCardData
+            int copies = int.Parse(f[7]);
+
+            // Add the card to the deck 'copies' number of times
+            for (int c = 0; c < copies; c++)
             {
-                Id = int.Parse(f[0]),
-                Name = f[1],
-                Category = f[2],
-                Tier = f[3],
-                WeaponType = f[4],
-                Value = int.Parse(f[5]),
-                Role = f[6],
-                Copies = int.Parse(f[7])
-            });
+                cards.Add(new ActionCardData
+                {
+                    Id = int.Parse(f[0]),
+                    Name = f[1],
+                    Category = f[2],
+                    Tier = f[3],
+                    WeaponType = f[4],
+                    Value = int.Parse(f[5]),
+                    Role = f[6],
+                    Copies = copies // Keeps the metadata intact
+                });
+            }
         }
         return cards;
     }
@@ -67,15 +73,21 @@ public static class CardLoader
             var f = rows[i];
             if (f.Count < 6) continue;
 
-            cards.Add(new SupportCardData
+            int copies = int.Parse(f[5]);
+
+            // Add the card to the deck 'copies' number of times
+            for (int c = 0; c < copies; c++)
             {
-                Id = int.Parse(f[0]),
-                Name = f[1],
-                Tier = f[2],
-                Effect = f[3],
-                EffectType = f[4],
-                Copies = int.Parse(f[5])
-            });
+                cards.Add(new SupportCardData
+                {
+                    Id = int.Parse(f[0]),
+                    Name = f[1],
+                    Tier = f[2],
+                    Effect = f[3],
+                    EffectType = f[4],
+                    Copies = copies // Keeps the metadata intact
+                });
+            }
         }
         return cards;
     }
