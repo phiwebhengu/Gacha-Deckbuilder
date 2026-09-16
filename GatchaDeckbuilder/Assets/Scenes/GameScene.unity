@@ -148,8 +148,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 03bf9ef8219d6a146be29f348d5d9dbe, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::DeckManager
-  actionDeckCsv: {fileID: 4900000, guid: ea35c383af237a0418ba8dee8a238fef, type: 3}
-  supportDeckCsv: {fileID: 4900000, guid: b04994634792304418828f774d56a639, type: 3}
+  actionDeckCsv: {fileID: 4900000, guid: 0d1238712bc2b3449a3f339eaf94cfd1, type: 3}
+  supportDeckCsv: {fileID: 4900000, guid: e9084c4075c0fe6449529f306399233b, type: 3}
   loadedActionCards: []
   loadedSupportCards: []
 --- !u!4 &382488697
