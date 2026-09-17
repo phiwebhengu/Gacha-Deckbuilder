@@ -16,7 +16,7 @@ public class DrawTimerManager : MonoBehaviour
     [SerializeField] private float roundTextHoldDuration = 0.6f;
 
     [Header("Timer Settings")]
-    [SerializeField] private float drawWindowDuration = 5f;
+    [SerializeField] private float drawWindowDuration = 20f;
     [SerializeField] private float pulseSpeed = 8f;
     [SerializeField] private float pulseScaleAmount = 0.15f;
 

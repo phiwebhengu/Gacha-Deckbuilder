@@ -277,19 +277,15 @@ public class EndTurnManager : MonoBehaviour
         // 1. Check direct knockouts (0 HP reached)
         if (currentAIHP <= 0)
         {
-            Debug.Log("[Match Over] PLAYER WINS BY KNOCKOUT!");
-            ClearAllSubmittedCards();
             return;
         }
         if (currentPlayerHP <= 0)
         {
             Debug.Log("[Match Over] AI RIVAL WINS BY KNOCKOUT!");
-            ClearAllSubmittedCards();
             return;
         }
 
-        // Clear locked cards on both player and AI sides with juicy scale animation
-        ClearAllSubmittedCards();
+    
 
         // 2. Check round limits
         if (timerManager != null)
@@ -307,26 +303,7 @@ public class EndTurnManager : MonoBehaviour
         }
     }
 
-    private void ClearAllSubmittedCards()
-    {
-        // Clear Player's placed cards
-        if (handManager != null && selectedHandTransform != null)
-        {
-            handManager.ClearSubmittedCardsJuicy(selectedHandTransform);
-        }
 
-        // Clear AI's placed cards
-        if (aiRival != null)
-        {
-            PlayerHandManager aiHandManager = aiRival.GetComponentInChildren<PlayerHandManager>();
-            RectTransform aiSelectedTransform = aiRival.RivalSelectedHandTransform; // ensure reference is exposed or retrieved
-
-            if (aiHandManager != null && aiSelectedTransform != null)
-            {
-                aiHandManager.ClearSubmittedCardsJuicy(aiSelectedTransform);
-            }
-        }
-    }
 
     private void EvaluateFinalMatchWinner()
     {

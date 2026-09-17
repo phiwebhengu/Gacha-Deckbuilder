@@ -5,14 +5,12 @@ using UnityEngine;
 public class TokenSelectionManager : MonoBehaviour
 {
     [Header("Identity Config")]
-    [Tooltip("Check this if this Token Manager belongs to the AI Rival")]
     [SerializeField] private bool isAI = false;
 
     [Header("Token Pool")]
     public List<TokenButton> tokenButtons = new List<TokenButton>();
     public Transform tokenContainer;
 
-    [Header("Selection & Staging State")]
     private int hoveredTokenCount = 0;
     private int stagedTokenCount = 0;
 
@@ -21,6 +19,7 @@ public class TokenSelectionManager : MonoBehaviour
 
     [Header("System References")]
     [SerializeField] private DrawTimerManager timerManager;
+    [SerializeField] private PlayerPullController pullController;
 
     public int StagedTokenCount => stagedTokenCount;
 
@@ -48,22 +47,13 @@ public class TokenSelectionManager : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Resets selection states for the new round while preserving remaining tokens.
-    /// </summary>
     public void ResetTokensForNewRound()
     {
         hoveredTokenCount = 0;
         stagedTokenCount = 0;
-
-        // Clean out null references if any tokens were destroyed in previous rounds
         tokenButtons.RemoveAll(btn => btn == null);
-
-        // Re-index remaining tokens and remove highlights
         ReindexTokens();
         UpdateTokenVisuals();
-
-        Debug.Log($"[Token System] {(isAI ? "AI" : "Player")} entering new round with {tokenButtons.Count} remaining tokens.");
     }
 
     public void HoverTokensUpTo(int count)
@@ -81,7 +71,6 @@ public class TokenSelectionManager : MonoBehaviour
     public void SelectTokens(int count)
     {
         stagedTokenCount = Mathf.Clamp(count, 0, tokenButtons.Count);
-        Debug.Log($"[Token System] {(isAI ? "AI" : "Player")} Staged {stagedTokenCount} tokens. Current staged value is: {stagedTokenCount}");
         UpdateTokenVisuals();
     }
 
@@ -96,14 +85,22 @@ public class TokenSelectionManager : MonoBehaviour
         int countToSpend = stagedTokenCount;
         stagedTokenCount = 0;
 
+        var results = new List<PullResult>(countToSpend);
+        for (int i = 0; i < countToSpend; i++)
+        {
+            PullResult result = deck.Type == DeckType.Action
+                ? pullController.PullAction()
+                : pullController.PullSupport();
+            results.Add(result);
+        }
+
         if (handManager != null)
         {
-            handManager.DealCardsFromTokens(countToSpend, deck.DeckTransform, deck.Type);
+            handManager.DealPulledCards(results, deck.DeckTransform);
         }
 
         DepleteTokens(countToSpend);
 
-        // ONLY notify the timer if this is the HUMAN player, not the AI!
         if (!isAI && timerManager != null)
         {
             timerManager.NotifyCardsDrawn();
@@ -114,11 +111,13 @@ public class TokenSelectionManager : MonoBehaviour
     {
         if (tokenButtons.Count == 0 || targetDeck == null) return;
 
-        Debug.Log($"[Token System] Executing Penalty: Drawing 1 card from {targetDeck.Type} Deck.");
+        PullResult result = targetDeck.Type == DeckType.Action
+            ? pullController.PullAction()
+            : pullController.PullSupport();
 
         if (handManager != null)
         {
-            handManager.DealCardsFromTokens(1, targetDeck.DeckTransform, targetDeck.Type);
+            handManager.DealPulledCards(new List<PullResult> { result }, targetDeck.DeckTransform);
         }
 
         DepleteTokens(1);
@@ -127,7 +126,6 @@ public class TokenSelectionManager : MonoBehaviour
     private void DepleteTokens(int countToDeplete)
     {
         ClearHover();
-
         for (int i = countToDeplete - 1; i >= 0; i--)
         {
             if (i < tokenButtons.Count)
@@ -137,16 +135,13 @@ public class TokenSelectionManager : MonoBehaviour
                 Destroy(btnToDestroy.gameObject);
             }
         }
-
         ReindexTokens();
     }
 
     private void ReindexTokens()
     {
         for (int i = 0; i < tokenButtons.Count; i++)
-        {
             tokenButtons[i].Setup(i + 1, this);
-        }
     }
 
     private void UpdateTokenVisuals()

@@ -6,24 +6,16 @@ public class PlayerHandManager : MonoBehaviour
 {
     [Header("UI References")]
     [SerializeField] private GameObject cardPrefab;
-    [SerializeField] private RectTransform handTransform;  // Parent object representing the hand
-    [SerializeField] private Canvas targetCanvas;          // Main UI Canvas
+    [SerializeField] private RectTransform handTransform;
+    [SerializeField] private Canvas targetCanvas;
 
     [Header("Fan Layout Settings")]
-    [Tooltip("Maximum arc spread angle for the outer cards")]
     [SerializeField] private float maxFanAngle = 30f;
-
-    [Tooltip("Horizontal spacing offset between cards")]
     [SerializeField] private float cardSpacing = 80f;
-
-    [Tooltip("Slight downward dip for outer cards to create an arc")]
     [SerializeField] private float arcHeightDip = 15f;
 
     [Header("Animation Settings")]
-    [Tooltip("Time it takes for a single card to reach the hand")]
     [SerializeField] private float cardMoveDuration = 0.4f;
-
-    [Tooltip("Delay between spawning consecutive cards from the deck")]
     [SerializeField] private float dealDelay = 0.15f;
 
     [Header("Identity Config")]
@@ -39,37 +31,32 @@ public class PlayerHandManager : MonoBehaviour
         if (targetCanvas == null)
         {
             targetCanvas = GetComponentInParent<Canvas>();
-            if (targetCanvas == null)
-            {
-                targetCanvas = FindObjectOfType<Canvas>();
-            }
+            if (targetCanvas == null) targetCanvas = FindObjectOfType<Canvas>();
         }
     }
 
-    public void DealCardsFromTokens(int count, RectTransform spawnDeckTransform, DeckType deckType)
+    public void DealPulledCards(List<PullResult> results, RectTransform spawnDeckTransform)
     {
         if (!isAI && timerManager != null)
         {
             timerManager.NotifyCardsDrawn();
         }
 
-        StartCoroutine(Routine_DealCards(count, spawnDeckTransform, deckType));
+        StartCoroutine(Routine_DealCards(results, spawnDeckTransform));
     }
 
-    private IEnumerator Routine_DealCards(int count, RectTransform spawnDeckTransform, DeckType deckType)
+    private IEnumerator Routine_DealCards(List<PullResult> results, RectTransform spawnDeckTransform)
     {
-        for (int i = 0; i < count; i++)
+        foreach (PullResult result in results)
         {
-            // 1. Force instantiation directly as child of handTransform
             GameObject newCardObj = Instantiate(cardPrefab, handTransform, false);
 
             if (targetCanvas != null && !newCardObj.transform.IsChildOf(targetCanvas.transform))
-            {
                 newCardObj.transform.SetParent(handTransform, false);
-            }
 
             RectTransform cardRect = newCardObj.GetComponent<RectTransform>();
             CardUI cardScript = newCardObj.GetComponent<CardUI>();
+            CardVisual visual = newCardObj.GetComponent<CardVisual>();
 
             if (cardRect == null || cardScript == null)
             {
@@ -77,23 +64,31 @@ public class PlayerHandManager : MonoBehaviour
                 yield break;
             }
 
-            // 2. Position card at chosen Deck UI location
+            if (visual != null)
+            {
+                Sprite sprite = result.Deck == DeckType.Action
+                    ? CardAssetRegistry.Instance.GetActionSprite(result.CardId)
+                    : CardAssetRegistry.Instance.GetSupportSprite(result.CardId);
+
+                if (result.Deck == DeckType.Action)
+                    visual.Setup(result.ActionData, sprite);
+                else
+                    visual.Setup(result.SupportData, sprite);
+            }
+
             cardRect.localScale = Vector3.one;
             cardRect.position = spawnDeckTransform.position;
-
-            // Reset Z coordinate to avoid UI clipping
             Vector3 localPos = cardRect.localPosition;
             localPos.z = 0f;
             cardRect.localPosition = localPos;
 
-            // 3. Bring card to front of canvas
             newCardObj.transform.SetAsLastSibling();
-
             cardsInHand.Add(cardScript);
 
-            // 4. Update dynamic fan layout
-            UpdateHandFanLayout();
+            PullRevealJuice juice = newCardObj.GetComponent<PullRevealJuice>();
+            if (juice != null) juice.PlayReveal(result.Tier);
 
+            UpdateHandFanLayout();
             yield return new WaitForSeconds(dealDelay);
         }
     }
@@ -106,147 +101,28 @@ public class PlayerHandManager : MonoBehaviour
         for (int i = 0; i < totalCards; i++)
         {
             float normalizedIndex = (totalCards > 1) ? ((float)i / (totalCards - 1)) - 0.5f : 0f;
-
-            // Rotation
             float zRotation = -normalizedIndex * maxFanAngle;
             Quaternion targetRotation = Quaternion.Euler(0f, 0f, zRotation);
-
-            // Horizontal position
             float xPos = normalizedIndex * (cardSpacing * Mathf.Min(totalCards, 8));
-
-            // Arc dip
             float yPos = -Mathf.Abs(normalizedIndex) * arcHeightDip;
-
             Vector3 targetPosition = new Vector3(xPos, yPos, 0f);
 
-            // Scale fetch
             BalatroCardController controller = cardsInHand[i].GetComponent<BalatroCardController>();
             Vector3 targetScale = (controller != null) ? controller.RestingScale : Vector3.one;
 
-            // Animate into fan layout
             StartCoroutine(cardsInHand[i].AnimateToHand(targetPosition, targetRotation, targetScale, cardMoveDuration));
-
-            // Draw order left-to-right
             cardsInHand[i].transform.SetAsLastSibling();
         }
     }
 
-    // Helper to retrieve currently selected cards[cite: 4]
     public List<CardUI> GetSelectedCards()
     {
         List<CardUI> selected = new List<CardUI>();
         foreach (CardUI card in cardsInHand)
         {
             BalatroCardController controller = card.GetComponent<BalatroCardController>();
-            if (controller != null && controller.IsSelected)
-            {
-                selected.Add(card);
-            }
+            if (controller != null && controller.IsSelected) selected.Add(card);
         }
         return selected;
-    }
-
-    // Moves selected cards out of the hand into the Selected Hand transform
-    public void SubmitSelectedCardsToHand(RectTransform selectedHandTarget)
-    {
-        List<CardUI> selectedCards = GetSelectedCards();
-
-        for (int i = 0; i < selectedCards.Count; i++)
-        {
-            CardUI card = selectedCards[i];
-
-            // Remove from current active hand layout list[cite: 4]
-            cardsInHand.Remove(card);
-
-            // Reparent to the Selected Hand UI area[cite: 4]
-            card.transform.SetParent(selectedHandTarget, true);
-
-            // Disable Balatro controller interactions once locked in
-            BalatroCardController controller = card.GetComponent<BalatroCardController>();
-            if (controller != null)
-            {
-                controller.enabled = false;
-            }
-
-            // Calculate horizontal offset spacing inside the selected hand area
-            float spacing = 90f;
-            float xPos = (i - (selectedCards.Count - 1) / 2f) * spacing;
-            Vector3 targetPos = new Vector3(xPos, 0f, 0f);
-
-            StartCoroutine(card.AnimateToHand(targetPos, Quaternion.identity, controller.RestingScale, cardMoveDuration));
-        }
-
-        // Re-fan the remaining cards left in the player hand[cite: 4]
-        UpdateHandFanLayout();
-    }
-
-    /// <summary>
-    /// Clears and destroys all cards in a given container (e.g., Selected Hand transform) with a pop scale animation.
-    /// </summary>
-    public void ClearSubmittedCardsJuicy(RectTransform containerTransform, float delay = 0f)
-    {
-        StartCoroutine(Routine_ClearCardsJuicy(containerTransform, delay));
-    }
-
-    private IEnumerator Routine_ClearCardsJuicy(RectTransform containerTransform, float delay)
-    {
-        if (containerTransform == null) yield break;
-
-        if (delay > 0f)
-        {
-            yield return new WaitForSeconds(delay);
-        }
-
-        // Collect all CardUI instances sitting inside the selected target transform
-        List<CardUI> cardsToClear = new List<CardUI>(containerTransform.GetComponentsInChildren<CardUI>());
-
-        if (cardsToClear.Count == 0) yield break;
-
-        float popUpDuration = 0.12f;
-        float shrinkDuration = 0.18f;
-        Vector3 popScale = new Vector3(1.3f, 1.3f, 1f);
-
-        // Step 1: Scale UP (Pop)
-        float elapsed = 0f;
-        while (elapsed < popUpDuration)
-        {
-            elapsed += Time.deltaTime;
-            float t = elapsed / popUpDuration;
-
-            foreach (CardUI card in cardsToClear)
-            {
-                if (card != null)
-                {
-                    card.transform.localScale = Vector3.Lerp(Vector3.one, popScale, t);
-                }
-            }
-            yield return null;
-        }
-
-        // Step 2: Scale DOWN to Zero
-        elapsed = 0f;
-        while (elapsed < shrinkDuration)
-        {
-            elapsed += Time.deltaTime;
-            float t = elapsed / shrinkDuration;
-
-            foreach (CardUI card in cardsToClear)
-            {
-                if (card != null)
-                {
-                    card.transform.localScale = Vector3.Lerp(popScale, Vector3.zero, t);
-                }
-            }
-            yield return null;
-        }
-
-        // Step 3: Destroy GameObjects
-        foreach (CardUI card in cardsToClear)
-        {
-            if (card != null)
-            {
-                Destroy(card.gameObject);
-            }
-        }
     }
 }
