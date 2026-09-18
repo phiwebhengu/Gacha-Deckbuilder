@@ -125,4 +125,65 @@ public class PlayerHandManager : MonoBehaviour
         }
         return selected;
     }
+
+    public void SubmitSelectedCardsToHand(RectTransform selectedHandTarget)
+    {
+        List<CardUI> selectedCards = GetSelectedCards();
+        for (int i = 0; i < selectedCards.Count; i++)
+        {
+            CardUI card = selectedCards[i];
+            cardsInHand.Remove(card);
+            card.transform.SetParent(selectedHandTarget, true);
+
+            BalatroCardController controller = card.GetComponent<BalatroCardController>();
+            if (controller != null) controller.enabled = false;
+
+            float spacing = 90f;
+            float xPos = (i - (selectedCards.Count - 1) / 2f) * spacing;
+            Vector3 targetPos = new Vector3(xPos, 0f, 0f);
+            StartCoroutine(card.AnimateToHand(targetPos, Quaternion.identity, controller.RestingScale, cardMoveDuration));
+        }
+        UpdateHandFanLayout();
+    }
+
+    public void ClearSubmittedCardsJuicy(RectTransform containerTransform, float delay = 0f)
+    {
+        StartCoroutine(Routine_ClearCardsJuicy(containerTransform, delay));
+    }
+
+    private IEnumerator Routine_ClearCardsJuicy(RectTransform containerTransform, float delay)
+    {
+        if (containerTransform == null) yield break;
+        if (delay > 0f) yield return new WaitForSeconds(delay);
+
+        List<CardUI> cardsToClear = new List<CardUI>(containerTransform.GetComponentsInChildren<CardUI>());
+        if (cardsToClear.Count == 0) yield break;
+
+        float popUpDuration = 0.12f;
+        float shrinkDuration = 0.18f;
+        Vector3 popScale = new Vector3(1.3f, 1.3f, 1f);
+
+        float elapsed = 0f;
+        while (elapsed < popUpDuration)
+        {
+            elapsed += Time.deltaTime;
+            float t = elapsed / popUpDuration;
+            foreach (CardUI card in cardsToClear)
+                if (card != null) card.transform.localScale = Vector3.Lerp(Vector3.one, popScale, t);
+            yield return null;
+        }
+
+        elapsed = 0f;
+        while (elapsed < shrinkDuration)
+        {
+            elapsed += Time.deltaTime;
+            float t = elapsed / shrinkDuration;
+            foreach (CardUI card in cardsToClear)
+                if (card != null) card.transform.localScale = Vector3.Lerp(popScale, Vector3.zero, t);
+            yield return null;
+        }
+
+        foreach (CardUI card in cardsToClear)
+            if (card != null) Destroy(card.gameObject);
+    }
 }
