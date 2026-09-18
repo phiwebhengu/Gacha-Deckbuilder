@@ -35,6 +35,9 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
     [Tooltip("TextMeshPro component displaying the card's numerical value.")]
     [SerializeField] private TextMeshProUGUI valueText;
 
+    [Tooltip("TextMeshPro component displaying card category (ATTACK or DEFENSE).")]
+    [SerializeField] private TextMeshProUGUI categoryText;
+
     [Header("Rarity Flash Overlays")]
     [Tooltip("Overlay UI Image for Common flash (No Raycast Target)")]
     [SerializeField] private Image commonFlashOverlay;
@@ -88,6 +91,10 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
     [SerializeField] private float legendaryShakeIntensity = 18f;
     [SerializeField] private float shakeDuration = 0.25f;
 
+    [Header("Combat Highlight Colors")]
+    [SerializeField] private Color attackHighlightColor = new Color(1f, 0.3f, 0.3f, 1f); // Red Glow
+    [SerializeField] private Color defenseHighlightColor = new Color(0.3f, 0.6f, 1f, 1f); // Blue Glow
+
     // Internal State Tracking
     private bool isHovered = false;
     private bool isSelected = false;
@@ -125,7 +132,6 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
         }
 
         ResetFlashOverlays();
-        // REMOVE THIS LINE: InitializeCardCategoryAndRarity();
     }
 
     private void ResetFlashOverlays()
@@ -147,9 +153,12 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
 
     public void InitializeCardCategoryAndRarity(PityManager pityManager = null, bool isAI = false)
     {
+        // 1. Roll Category (50% Attack, 50% Defense)
+        category = (Random.value < 0.5f) ? CardCategory.Attack : CardCategory.Defense;
+
+        // 2. Roll Rarity & Value
         if (category == CardCategory.Attack)
         {
-            // 1. Check pity status on the specific PityManager passed in
             bool forceLegendary = (pityManager != null && pityManager.ShouldForceLegendary());
 
             if (forceLegendary)
@@ -178,21 +187,42 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
                 }
             }
 
-            // 2. Register with owner's PityManager
             if (pityManager != null)
             {
                 pityManager.RegisterPull(rarity);
             }
         }
+        else // Defense Card
+        {
+            float roll = Random.Range(0f, 100f);
+
+            if (roll < 60f)
+            {
+                rarity = CardRarity.Common;
+                cardValue = Random.Range(1, 6);
+            }
+            else if (roll < 90f)
+            {
+                rarity = CardRarity.Rare;
+                cardValue = Random.Range(6, 9);
+            }
+            else
+            {
+                rarity = CardRarity.Legendary;
+                cardValue = Random.Range(9, 11);
+            }
+        }
 
         ApplyRarityColor();
         UpdateValueTextUI();
+        UpdateCategoryTextUI();
     }
 
     public void PrepareForUnrevealedSpawn()
     {
         isRevealing = true;
         if (valueText != null) valueText.gameObject.SetActive(false);
+        if (categoryText != null) categoryText.gameObject.SetActive(false);
         if (tierImage != null) tierImage.gameObject.SetActive(false);
     }
 
@@ -231,8 +261,9 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
             yield return null;
         }
 
-        // --- INSTANT REVEAL, SCREEN SHAKE & RARITY FLASH SYNCHRONIZED WITH OVERSHOOT IMPACT ---
+        // Reveal UI elements
         if (valueText != null) valueText.gameObject.SetActive(true);
+        if (categoryText != null) categoryText.gameObject.SetActive(true);
         if (tierImage != null) tierImage.gameObject.SetActive(true);
 
         TriggerRarityScreenShake();
@@ -284,7 +315,6 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
         float halfDuration = flashDuration * 0.5f;
         float elapsed = 0f;
 
-        // Flash In
         while (elapsed < halfDuration)
         {
             elapsed += Time.deltaTime;
@@ -293,7 +323,6 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
             yield return null;
         }
 
-        // Flash Out
         elapsed = 0f;
         while (elapsed < halfDuration)
         {
@@ -354,6 +383,14 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
         if (valueText != null)
         {
             valueText.text = cardValue.ToString();
+        }
+    }
+
+    private void UpdateCategoryTextUI()
+    {
+        if (categoryText != null)
+        {
+            categoryText.text = (category == CardCategory.Attack) ? "ATTACK" : "DEFENSE";
         }
     }
 
@@ -462,6 +499,28 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
             targetLocalRotation = baseLocalRotation;
             targetScale = restingScale;
             if (cardFrameOrOutline != null) cardFrameOrOutline.color = originalColor;
+        }
+    }
+
+    public void HighlightCardForCategory(CardCategory targetCategory, float scaleMultiplier = 1.25f)
+    {
+        if (category != targetCategory) return;
+
+        targetScale = restingScale * scaleMultiplier;
+        Color targetHighlight = (category == CardCategory.Attack) ? attackHighlightColor : defenseHighlightColor;
+
+        if (cardFrameOrOutline != null)
+        {
+            cardFrameOrOutline.color = targetHighlight;
+        }
+    }
+
+    public void ResetCombatHighlight()
+    {
+        targetScale = restingScale;
+        if (cardFrameOrOutline != null)
+        {
+            cardFrameOrOutline.color = originalColor;
         }
     }
 }

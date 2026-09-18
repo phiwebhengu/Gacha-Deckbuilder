@@ -139,7 +139,7 @@ public class AIRivalController : MonoBehaviour
     {
         if (rivalHandManager != null && rivalSelectedHandTransform != null)
         {
-            rivalHandManager.ClearSubmittedCardsJuicy(rivalSelectedHandTransform);
+            rivalHandManager.ReturnSubmittedCardsToHand(rivalSelectedHandTransform);
         }
     }
 
@@ -164,4 +164,6 @@ public class AIRivalController : MonoBehaviour
             rivalTokenManager.gameObject.SetActive(false);
         }
     }
+
+
 }

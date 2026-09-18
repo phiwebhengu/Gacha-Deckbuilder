@@ -45,7 +45,6 @@ public class PlayerHandManager : MonoBehaviour
     [SerializeField] private DrawTimerManager timerManager;
     [SerializeField] private PityManager pityManager;
 
-
     public PityManager PityMgr => pityManager;
 
     private List<CardUI> cardsInHand = new List<CardUI>();
@@ -79,7 +78,6 @@ public class PlayerHandManager : MonoBehaviour
 
     private IEnumerator Routine_DealCards(int count, RectTransform spawnDeckTransform, DeckType deckType)
     {
-        // 1. Only enable click blocker overlay for local player reveals
         if (!isAI && clickBlockerOverlay != null)
         {
             clickBlockerOverlay.SetActive(true);
@@ -102,17 +100,14 @@ public class PlayerHandManager : MonoBehaviour
             CardUI cardScript = newCardObj.GetComponent<CardUI>();
             BalatroCardController controller = newCardObj.GetComponent<BalatroCardController>();
 
-            // Validate components FIRST before calling functions on them
             if (cardRect == null || cardScript == null || controller == null)
             {
                 Debug.LogError("[Hand Manager] Card Prefab is missing components!");
                 yield break;
             }
 
-            // Initialize category, rarity, and pity tracking AFTER validation
             controller.InitializeCardCategoryAndRarity(pityManager, isAI);
 
-            // Spawn at deck location
             cardRect.localScale = Vector3.one;
             cardRect.position = spawnDeckTransform.position;
 
@@ -124,13 +119,11 @@ public class PlayerHandManager : MonoBehaviour
 
             if (isAI)
             {
-                // AI DRAW: Skip close-up center reveal and screen shake entirely.
                 cardsInHand.Add(cardScript);
                 UpdateHandFanLayout();
             }
             else
             {
-                // PLAYER DRAW: Execute full center zoom, screen shake, and stats reveal sequence.
                 controller.PrepareForUnrevealedSpawn();
 
                 yield return StartCoroutine(controller.Routine_AnimateCenterReveal(
@@ -150,14 +143,13 @@ public class PlayerHandManager : MonoBehaviour
             yield return new WaitForSeconds(dealDelay);
         }
 
-        // Disable click blocker overlay after sequence finishes
         if (!isAI && clickBlockerOverlay != null)
         {
             clickBlockerOverlay.SetActive(false);
         }
     }
 
-    private void UpdateHandFanLayout()
+    public void UpdateHandFanLayout()
     {
         int totalCards = cardsInHand.Count;
         if (totalCards == 0) return;
@@ -224,6 +216,43 @@ public class PlayerHandManager : MonoBehaviour
         UpdateHandFanLayout();
     }
 
+    /// <summary>
+    /// Moves submitted cards from the play area back to the hand.
+    /// Re-enables card selection state and recalculates fan positioning.
+    /// </summary>
+    public void ReturnSubmittedCardsToHand(RectTransform containerTransform)
+    {
+        if (containerTransform == null) return;
+
+        List<CardUI> submittedCards = new List<CardUI>(containerTransform.GetComponentsInChildren<CardUI>());
+        if (submittedCards.Count == 0) return;
+
+        foreach (CardUI card in submittedCards)
+        {
+            if (card == null) continue;
+
+            card.transform.SetParent(handTransform, true);
+
+            BalatroCardController controller = card.GetComponent<BalatroCardController>();
+            if (controller != null)
+            {
+                controller.enabled = true;
+                if (controller.IsSelected)
+                {
+                    controller.ToggleSelection(); // Reset selection state visually/internally
+                }
+            }
+
+            if (!cardsInHand.Contains(card))
+            {
+                cardsInHand.Add(card);
+            }
+        }
+
+        UpdateHandFanLayout();
+    }
+
+    // Kept intact for future implementation of consumable/disappearing card types
     public void ClearSubmittedCardsJuicy(RectTransform containerTransform, float delay = 0f)
     {
         StartCoroutine(Routine_ClearCardsJuicy(containerTransform, delay));
