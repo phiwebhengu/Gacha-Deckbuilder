@@ -1,12 +1,12 @@
 using System.Collections;
+using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 
 public class MatchPullSetup : MonoBehaviour
 {
     [SerializeField] private DeckManager deckManager;
-    [SerializeField] private PlayerPullController playerAPull;
-    [SerializeField] private PlayerPullController playerBPull;
+    [SerializeField] private List<PlayerPullController> pullControllers;
 
     private IEnumerator Start()
     {
@@ -23,7 +23,9 @@ public class MatchPullSetup : MonoBehaviour
 
         Debug.Log($"[MatchSetup] Featured Action card this match: ID {featuredAction} | Featured Support card: ID {featuredSupport}");
 
-        playerAPull.SetFeaturedCards(featuredAction, featuredSupport);
-        playerBPull.SetFeaturedCards(featuredAction, featuredSupport);
+        foreach (var controller in pullControllers)
+        {
+            controller.SetFeaturedCards(featuredAction, featuredSupport);
+        }
     }
 }
