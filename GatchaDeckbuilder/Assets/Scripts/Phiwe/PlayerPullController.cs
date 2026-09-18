@@ -16,7 +16,7 @@ public class PlayerPullController : MonoBehaviour
     private void Awake()
     {
         rng = new System.Random();
-        if (deckManager == null) deckManager = FindObjectOfType<DeckManager>();
+        if (deckManager == null) deckManager = FindFirstObjectByType<DeckManager>();
     }
 
     public void SetSeed(int seed) => rng = new System.Random(seed);

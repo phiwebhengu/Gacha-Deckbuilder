@@ -70,22 +70,19 @@ public class DrawTimerManager : MonoBehaviour
 
         if (tokenManager == null)
         {
-            tokenManager = FindObjectOfType<TokenSelectionManager>();
+            tokenManager = FindFirstObjectByType<TokenSelectionManager>();
         }
 
-        // Hide Player's Tokens on Start
         if (tokenManager != null)
         {
             tokenManager.gameObject.SetActive(false);
         }
 
-        // Hide AI's Tokens on Start
         if (aiRival != null)
         {
             aiRival.StopAIDrawPhase();
         }
 
-        // Hide countdown text on start
         if (countdownText != null)
         {
             countdownText.gameObject.SetActive(false);
@@ -117,7 +114,6 @@ public class DrawTimerManager : MonoBehaviour
 
     private IEnumerator Routine_StartRoundSequence()
     {
-        // 1. Display and Fade-Out Round Banner Text
         if (roundDisplayText != null && roundDisplayCanvasGroup != null)
         {
             roundDisplayText.text = $"ROUND {currentRound}";
@@ -136,7 +132,6 @@ public class DrawTimerManager : MonoBehaviour
             roundDisplayCanvasGroup.alpha = 0f;
         }
 
-        // 2. Execute Ready... Set... Draw!
         yield return StartCoroutine(Routine_ExecuteCountdown());
     }
 
@@ -189,14 +184,12 @@ public class DrawTimerManager : MonoBehaviour
             timerContainer.gameObject.SetActive(true);
         }
 
-        // Re-enable Player Tokens for the round
         if (tokenManager != null)
         {
             tokenManager.gameObject.SetActive(true);
             tokenManager.ResetTokensForNewRound();
         }
 
-        // Re-enable AI Tokens for the round
         if (aiRival != null)
         {
             aiRival.StartAIDrawPhase();

@@ -33,13 +33,12 @@ public class DeckButton : MonoBehaviour, IPointerClickHandler, IPointerEnterHand
         originalScale = transform.localScale;
         targetScale = originalScale;
 
-        // Fallback search only if left unassigned
         if (tokenManager == null)
         {
             tokenManager = GetComponentInParent<TokenSelectionManager>();
             if (tokenManager == null)
             {
-                tokenManager = FindObjectOfType<TokenSelectionManager>();
+                tokenManager = FindFirstObjectByType<TokenSelectionManager>();
             }
         }
     }
