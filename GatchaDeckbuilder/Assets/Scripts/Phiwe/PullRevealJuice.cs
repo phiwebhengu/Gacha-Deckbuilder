@@ -4,7 +4,7 @@ using UnityEngine.UI;
 
 public class PullRevealJuice : MonoBehaviour
 {
-    [SerializeField] private Image glowOverlay;
+    [SerializeField] private Image glowOverlay; // optional — leave unassigned, still works fine
 
     public void PlayReveal(Rarity tier)
     {
