@@ -31,7 +31,7 @@ public class PlayerHandManager : MonoBehaviour
         if (targetCanvas == null)
         {
             targetCanvas = GetComponentInParent<Canvas>();
-            if (targetCanvas == null) targetCanvas = FindObjectOfType<Canvas>();
+            if (targetCanvas == null) targetCanvas = FindFirstObjectByType<Canvas>();
         }
     }
 
