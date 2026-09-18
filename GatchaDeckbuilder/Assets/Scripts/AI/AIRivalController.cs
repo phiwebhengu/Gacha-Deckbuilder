@@ -90,10 +90,14 @@ public class AIRivalController : MonoBehaviour
     {
         if (rivalTokenManager == null || deck == null || tokenCount <= 0) yield break;
 
-        rivalTokenManager.SelectTokens(tokenCount);
-        yield return new WaitForSeconds(0.35f);
+        for (int i = 0; i < tokenCount; i++)
+        {
+            // Stop if AI runs out of tokens mid-sequence
+            if (rivalTokenManager.RemainingTokenCount <= 0) yield break;
 
-        rivalTokenManager.OnDeckSelected(deck);
+            rivalTokenManager.OnDeckSelected(deck);
+            yield return new WaitForSeconds(0.35f);
+        }
     }
 
     // AI selects a random subset of cards currently held in hand

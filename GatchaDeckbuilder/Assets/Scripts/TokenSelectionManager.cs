@@ -12,17 +12,13 @@ public class TokenSelectionManager : MonoBehaviour
     public List<TokenButton> tokenButtons = new List<TokenButton>();
     public Transform tokenContainer;
 
-    [Header("Selection & Staging State")]
-    private int hoveredTokenCount = 0;
-    private int stagedTokenCount = 0;
-
     [Header("Hand Reference")]
     [SerializeField] private PlayerHandManager handManager;
 
     [Header("System References")]
     [SerializeField] private DrawTimerManager timerManager;
 
-    public int StagedTokenCount => stagedTokenCount;
+    public int RemainingTokenCount => tokenButtons.Count;
 
     private void Start()
     {
@@ -49,61 +45,39 @@ public class TokenSelectionManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Resets selection states for the new round while preserving remaining tokens.
+    /// Resets list references for a new round while preserving remaining tokens.
     /// </summary>
     public void ResetTokensForNewRound()
     {
-        hoveredTokenCount = 0;
-        stagedTokenCount = 0;
-
-        // Clean out null references if any tokens were destroyed in previous rounds
         tokenButtons.RemoveAll(btn => btn == null);
-
-        // Re-index remaining tokens and remove highlights
         ReindexTokens();
-        UpdateTokenVisuals();
 
         Debug.Log($"[Token System] {(isAI ? "AI" : "Player")} entering new round with {tokenButtons.Count} remaining tokens.");
     }
 
-    public void HoverTokensUpTo(int count)
-    {
-        hoveredTokenCount = Mathf.Clamp(count, 0, tokenButtons.Count);
-        UpdateTokenVisuals();
-    }
-
-    public void ClearHover()
-    {
-        hoveredTokenCount = 0;
-        UpdateTokenVisuals();
-    }
-
-    public void SelectTokens(int count)
-    {
-        stagedTokenCount = Mathf.Clamp(count, 0, tokenButtons.Count);
-        Debug.Log($"[Token System] {(isAI ? "AI" : "Player")} Staged {stagedTokenCount} tokens. Current staged value is: {stagedTokenCount}");
-        UpdateTokenVisuals();
-    }
-
+    /// <summary>
+    /// Called when a player clicks directly on a deck. Consumes 1 token and draws 1 card.
+    /// </summary>
     public void OnDeckSelected(DeckButton deck)
     {
-        if (stagedTokenCount <= 0)
+        tokenButtons.RemoveAll(btn => btn == null);
+
+        if (tokenButtons.Count <= 0)
         {
-            Debug.LogWarning("[Token System] Select a token count before picking a deck!");
+            Debug.LogWarning($"[Token System] {(isAI ? "AI" : "Player")} has no tokens left to draw cards!");
             return;
         }
 
-        int countToSpend = stagedTokenCount;
-        stagedTokenCount = 0;
-
+        // Deal 1 card from the selected deck
         if (handManager != null)
         {
-            handManager.DealCardsFromTokens(countToSpend, deck.DeckTransform, deck.Type);
+            handManager.DealCardsFromTokens(1, deck.DeckTransform, deck.Type);
         }
 
-        DepleteTokens(countToSpend);
+        // Consume and destroy 1 token from the collection
+        DepleteSingleToken();
 
-        // ONLY notify the timer if this is the HUMAN player, not the AI!
+        // Notify timer if human player
         if (!isAI && timerManager != null)
         {
             timerManager.NotifyCardsDrawn();
@@ -112,30 +86,21 @@ public class TokenSelectionManager : MonoBehaviour
 
     public void ForceAutoDrawSingleToken(DeckButton targetDeck)
     {
-        if (tokenButtons.Count == 0 || targetDeck == null) return;
-
-        Debug.Log($"[Token System] Executing Penalty: Drawing 1 card from {targetDeck.Type} Deck.");
-
-        if (handManager != null)
-        {
-            handManager.DealCardsFromTokens(1, targetDeck.DeckTransform, targetDeck.Type);
-        }
-
-        DepleteTokens(1);
+        OnDeckSelected(targetDeck);
     }
 
-    private void DepleteTokens(int countToDeplete)
+    private void DepleteSingleToken()
     {
-        ClearHover();
+        if (tokenButtons.Count == 0) return;
 
-        for (int i = countToDeplete - 1; i >= 0; i--)
+        // Destroy the last token in the pool
+        int lastIndex = tokenButtons.Count - 1;
+        TokenButton btnToDestroy = tokenButtons[lastIndex];
+        tokenButtons.RemoveAt(lastIndex);
+
+        if (btnToDestroy != null)
         {
-            if (i < tokenButtons.Count)
-            {
-                TokenButton btnToDestroy = tokenButtons[i];
-                tokenButtons.RemoveAt(i);
-                Destroy(btnToDestroy.gameObject);
-            }
+            Destroy(btnToDestroy.gameObject);
         }
 
         ReindexTokens();
@@ -145,16 +110,10 @@ public class TokenSelectionManager : MonoBehaviour
     {
         for (int i = 0; i < tokenButtons.Count; i++)
         {
-            tokenButtons[i].Setup(i + 1, this);
-        }
-    }
-
-    private void UpdateTokenVisuals()
-    {
-        for (int i = 0; i < tokenButtons.Count; i++)
-        {
-            bool shouldHighlight = (i + 1) <= hoveredTokenCount || (i + 1) <= stagedTokenCount;
-            tokenButtons[i].Highlight(shouldHighlight);
+            if (tokenButtons[i] != null)
+            {
+                tokenButtons[i].Setup(i + 1, this);
+            }
         }
     }
 }

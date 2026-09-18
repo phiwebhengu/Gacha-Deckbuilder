@@ -8,6 +8,17 @@ public class PlayerHandManager : MonoBehaviour
     [SerializeField] private GameObject cardPrefab;
     [SerializeField] private RectTransform handTransform;  // Parent object representing the hand
     [SerializeField] private Canvas targetCanvas;          // Main UI Canvas
+    [Tooltip("Invisible raycast target image activated during card reveal to block token/card clicks.")]
+    [SerializeField] private GameObject clickBlockerOverlay;
+
+    [Header("Reveal Animation Timings")]
+    [Tooltip("Center world point override. If left null, Screen center will be used automatically.")]
+    [SerializeField] private Transform centerPointTarget;
+    [SerializeField] private float moveToCenterDuration = 0.45f;
+    [SerializeField] private float shrinkDuration = 0.12f;
+    [SerializeField] private float overshootDuration = 0.12f;
+    [SerializeField] private float returnToNormalDuration = 0.15f;
+    [SerializeField] private float postRevealPause = 0.35f;
 
     [Header("Fan Layout Settings")]
     [Tooltip("Maximum arc spread angle for the outer cards")]
@@ -27,10 +38,15 @@ public class PlayerHandManager : MonoBehaviour
     [SerializeField] private float dealDelay = 0.15f;
 
     [Header("Identity Config")]
+    [Tooltip("Check this TRUE on the AI Hand Manager instance to skip close-up reveal sequences and screen shake.")]
     [SerializeField] private bool isAI = false;
 
     [Header("System References")]
     [SerializeField] private DrawTimerManager timerManager;
+    [SerializeField] private PityManager pityManager;
+
+
+    public PityManager PityMgr => pityManager;
 
     private List<CardUI> cardsInHand = new List<CardUI>();
 
@@ -43,6 +59,11 @@ public class PlayerHandManager : MonoBehaviour
             {
                 targetCanvas = FindObjectOfType<Canvas>();
             }
+        }
+
+        if (clickBlockerOverlay != null)
+        {
+            clickBlockerOverlay.SetActive(false);
         }
     }
 
@@ -58,9 +79,18 @@ public class PlayerHandManager : MonoBehaviour
 
     private IEnumerator Routine_DealCards(int count, RectTransform spawnDeckTransform, DeckType deckType)
     {
+        // 1. Only enable click blocker overlay for local player reveals
+        if (!isAI && clickBlockerOverlay != null)
+        {
+            clickBlockerOverlay.SetActive(true);
+        }
+
+        Vector3 screenCenterWorldPos = (centerPointTarget != null)
+            ? centerPointTarget.position
+            : targetCanvas.transform.position;
+
         for (int i = 0; i < count; i++)
         {
-            // 1. Force instantiation directly as child of handTransform
             GameObject newCardObj = Instantiate(cardPrefab, handTransform, false);
 
             if (targetCanvas != null && !newCardObj.transform.IsChildOf(targetCanvas.transform))
@@ -70,31 +100,60 @@ public class PlayerHandManager : MonoBehaviour
 
             RectTransform cardRect = newCardObj.GetComponent<RectTransform>();
             CardUI cardScript = newCardObj.GetComponent<CardUI>();
+            BalatroCardController controller = newCardObj.GetComponent<BalatroCardController>();
 
-            if (cardRect == null || cardScript == null)
+            // Validate components FIRST before calling functions on them
+            if (cardRect == null || cardScript == null || controller == null)
             {
-                Debug.LogError("[Hand Manager] Card Prefab is missing RectTransform or CardUI script!");
+                Debug.LogError("[Hand Manager] Card Prefab is missing components!");
                 yield break;
             }
 
-            // 2. Position card at chosen Deck UI location
+            // Initialize category, rarity, and pity tracking AFTER validation
+            controller.InitializeCardCategoryAndRarity(pityManager, isAI);
+
+            // Spawn at deck location
             cardRect.localScale = Vector3.one;
             cardRect.position = spawnDeckTransform.position;
 
-            // Reset Z coordinate to avoid UI clipping
             Vector3 localPos = cardRect.localPosition;
             localPos.z = 0f;
             cardRect.localPosition = localPos;
 
-            // 3. Bring card to front of canvas
             newCardObj.transform.SetAsLastSibling();
 
-            cardsInHand.Add(cardScript);
+            if (isAI)
+            {
+                // AI DRAW: Skip close-up center reveal and screen shake entirely.
+                cardsInHand.Add(cardScript);
+                UpdateHandFanLayout();
+            }
+            else
+            {
+                // PLAYER DRAW: Execute full center zoom, screen shake, and stats reveal sequence.
+                controller.PrepareForUnrevealedSpawn();
 
-            // 4. Update dynamic fan layout
-            UpdateHandFanLayout();
+                yield return StartCoroutine(controller.Routine_AnimateCenterReveal(
+                    screenCenterWorldPos,
+                    moveToCenterDuration,
+                    shrinkDuration,
+                    overshootDuration,
+                    returnToNormalDuration
+                ));
+
+                yield return new WaitForSeconds(postRevealPause);
+
+                cardsInHand.Add(cardScript);
+                UpdateHandFanLayout();
+            }
 
             yield return new WaitForSeconds(dealDelay);
+        }
+
+        // Disable click blocker overlay after sequence finishes
+        if (!isAI && clickBlockerOverlay != null)
+        {
+            clickBlockerOverlay.SetActive(false);
         }
     }
 
@@ -107,31 +166,23 @@ public class PlayerHandManager : MonoBehaviour
         {
             float normalizedIndex = (totalCards > 1) ? ((float)i / (totalCards - 1)) - 0.5f : 0f;
 
-            // Rotation
             float zRotation = -normalizedIndex * maxFanAngle;
             Quaternion targetRotation = Quaternion.Euler(0f, 0f, zRotation);
 
-            // Horizontal position
             float xPos = normalizedIndex * (cardSpacing * Mathf.Min(totalCards, 8));
-
-            // Arc dip
             float yPos = -Mathf.Abs(normalizedIndex) * arcHeightDip;
 
             Vector3 targetPosition = new Vector3(xPos, yPos, 0f);
 
-            // Scale fetch
             BalatroCardController controller = cardsInHand[i].GetComponent<BalatroCardController>();
             Vector3 targetScale = (controller != null) ? controller.RestingScale : Vector3.one;
 
-            // Animate into fan layout
             StartCoroutine(cardsInHand[i].AnimateToHand(targetPosition, targetRotation, targetScale, cardMoveDuration));
 
-            // Draw order left-to-right
             cardsInHand[i].transform.SetAsLastSibling();
         }
     }
 
-    // Helper to retrieve currently selected cards[cite: 4]
     public List<CardUI> GetSelectedCards()
     {
         List<CardUI> selected = new List<CardUI>();
@@ -146,7 +197,6 @@ public class PlayerHandManager : MonoBehaviour
         return selected;
     }
 
-    // Moves selected cards out of the hand into the Selected Hand transform
     public void SubmitSelectedCardsToHand(RectTransform selectedHandTarget)
     {
         List<CardUI> selectedCards = GetSelectedCards();
@@ -155,20 +205,15 @@ public class PlayerHandManager : MonoBehaviour
         {
             CardUI card = selectedCards[i];
 
-            // Remove from current active hand layout list[cite: 4]
             cardsInHand.Remove(card);
-
-            // Reparent to the Selected Hand UI area[cite: 4]
             card.transform.SetParent(selectedHandTarget, true);
 
-            // Disable Balatro controller interactions once locked in
             BalatroCardController controller = card.GetComponent<BalatroCardController>();
             if (controller != null)
             {
                 controller.enabled = false;
             }
 
-            // Calculate horizontal offset spacing inside the selected hand area
             float spacing = 90f;
             float xPos = (i - (selectedCards.Count - 1) / 2f) * spacing;
             Vector3 targetPos = new Vector3(xPos, 0f, 0f);
@@ -176,13 +221,9 @@ public class PlayerHandManager : MonoBehaviour
             StartCoroutine(card.AnimateToHand(targetPos, Quaternion.identity, controller.RestingScale, cardMoveDuration));
         }
 
-        // Re-fan the remaining cards left in the player hand[cite: 4]
         UpdateHandFanLayout();
     }
 
-    /// <summary>
-    /// Clears and destroys all cards in a given container (e.g., Selected Hand transform) with a pop scale animation.
-    /// </summary>
     public void ClearSubmittedCardsJuicy(RectTransform containerTransform, float delay = 0f)
     {
         StartCoroutine(Routine_ClearCardsJuicy(containerTransform, delay));
@@ -192,21 +233,15 @@ public class PlayerHandManager : MonoBehaviour
     {
         if (containerTransform == null) yield break;
 
-        if (delay > 0f)
-        {
-            yield return new WaitForSeconds(delay);
-        }
+        if (delay > 0f) yield return new WaitForSeconds(delay);
 
-        // Collect all CardUI instances sitting inside the selected target transform
         List<CardUI> cardsToClear = new List<CardUI>(containerTransform.GetComponentsInChildren<CardUI>());
-
         if (cardsToClear.Count == 0) yield break;
 
         float popUpDuration = 0.12f;
         float shrinkDuration = 0.18f;
         Vector3 popScale = new Vector3(1.3f, 1.3f, 1f);
 
-        // Step 1: Scale UP (Pop)
         float elapsed = 0f;
         while (elapsed < popUpDuration)
         {
@@ -215,15 +250,11 @@ public class PlayerHandManager : MonoBehaviour
 
             foreach (CardUI card in cardsToClear)
             {
-                if (card != null)
-                {
-                    card.transform.localScale = Vector3.Lerp(Vector3.one, popScale, t);
-                }
+                if (card != null) card.transform.localScale = Vector3.Lerp(Vector3.one, popScale, t);
             }
             yield return null;
         }
 
-        // Step 2: Scale DOWN to Zero
         elapsed = 0f;
         while (elapsed < shrinkDuration)
         {
@@ -232,21 +263,14 @@ public class PlayerHandManager : MonoBehaviour
 
             foreach (CardUI card in cardsToClear)
             {
-                if (card != null)
-                {
-                    card.transform.localScale = Vector3.Lerp(popScale, Vector3.zero, t);
-                }
+                if (card != null) card.transform.localScale = Vector3.Lerp(popScale, Vector3.zero, t);
             }
             yield return null;
         }
 
-        // Step 3: Destroy GameObjects
         foreach (CardUI card in cardsToClear)
         {
-            if (card != null)
-            {
-                Destroy(card.gameObject);
-            }
+            if (card != null) Destroy(card.gameObject);
         }
     }
 }
