@@ -1,3 +1,4 @@
+using GachaSystem;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -10,6 +11,10 @@ public class PlayerHandManager : MonoBehaviour
     [SerializeField] private Canvas targetCanvas;          // Main UI Canvas
     [Tooltip("Invisible raycast target image activated during card reveal to block token/card clicks.")]
     [SerializeField] private GameObject clickBlockerOverlay;
+
+    [Header("Database & Deck Sources")]
+    [Tooltip("Reference to your Support Cards CSV Database ScriptableObject")]
+    [SerializeField] private SupportDeckDatabase supportDatabase;
 
     [Header("Reveal Animation Timings")]
     [Tooltip("Center world point override. If left null, Screen center will be used automatically.")]
@@ -44,8 +49,7 @@ public class PlayerHandManager : MonoBehaviour
     [Header("System References")]
     [SerializeField] private DrawTimerManager timerManager;
     [SerializeField] private PityManager pityManager;
-    [SerializeField] private PullConfig pullConfig; 
-
+    [SerializeField] private PullConfig pullConfig;
 
     private List<CardUI> cardsInHand = new List<CardUI>();
 
@@ -66,18 +70,24 @@ public class PlayerHandManager : MonoBehaviour
         }
     }
 
-    public void DealCardsFromTokens(int count, RectTransform spawnDeckTransform, DeckType deckType)
+    public void DealCardsFromTokens(int count, DeckButton selectedDeck)
     {
         if (!isAI && timerManager != null)
         {
             timerManager.NotifyCardsDrawn();
         }
 
-        StartCoroutine(Routine_DealCards(count, spawnDeckTransform, deckType));
+        StartCoroutine(Routine_DealCards(count, selectedDeck));
     }
 
-    private IEnumerator Routine_DealCards(int count, RectTransform spawnDeckTransform, DeckType deckType)
+    private IEnumerator Routine_DealCards(int count, DeckButton selectedDeck)
     {
+        if (selectedDeck == null)
+        {
+            Debug.LogError("[Hand Manager] Selected Deck is null!");
+            yield break;
+        }
+
         if (!isAI && clickBlockerOverlay != null)
         {
             clickBlockerOverlay.SetActive(true);
@@ -106,11 +116,20 @@ public class PlayerHandManager : MonoBehaviour
                 yield break;
             }
 
-            // Single initialization call for both Player and AI:
-            controller.InitializeCardCategoryAndRarity(pityManager, null, pullConfig);
+            // --- BRANCHING ROUTE BASED ON DECK TYPE ---
+            if (selectedDeck.IsSupportDeck)
+            {
+                // Draw directly from CSV Support database
+                controller.InitializeAsSupportCard(supportDatabase, pityManager);
+            }
+            else
+            {
+                // Draw strictly Attack or Defense with standard rarity parameters
+                controller.InitializeCardCategoryAndRarity(pityManager, null, pullConfig);
+            }
 
             cardRect.localScale = Vector3.one;
-            cardRect.position = spawnDeckTransform.position;
+            cardRect.position = selectedDeck.DeckTransform.position;
 
             Vector3 localPos = cardRect.localPosition;
             localPos.z = 0f;

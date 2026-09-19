@@ -172,25 +172,11 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
         PullConfig activeConfig = configOverride != null ? configOverride : pullConfig;
         System.Random rng = networkRng ?? new System.Random();
 
-        // 1. Roll Category (Equal 33.3% weighting across Attack, Defense, and Support)
-        double categoryRoll = rng.NextDouble();
-        if (categoryRoll < 0.33333)
-        {
-            category = CardCategory.Attack;
-        }
-        else if (categoryRoll < 0.66666)
-        {
-            category = CardCategory.Defense;
-        }
-        else
-        {
-            InitializeAsSupportCard(supportDatabase, pityManager, rng, activeConfig);
-            return;
-        }
+        // Force category to roll ONLY between Attack and Defense (50/50)
+        category = (rng.NextDouble() < 0.5) ? CardCategory.Attack : CardCategory.Defense;
 
-        // 2. Roll Rarity using active PullConfig & Pity System
+        // Roll Rarity
         bool forceLegendary = (pityManager != null && pityManager.ShouldForceLegendary());
-
         if (forceLegendary)
         {
             rarity = Rarity.Legendary;
@@ -201,28 +187,17 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
         }
         else
         {
-            Debug.LogWarning($"[BalatroCardController] PullConfig is missing on {gameObject.name}. Defaulting to Common.");
             rarity = Rarity.Common;
         }
 
-        // 3. Register with Pity System
-        if (pityManager != null)
-        {
-            pityManager.RegisterPull(rarity);
-        }
+        if (pityManager != null) pityManager.RegisterPull(rarity);
 
-        // 4. Determine Card Value
+        // Roll Value
         switch (rarity)
         {
-            case Rarity.Common:
-                cardValue = rng.Next(1, 6);
-                break;
-            case Rarity.Rare:
-                cardValue = rng.Next(6, 9);
-                break;
-            case Rarity.Legendary:
-                cardValue = rng.Next(9, 11);
-                break;
+            case Rarity.Common: cardValue = rng.Next(1, 6); break;
+            case Rarity.Rare: cardValue = rng.Next(6, 9); break;
+            case Rarity.Legendary: cardValue = rng.Next(9, 11); break;
         }
 
         currentSupportData = null;

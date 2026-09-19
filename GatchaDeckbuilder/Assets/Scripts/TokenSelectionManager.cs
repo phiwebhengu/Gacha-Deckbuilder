@@ -68,10 +68,10 @@ public class TokenSelectionManager : MonoBehaviour
             return;
         }
 
-        // Deal 1 card from the selected deck
+        // Deal 1 card passing the entire deck object
         if (handManager != null)
         {
-            handManager.DealCardsFromTokens(1, deck.DeckTransform, deck.Type);
+            handManager.DealCardsFromTokens(1, deck);
         }
 
         // Consume and destroy 1 token from the collection
