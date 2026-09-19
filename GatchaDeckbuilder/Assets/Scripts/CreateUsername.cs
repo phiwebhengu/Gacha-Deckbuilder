@@ -1,15 +1,16 @@
+using System.Collections;
 using System.Collections.Generic;
+using System.Linq.Expressions;
+using System.Threading.Tasks;
 using TMPro;
 using Unity.Services.Authentication;
+using Unity.Services.CloudSave;
 using Unity.Services.Core;
+using Unity.Services.Lobbies.Models;
+using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
-using Unity.Services.CloudSave;
-using System.Threading.Tasks;
-using Unity.VisualScripting;
-using Unity.Services.Lobbies.Models;
-using System.Linq.Expressions;
 
 public class CreateUsername : MonoBehaviour
 {
@@ -23,6 +24,7 @@ public class CreateUsername : MonoBehaviour
     public TextMeshProUGUI statusTextCreate; //Text  for create username
     public TextMeshProUGUI statusTextLogin;//Text for login
     public GameObject signInPanel;
+    public GameObject notificationPanel;
 
     [Header("Scene Settings")]
     public string lobbySceneName = "Lobby"; // Change to your actual lobby scene name
@@ -30,8 +32,7 @@ public class CreateUsername : MonoBehaviour
     private bool isInitialized = false;
     private bool isSigningIn = false;
 
-
-
+    private Dictionary<GameObject, Coroutine> activeNotifications = new Dictionary<GameObject, Coroutine>();
 
     async void Start()
     {
@@ -39,9 +40,6 @@ public class CreateUsername : MonoBehaviour
         if (signInButton != null) signInButton.interactable = false;
 
         await UnityServices.InitializeAsync();
-
-        // Try to load existing username
-        // await LoadUsername();
 
         // Enable button once ready
         if (signInButton != null) signInButton.interactable = true;
@@ -52,101 +50,25 @@ public class CreateUsername : MonoBehaviour
         if (isSigningIn) return;
 
         string username = userInputCreate.text.Trim();
-        string password = userPasswordCreate.text.Trim(); //Gets rid of spaces
+        string password = userPasswordCreate.text.Trim();
 
-        // Validate username
-        if (string.IsNullOrEmpty(username))
+        if (!isValidUsername(username, out string usernameError))
         {
-            if (statusTextCreate != null) statusTextCreate.text = "Please enter a username";
+            ShowNotification(statusTextCreate, usernameError);
             return;
         }
 
-        if (username.Length < 3)
+        if (!isValidPassword(password, out string passwordError))
         {
-            if (statusTextCreate != null) statusTextCreate.text = "Username must be 3+ characters";
-            return;
-        }
-
-        if (username.Length > 20)
-        {
-            if (statusTextCreate != null) statusTextCreate.text = "Username must be under 20 characters";
-            return;
-        }
-
-        //Validate password
-        bool hasUpper = false;
-        bool hasLower = false;
-        bool hasNum = false;
-        bool hasSpecial = false;
-
-        if (string.IsNullOrEmpty(password))
-        {
-            if (statusTextCreate != null) statusTextCreate.text = "Please enter a password";
-            return;
-        }
-
-        if (password.Length < 8)
-        {
-            if (statusTextCreate != null) statusTextCreate.text = "Password must be 8 characters or more";
-            return;
-        }
-
-        if (password.Length > 20)
-        {
-            if (statusTextCreate != null) statusTextCreate.text = "Password must be under 20 characters";
-            return;
-        }
-
-        foreach (char c in password)
-        {
-            if (char.IsLower(c))
-            {
-                hasLower = true;
-            }
-
-            if (char.IsUpper(c))
-            {
-                hasUpper = true;
-            }
-
-            if (char.IsDigit(c))
-            {
-                hasNum = true;
-            }
-
-            if (!char.IsLetterOrDigit(c))
-            {
-                hasSpecial = true;
-            }
-        }
-
-        if (!hasLower)
-        {
-            statusTextCreate.text = "Password needs a lowercase letter";
-            return;
-        }
-
-        if (!hasUpper)
-        {
-            statusTextCreate.text = "Password needs an uppercase letter";
-            return;
-        }
-
-        if (!hasNum)
-        {
-            statusTextCreate.text = "Password needs a number";
-            return;
-        }
-
-        if (!hasSpecial)
-        {
-            statusTextCreate.text = "Password needs a special character";
+            ShowNotification(statusTextCreate, passwordError);
             return;
         }
 
         isSigningIn = true;
         createAccount.interactable = false;
-        statusTextCreate.text = "Creating account...";
+
+        // Show "Creating account..." with a longer duration so it doesn't disappear mid-process
+        ShowNotification(statusTextCreate, "Creating account...", 5f);
 
         try
         {
@@ -156,57 +78,51 @@ public class CreateUsername : MonoBehaviour
             PlayerData.Instance.SetUsername(username);
             PlayerData.Instance.SetPassword(password);
 
-            await SaveCloudData(username, password); //Saves to Cloud Save
+            await SaveCloudData(username, password);
 
             LoadLobbyScene();
         }
         catch (AuthenticationException e)
         {
             Debug.LogError(e);
-            statusTextCreate.text = "Account creation failed"; //Triggers if trying to signing into an existing account
+            ShowNotification(statusTextCreate, "Account creation failed");
         }
         finally
         {
             isSigningIn = false;
-            signInButton.interactable = true;
+            if (signInButton != null) signInButton.interactable = true;
         }
     }
 
-    public bool isValidUsername(string username, out string error) //Seperate the validation to make testing easier
+    public bool isValidUsername(string username, out string error)
     {
         error = "";
-        //Validation tests
         if (string.IsNullOrEmpty(username))
         {
             error = "Please enter a username";
             return false;
         }
-
         if (username.Length < 3)
         {
             error = "Username must be 3+ characters";
             return false;
         }
-
         if (username.Length > 20)
         {
             error = "Username must be under 20 characters";
             return false;
         }
-
         return true;
     }
 
-    public bool isValidPassword(string password, out string error) //Seperate validation for password test cases
+    public bool isValidPassword(string password, out string error)
     {
         error = "";
-
         if (string.IsNullOrEmpty(password))
         {
             error = "Please enter a password";
             return false;
         }
-
         if (password.Length < 8)
         {
             error = "Password must be 8 characters or more";
@@ -226,60 +142,35 @@ public class CreateUsername : MonoBehaviour
             if (!char.IsLetterOrDigit(c)) hasSpecial = true;
         }
 
-        if (!hasLower)
-        {
-            error = "Password needs a lowercase letter";
-            return false;
-        }
-
-        if (!hasUpper)
-        {
-            error = "Password needs an uppercase letter";
-            return false;
-        }
-
-        if (!hasNum)
-        {
-            error = "Password needs a number";
-            return false;
-        }
-
-        if (!hasSpecial)
-        {
-            error = "Password needs a special character";
-            return false;
-        }
+        if (!hasLower) { error = "Password needs a lowercase letter"; return false; }
+        if (!hasUpper) { error = "Password needs an uppercase letter"; return false; }
+        if (!hasNum) { error = "Password needs a number"; return false; }
+        if (!hasSpecial) { error = "Password needs a special character"; return false; }
 
         return true;
     }
 
     public async void OnSignInButtonClicked()
     {
-        // Prevent double-clicks
         if (isSigningIn) return;
 
         string username = userInput.text.Trim();
         string password = userPassword.text.Trim();
 
-        // Validate username
         if (string.IsNullOrEmpty(username))
         {
-            if (statusTextLogin != null) statusTextLogin.text = "Please enter a username";
+            ShowNotification(statusTextLogin, "Please enter a username");
             return;
         }
-        //Validate password
         if (string.IsNullOrEmpty(password))
         {
-            if (statusTextLogin != null) statusTextLogin.text = "Please enter a password";
+            ShowNotification(statusTextLogin, "Please enter a password");
             return;
         }
 
-
-
-        // Start sign-in process
         isSigningIn = true;
         if (signInButton != null) signInButton.interactable = false;
-        if (statusTextLogin != null) statusTextLogin.text = "Signing in...";
+        ShowNotification(statusTextLogin, "Signing in...", 5f);
 
         try
         {
@@ -289,27 +180,28 @@ public class CreateUsername : MonoBehaviour
             PlayerData.Instance.SetUsername(username);
             PlayerData.Instance.SetPassword(password);
 
-            await LoadCloudData(); // load wins/losses
+            await LoadCloudData();
 
             LoadLobbyScene();
         }
-        catch (AuthenticationException e) //Cateches invalid usernames and password
+        catch (AuthenticationException e)
         {
             Debug.LogError(e);
-            statusTextLogin.text = "Invalid username or password";
+            ShowNotification(statusTextLogin, "Invalid username or password");
         }
         catch (RequestFailedException e)
         {
             Debug.LogError(e);
-            statusTextLogin.text = "Invalid username or password";
+            ShowNotification(statusTextLogin, "Invalid username or password");
         }
         finally
         {
             isSigningIn = false;
-            signInButton.interactable = true;
+            if (signInButton != null) signInButton.interactable = true;
         }
     }
-    async Task InitializeServices() //Loads unity services
+
+    async Task InitializeServices()
     {
         try
         {
@@ -320,17 +212,16 @@ public class CreateUsername : MonoBehaviour
         catch (System.Exception e)
         {
             Debug.LogError($"Failed to initialize services: {e.Message}");
-            if (statusTextLogin != null) statusTextLogin.text = "Connection failed";
+            ShowNotification(statusTextLogin, "Connection failed");
         }
     }
 
     void LoadLobbyScene()
     {
-        // Load your lobby scene that contains UIManager + GameNetwork
-        UnityEngine.SceneManagement.SceneManager.LoadScene("Lobby");
+        UnityEngine.SceneManagement.SceneManager.LoadScene(lobbySceneName);
     }
 
-    public async Task SaveCloudData(string username, string password) //Dictionary that appears in the CLoud Save
+    public async Task SaveCloudData(string username, string password)
     {
         var data = new Dictionary<string, object>
         {
@@ -340,20 +231,19 @@ public class CreateUsername : MonoBehaviour
             {"losses", PlayerData.Instance.losses},
             {"draw", PlayerData.Instance.draw},
             { "lastLogin", System.DateTime.UtcNow.ToString() }
-
         };
 
         await CloudSaveService.Instance.Data.ForceSaveAsync(data);
         Debug.Log("Username saved to CloudSave");
     }
 
-    async Task LoadCloudData() //Loads all data in CLoud Save
+    async Task LoadCloudData() 
     {
 
         var data = await CloudSaveService.Instance.Data.LoadAsync(new HashSet<string> { "wins", "losses", "username", "password", "draw" });
 
         PlayerData.Instance.setWins(data.ContainsKey("wins") ? float.Parse(data["wins"].ToString()) : 0);
-        PlayerData.Instance.setLoss(data.ContainsKey("losses") ? float.Parse(data["losses"].ToString()) : 0); // Sets to the cloud
+        PlayerData.Instance.setLoss(data.ContainsKey("losses") ? float.Parse(data["losses"].ToString()) : 0);
         PlayerData.Instance.setDraw(data.ContainsKey("draw") ? float.Parse(data["draw"].ToString()) : 0);
 
         string username = data.ContainsKey("username") ? data["username"].ToString() : "";
@@ -363,13 +253,7 @@ public class CreateUsername : MonoBehaviour
         Debug.Log("Password: " + password);
     }
 
-    void ExecuteSceneLoad()
-    {
-        // Load the lobby scene (additive or single)
-        SceneManager.LoadScene(lobbySceneName);
-    }
-
-    public void openSignInPanel() //Toggle the sign in panel
+    public void openSignInPanel() 
     {
         signInPanel.SetActive(true);
     }
@@ -378,5 +262,39 @@ public class CreateUsername : MonoBehaviour
     {
         signInPanel.SetActive(false);
     }
+    private void ShowNotification(TextMeshProUGUI statusText, string message, float duration = 2f)
+    {
+        if (statusText == null) return;
 
+        // Prioritize the notificationPanel if it's assigned in the Inspector, 
+        // otherwise fallback to the text object's own GameObject
+        GameObject targetObject = notificationPanel != null ? notificationPanel : statusText.gameObject;
+
+        // Cancel any existing hide coroutine for this specific panel to prevent overlapping/early hides
+        if (activeNotifications.TryGetValue(targetObject, out Coroutine existingCoroutine))
+        {
+            StopCoroutine(existingCoroutine);
+            activeNotifications.Remove(targetObject);
+        }
+
+        // Update the text and activate the panel
+        statusText.text = message;
+        targetObject.SetActive(true);
+
+        // Start the hide timer, passing only the targetObject and duration
+        activeNotifications[targetObject] = StartCoroutine(HideNotificationAfterDelay(targetObject, duration));
+    }
+
+    private IEnumerator HideNotificationAfterDelay(GameObject targetObject, float delay)
+    {
+        yield return new WaitForSeconds(delay);
+
+        // Only hide if the object hasn't been destroyed (e.g., due to a scene change)
+        if (targetObject != null)
+        {
+            targetObject.SetActive(false);
+        }
+
+        activeNotifications.Remove(targetObject);
+    }
 }
