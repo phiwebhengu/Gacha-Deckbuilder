@@ -4,36 +4,51 @@ using UnityEngine.UI;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 using TMPro;
+using GachaSystem;
 
 public enum CardCategory
 {
     Attack,
-    Defense
+    Defense,
+    Support
 }
 
 public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler, IPointerClickHandler
 {
-    [Header("Gacha Config")]
+    [Header("Gacha & Support Config")]
     [Tooltip("ScriptableObject determining rarity odds and rolling logic.")]
     [SerializeField] private PullConfig pullConfig;
+
+    [Tooltip("Reference to the database containing support card data parsed from CSV.")]
+    [SerializeField] private SupportDeckDatabase supportDatabase;
 
     [Header("Card Category & Rarity")]
     [SerializeField] private CardCategory category = CardCategory.Attack;
     [SerializeField] private Rarity rarity = Rarity.Common;
 
-    [Header("Card Value Settings")]
+    [Header("Card Value & Support Data Settings")]
     [Tooltip("The calculated numerical value of this card based on its rarity.")]
     [SerializeField] private int cardValue;
+
+    // Fully qualified namespace reference prevents ambiguous class collisions
+    private GachaSystem.SupportCardData currentSupportData;
+    public GachaSystem.SupportCardData CurrentSupportData => currentSupportData;
 
     [Header("UI References")]
     [Tooltip("The UI Image on your button that reflects the tier's color.")]
     [SerializeField] private Image tierImage;
 
-    [Tooltip("TextMeshPro component displaying the card's numerical value.")]
+    [Tooltip("TextMeshPro component displaying the card's numerical value (for Attack/Defense).")]
     [SerializeField] private TextMeshProUGUI valueText;
 
-    [Tooltip("TextMeshPro component displaying card category (ATTACK or DEFENSE).")]
+    [Tooltip("TextMeshPro component displaying card category (ATTACK, DEFENSE, or SUPPORT).")]
     [SerializeField] private TextMeshProUGUI categoryText;
+
+    [Tooltip("TextMeshPro component displaying card title/name (especially useful for Support cards).")]
+    [SerializeField] private TextMeshProUGUI nameText;
+
+    [Tooltip("TextMeshPro component displaying the support effect text description.")]
+    [SerializeField] private TextMeshProUGUI descriptionText;
 
     [Header("Rarity Flash Overlays")]
     [Tooltip("Overlay UI Image for Common flash (No Raycast Target)")]
@@ -89,8 +104,9 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
     [SerializeField] private float shakeDuration = 0.25f;
 
     [Header("Combat Highlight Colors")]
-    [SerializeField] private Color attackHighlightColor = new Color(1f, 0.3f, 0.3f, 1f); // Red Glow
+    [SerializeField] private Color attackHighlightColor = new Color(1f, 0.3f, 0.3f, 1f);  // Red Glow
     [SerializeField] private Color defenseHighlightColor = new Color(0.3f, 0.6f, 1f, 1f); // Blue Glow
+    [SerializeField] private Color supportHighlightColor = new Color(0.3f, 0.9f, 0.4f, 1f); // Green Glow
 
     // Internal State Tracking
     private bool isHovered = false;
@@ -149,18 +165,28 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
     }
 
     /// <summary>
-    /// Initializes card category randomly (50% Attack / 50% Defense) and rolls rarity using PullConfig.
-    /// Supports deterministic RNG passing for multiplayer synchronicity.
+    /// Initializes standard Attack or Defense card rolling logic.
     /// </summary>
     public void InitializeCardCategoryAndRarity(PityManager pityManager = null, System.Random networkRng = null, PullConfig configOverride = null)
     {
-        // Use passed config override if field on component is unassigned
         PullConfig activeConfig = configOverride != null ? configOverride : pullConfig;
-
         System.Random rng = networkRng ?? new System.Random();
 
-        // 1. Roll Category (50% Attack, 50% Defense)
-        category = (rng.NextDouble() < 0.5) ? CardCategory.Attack : CardCategory.Defense;
+        // 1. Roll Category (Equal 33.3% weighting across Attack, Defense, and Support)
+        double categoryRoll = rng.NextDouble();
+        if (categoryRoll < 0.33333)
+        {
+            category = CardCategory.Attack;
+        }
+        else if (categoryRoll < 0.66666)
+        {
+            category = CardCategory.Defense;
+        }
+        else
+        {
+            InitializeAsSupportCard(supportDatabase, pityManager, rng, activeConfig);
+            return;
+        }
 
         // 2. Roll Rarity using active PullConfig & Pity System
         bool forceLegendary = (pityManager != null && pityManager.ShouldForceLegendary());
@@ -199,9 +225,66 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
                 break;
         }
 
+        currentSupportData = null;
         ApplyRarityColor();
         UpdateValueTextUI();
         UpdateCategoryTextUI();
+        UpdateSupportTextUI();
+    }
+
+    /// <summary>
+    /// Specifically initializes card as a Support card, selecting a random entry from SupportDeckDatabase matching the rolled rarity.
+    /// </summary>
+    public void InitializeAsSupportCard(SupportDeckDatabase databaseOverride = null, PityManager pityManager = null, System.Random networkRng = null, PullConfig configOverride = null)
+    {
+        category = CardCategory.Support;
+
+        SupportDeckDatabase db = databaseOverride != null ? databaseOverride : supportDatabase;
+        PullConfig activeConfig = configOverride != null ? configOverride : pullConfig;
+        System.Random rng = networkRng ?? new System.Random();
+
+        // Roll Rarity
+        bool forceLegendary = (pityManager != null && pityManager.ShouldForceLegendary());
+        if (forceLegendary)
+        {
+            rarity = Rarity.Legendary;
+        }
+        else if (activeConfig != null)
+        {
+            rarity = activeConfig.RollRarity(rng);
+        }
+        else
+        {
+            rarity = Rarity.Common;
+        }
+
+        if (pityManager != null)
+        {
+            pityManager.RegisterPull(rarity);
+        }
+
+        // Pull random support card from CSV entries matching rolled rarity
+        if (db != null)
+        {
+            currentSupportData = db.GetRandomCardByRarity(rarity, rng);
+
+            // Fallback if rarity tier had no matches
+            if (currentSupportData == null && db.SupportCards.Count > 0)
+            {
+                currentSupportData = db.SupportCards[rng.Next(0, db.SupportCards.Count)];
+            }
+        }
+        else
+        {
+            Debug.LogError($"[BalatroCardController] SupportDeckDatabase reference is missing on {gameObject.name}!");
+        }
+
+        cardValue = 0; // Support cards derive utility from effects rather than base numerical value
+
+        ApplyRarityColor();
+        UpdateValueTextUI();
+        UpdateCategoryTextUI();
+        UpdateSupportTextUI();
     }
 
     public void PrepareForUnrevealedSpawn()
@@ -209,6 +292,8 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
         isRevealing = true;
         if (valueText != null) valueText.gameObject.SetActive(false);
         if (categoryText != null) categoryText.gameObject.SetActive(false);
+        if (nameText != null) nameText.gameObject.SetActive(false);
+        if (descriptionText != null) descriptionText.gameObject.SetActive(false);
         if (tierImage != null) tierImage.gameObject.SetActive(false);
     }
 
@@ -248,9 +333,21 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
         }
 
         // Reveal UI elements
-        if (valueText != null) valueText.gameObject.SetActive(true);
         if (categoryText != null) categoryText.gameObject.SetActive(true);
         if (tierImage != null) tierImage.gameObject.SetActive(true);
+
+        if (category == CardCategory.Support)
+        {
+            if (nameText != null) nameText.gameObject.SetActive(true);
+            if (descriptionText != null) descriptionText.gameObject.SetActive(true);
+            if (valueText != null) valueText.gameObject.SetActive(false);
+        }
+        else
+        {
+            if (valueText != null) valueText.gameObject.SetActive(true);
+            if (nameText != null) nameText.gameObject.SetActive(false);
+            if (descriptionText != null) descriptionText.gameObject.SetActive(false);
+        }
 
         TriggerRarityScreenShake();
         TriggerRarityFlash();
@@ -366,8 +463,15 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
 
     private void UpdateValueTextUI()
     {
-        if (valueText != null)
+        if (valueText == null) return;
+
+        if (category == CardCategory.Support)
         {
+            valueText.gameObject.SetActive(false);
+        }
+        else
+        {
+            valueText.gameObject.SetActive(true);
             valueText.text = cardValue.ToString();
         }
     }
@@ -376,7 +480,41 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
     {
         if (categoryText != null)
         {
-            categoryText.text = (category == CardCategory.Attack) ? "ATTACK" : "DEFENSE";
+            switch (category)
+            {
+                case CardCategory.Attack:
+                    categoryText.text = "ATTACK";
+                    break;
+                case CardCategory.Defense:
+                    categoryText.text = "DEFENSE";
+                    break;
+                case CardCategory.Support:
+                    categoryText.text = "SUPPORT";
+                    break;
+            }
+        }
+    }
+
+    private void UpdateSupportTextUI()
+    {
+        if (category == CardCategory.Support && currentSupportData != null)
+        {
+            if (nameText != null)
+            {
+                nameText.gameObject.SetActive(true);
+                nameText.text = currentSupportData.cardName;
+            }
+
+            if (descriptionText != null)
+            {
+                descriptionText.gameObject.SetActive(true);
+                descriptionText.text = currentSupportData.effectDescription;
+            }
+        }
+        else
+        {
+            if (nameText != null) nameText.gameObject.SetActive(false);
+            if (descriptionText != null) descriptionText.gameObject.SetActive(false);
         }
     }
 
@@ -493,7 +631,20 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
         if (category != targetCategory) return;
 
         targetScale = restingScale * scaleMultiplier;
-        Color targetHighlight = (category == CardCategory.Attack) ? attackHighlightColor : defenseHighlightColor;
+
+        Color targetHighlight = attackHighlightColor;
+        switch (category)
+        {
+            case CardCategory.Attack:
+                targetHighlight = attackHighlightColor;
+                break;
+            case CardCategory.Defense:
+                targetHighlight = defenseHighlightColor;
+                break;
+            case CardCategory.Support:
+                targetHighlight = supportHighlightColor;
+                break;
+        }
 
         if (cardFrameOrOutline != null)
         {
