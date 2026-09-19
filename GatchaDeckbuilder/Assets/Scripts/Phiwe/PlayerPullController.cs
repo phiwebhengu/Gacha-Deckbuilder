@@ -8,6 +8,11 @@ public class PlayerPullController : MonoBehaviour
 
     private readonly PityState actionPity = new PityState();
     private readonly PityState supportPity = new PityState();
+
+    public int ActionPityCount => GetPityCount(actionPity);
+    public int SupportPityCount => GetPityCount(supportPity);
+
+    private int GetPityCount(PityState state) => state.PullsSinceLegendary;
     private System.Random rng;
 
     private int featuredActionCardId;

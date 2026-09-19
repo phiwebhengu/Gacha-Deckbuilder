@@ -1,13 +1,15 @@
+using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
-using TMPro; // Added for TextMeshPro references
+using TMPro;
 
 public enum CardCategory
 {
     Attack,
-    Defense
+    Defense,
+    Support
 }
 
 public enum CardRarity
@@ -21,32 +23,32 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
 {
     [Header("Card Category & Rarity")]
     [SerializeField] private CardCategory category = CardCategory.Attack;
-    [SerializeField] private CardRarity rarity;
+    [SerializeField] private CardRarity rarity = CardRarity.Common;
 
     [Header("Card Value Settings")]
-    [Tooltip("The calculated numerical value of this card based on its rarity.")]
     [SerializeField] private int cardValue;
 
     [Header("UI References")]
-    [Tooltip("The UI Image on your button that reflects the tier's color.")]
     [SerializeField] private Image tierImage;
-
-    [Tooltip("TextMeshPro component displaying the card's numerical value.")]
     [SerializeField] private TextMeshProUGUI valueText;
+    [SerializeField] private TextMeshProUGUI categoryText;
 
     [Header("Rarity Tier Colors")]
-    [SerializeField] private Color commonColor = new Color(0.6f, 0.6f, 0.6f, 1f);     // Gray/Silver
-    [SerializeField] private Color rareColor = new Color(0.2f, 0.6f, 1f, 1f);       // Blue
-    [SerializeField] private Color legendaryColor = new Color(1f, 0.8f, 0f, 1f);     // Gold
+    [SerializeField] private Color commonColor = new Color(0.6f, 0.6f, 0.6f, 1f);
+    [SerializeField] private Color rareColor = new Color(0.2f, 0.6f, 1f, 1f);
+    [SerializeField] private Color legendaryColor = new Color(1f, 0.8f, 0f, 1f);
 
     [Header("Hover Visual Settings")]
     [SerializeField] private Vector3 hoverScale = new Vector3(1.15f, 1.15f, 1f);
-    [SerializeField] private float hoverLiftAmount = 30f; // Pixels lifted while hovering
+    [SerializeField] private float hoverLiftAmount = 30f;
     [SerializeField] private Color highlightColor = new Color(1f, 0.9f, 0.4f, 1f);
     [SerializeField] private Image cardFrameOrOutline;
 
+    [Header("Combat Highlight Colors")]
+    [SerializeField] private Color combatHighlightColor = new Color(1f, 0.2f, 0.2f, 1f);
+    [SerializeField] private Color combatDimColor = new Color(0.3f, 0.3f, 0.3f, 0.5f);
+
     [Header("Selection Visual Settings")]
-    [Tooltip("Height above the resting hand position when locked in as selected")]
     [SerializeField] private float selectedLiftAmount = 60f;
     [SerializeField] private Vector3 selectedScale = new Vector3(1.15f, 1.15f, 1f);
 
@@ -57,10 +59,8 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
     [SerializeField] private float lerpSpeed = 12f;
 
     [Header("Scale Settings")]
-    [Tooltip("Base scale of the card while resting in hand (unselected)")]
     [SerializeField] private Vector3 restingScale = new Vector3(0.7f, 0.7f, 1f);
 
-    // Internal State Tracking
     private bool isHovered = false;
     private bool isSelected = false;
 
@@ -73,6 +73,7 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
     private Color originalColor = Color.white;
     private RectTransform rectTransform;
     private Canvas parentCanvas;
+    private CanvasGroup canvasGroup;
 
     public CardCategory Category => category;
     public CardRarity Rarity => rarity;
@@ -85,6 +86,12 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
         rectTransform = GetComponent<RectTransform>();
         parentCanvas = GetComponentInParent<Canvas>();
 
+        canvasGroup = GetComponent<CanvasGroup>();
+        if (canvasGroup == null)
+        {
+            canvasGroup = gameObject.AddComponent<CanvasGroup>();
+        }
+
         if (cardFrameOrOutline == null)
         {
             cardFrameOrOutline = GetComponent<Image>();
@@ -94,86 +101,171 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
         {
             originalColor = cardFrameOrOutline.color;
         }
-
-        // Initialize category, rarity, and numerical value upon spawn
-        InitializeCardCategoryAndRarity();
     }
 
-    /// <summary>
-    /// Assigns card category, calculates probability-based rarity, and rolls numerical value:
-    /// Common (50%): 1 to 5 | Rare (30%): 6 to 8 | Legendary (20%): 9 to 10
-    /// </summary>
+    public void ApplyPulledCardData(string cardName, string role, string tier, int value)
+    {
+        category = role switch
+        {
+            "Attack" => CardCategory.Attack,
+            "Defense" => CardCategory.Defense,
+            _ => CardCategory.Support
+        };
+
+        rarity = tier switch
+        {
+            "Legendary" => CardRarity.Legendary,
+            "Rare" => CardRarity.Rare,
+            _ => CardRarity.Common
+        };
+
+        cardValue = value;
+
+        ApplyRarityColor();
+        UpdateValueTextUI();
+        UpdateCategoryTextUI();
+    }
+
     public void InitializeCardCategoryAndRarity()
     {
-        if (category == CardCategory.Attack)
+        float roll = Random.Range(0f, 100f);
+        if (roll < 50f)
         {
-            float roll = Random.Range(0f, 100f);
-
-            if (roll < 50f)
-            {
-                rarity = CardRarity.Common;
-                cardValue = Random.Range(1, 6); // 1 to 5 inclusive
-            }
-            else if (roll < 80f) // 50% to 80% range (30% total)
-            {
-                rarity = CardRarity.Rare;
-                cardValue = Random.Range(6, 9); // 6 to 8 inclusive
-            }
-            else // 80% to 100% range (20% total)
-            {
-                rarity = CardRarity.Legendary;
-                cardValue = Random.Range(9, 11); // 9 to 10 inclusive
-            }
+            rarity = CardRarity.Common;
+            cardValue = Random.Range(1, 6);
+        }
+        else if (roll < 80f)
+        {
+            rarity = CardRarity.Rare;
+            cardValue = Random.Range(6, 9);
+        }
+        else
+        {
+            rarity = CardRarity.Legendary;
+            cardValue = Random.Range(9, 11);
         }
 
         ApplyRarityColor();
         UpdateValueTextUI();
+        UpdateCategoryTextUI();
     }
 
-    private void ApplyRarityColor()
+    public void ApplyRarityColor()
     {
         if (tierImage == null) return;
 
-        switch (rarity)
+        tierImage.color = rarity switch
         {
-            case CardRarity.Common:
-                tierImage.color = commonColor;
-                break;
-            case CardRarity.Rare:
-                tierImage.color = rareColor;
-                break;
-            case CardRarity.Legendary:
-                tierImage.color = legendaryColor;
-                break;
-        }
+            CardRarity.Rare => rareColor,
+            CardRarity.Legendary => legendaryColor,
+            _ => commonColor
+        };
     }
 
-    private void UpdateValueTextUI()
+    public void UpdateValueTextUI()
     {
-        if (valueText != null)
+        if (valueText != null) valueText.text = cardValue.ToString();
+    }
+
+    public void UpdateCategoryTextUI()
+    {
+        if (categoryText != null) categoryText.text = category.ToString();
+    }
+
+    /// <summary>
+    /// Highlights cards matching the active evaluation category and dims non-matching cards during resolution.
+    /// </summary>
+    public void HighlightCardForCategory(CardCategory activeCategory)
+    {
+        if (category == activeCategory)
         {
-            valueText.text = cardValue.ToString();
+            if (cardFrameOrOutline != null) cardFrameOrOutline.color = combatHighlightColor;
+            targetScale = selectedScale;
+        }
+        else
+        {
+            if (cardFrameOrOutline != null) cardFrameOrOutline.color = combatDimColor;
+            targetScale = restingScale;
         }
     }
 
-    // Call this whenever the Hand Manager updates the fan layout positions
+    /// <summary>
+    /// Restores card visual state after combat category evaluation.
+    /// </summary>
+    public void ResetCombatHighlight()
+    {
+        UpdateTargetVisuals();
+    }
+
+    public void PrepareForUnrevealedSpawn()
+    {
+        if (canvasGroup != null) canvasGroup.alpha = 0f;
+        transform.localScale = Vector3.zero;
+    }
+
+    public IEnumerator Routine_AnimateCenterReveal(Vector3 centerTargetPos, float moveDuration, float shrinkDuration, float overshootDuration, float returnDuration)
+    {
+        if (canvasGroup != null) canvasGroup.alpha = 1f;
+
+        Vector3 startPos = rectTransform.position;
+        float elapsed = 0f;
+
+        while (elapsed < moveDuration)
+        {
+            elapsed += Time.deltaTime;
+            float t = elapsed / moveDuration;
+            rectTransform.position = Vector3.Lerp(startPos, centerTargetPos, t);
+            rectTransform.localScale = Vector3.Lerp(Vector3.zero, Vector3.one * 1.4f, t);
+            yield return null;
+        }
+
+        rectTransform.position = centerTargetPos;
+
+        elapsed = 0f;
+        while (elapsed < shrinkDuration)
+        {
+            elapsed += Time.deltaTime;
+            float t = elapsed / shrinkDuration;
+            rectTransform.localScale = Vector3.Lerp(Vector3.one * 1.4f, Vector3.one * 1.1f, t);
+            yield return null;
+        }
+
+        elapsed = 0f;
+        while (elapsed < overshootDuration)
+        {
+            elapsed += Time.deltaTime;
+            float t = elapsed / overshootDuration;
+            rectTransform.localScale = Vector3.Lerp(Vector3.one * 1.1f, Vector3.one * 1.5f, t);
+            yield return null;
+        }
+
+        elapsed = 0f;
+        while (elapsed < returnDuration)
+        {
+            elapsed += Time.deltaTime;
+            float t = elapsed / returnDuration;
+            rectTransform.localScale = Vector3.Lerp(Vector3.one * 1.5f, Vector3.one, t);
+            yield return null;
+        }
+
+        rectTransform.localScale = Vector3.one;
+        SaveBaseTransform();
+    }
+
     public void SaveBaseTransform()
     {
         baseLocalPosition = rectTransform.localPosition;
         baseLocalRotation = rectTransform.localRotation;
-
         UpdateTargetVisuals();
     }
 
     private void Update()
     {
-        // Dynamic Balatro tilt only occurs when hovering and NOT locked in selection
         if (isHovered && !isSelected)
         {
             CalculateCursorTilt();
         }
 
-        // Interpolate position, rotation, and scale smoothly
         rectTransform.localPosition = Vector3.Lerp(rectTransform.localPosition, targetLocalPosition, Time.deltaTime * lerpSpeed);
         rectTransform.localRotation = Quaternion.Slerp(rectTransform.localRotation, targetLocalRotation, Time.deltaTime * lerpSpeed);
         rectTransform.localScale = Vector3.Lerp(rectTransform.localScale, targetScale, Time.deltaTime * lerpSpeed);
@@ -182,19 +274,9 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
     private void CalculateCursorTilt()
     {
         Vector2 mousePos = Vector2.zero;
-
-        if (Mouse.current != null)
-        {
-            mousePos = Mouse.current.position.ReadValue();
-        }
-        else if (Pointer.current != null)
-        {
-            mousePos = Pointer.current.position.ReadValue();
-        }
-        else
-        {
-            return;
-        }
+        if (Mouse.current != null) mousePos = Mouse.current.position.ReadValue();
+        else if (Pointer.current != null) mousePos = Pointer.current.position.ReadValue();
+        else return;
 
         Camera uiCamera = (parentCanvas != null && parentCanvas.renderMode != RenderMode.ScreenSpaceOverlay) ? parentCanvas.worldCamera : null;
 
@@ -214,11 +296,7 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
     {
         isHovered = true;
         UpdateTargetVisuals();
-
-        if (!isSelected)
-        {
-            transform.SetAsLastSibling();
-        }
+        if (!isSelected) transform.SetAsLastSibling();
     }
 
     public void OnPointerExit(PointerEventData eventData)
@@ -227,42 +305,21 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
         UpdateTargetVisuals();
     }
 
-    // Direct interface click handler
-    public void OnPointerClick(PointerEventData eventData)
-    {
-        ToggleSelection();
-    }
-
-    // Exposed parameterless method for standard UI Button OnClick() events
-    public void OnCardClicked()
-    {
-        ToggleSelection();
-    }
+    public void OnPointerClick(PointerEventData eventData) => ToggleSelection();
 
     public void ToggleSelection()
     {
         isSelected = !isSelected;
         UpdateTargetVisuals();
+        if (isSelected) transform.SetAsLastSibling();
 
-        if (isSelected)
-        {
-            transform.SetAsLastSibling();
-            Debug.Log($"[Card System] Selected: {gameObject.name} ({rarity} {category} - Value: {cardValue})");
-        }
-        else
-        {
-            Debug.Log($"[Card System] Deselected: {gameObject.name}");
-        }
-
-        // Notify End Turn system to update button visibility
-        EndTurnManager endTurnMgr = FindObjectOfType<EndTurnManager>();
+        EndTurnManager endTurnMgr = FindFirstObjectByType<EndTurnManager>();
         if (endTurnMgr != null)
         {
             endTurnMgr.UpdateEndTurnButtonVisibility();
         }
     }
 
-    // Central state machine that determines target transforms based on (isSelected, isHovered)
     private void UpdateTargetVisuals()
     {
         if (isSelected)
@@ -270,33 +327,20 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
             targetLocalPosition = baseLocalPosition + (transform.up * selectedLiftAmount);
             targetLocalRotation = baseLocalRotation;
             targetScale = selectedScale;
-
-            if (cardFrameOrOutline != null)
-            {
-                cardFrameOrOutline.color = highlightColor;
-            }
+            if (cardFrameOrOutline != null) cardFrameOrOutline.color = highlightColor;
         }
         else if (isHovered)
         {
             targetLocalPosition = baseLocalPosition + (transform.up * hoverLiftAmount);
             targetScale = hoverScale;
-
-            if (cardFrameOrOutline != null)
-            {
-                cardFrameOrOutline.color = highlightColor;
-            }
+            if (cardFrameOrOutline != null) cardFrameOrOutline.color = highlightColor;
         }
         else
         {
-            // Resets back to resting scale instead of Vector3.one
             targetLocalPosition = baseLocalPosition;
             targetLocalRotation = baseLocalRotation;
             targetScale = restingScale;
-
-            if (cardFrameOrOutline != null)
-            {
-                cardFrameOrOutline.color = originalColor;
-            }
+            if (cardFrameOrOutline != null) cardFrameOrOutline.color = originalColor;
         }
     }
 }

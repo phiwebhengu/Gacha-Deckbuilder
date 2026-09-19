@@ -14,9 +14,12 @@ public class DeckButton : MonoBehaviour, IPointerClickHandler, IPointerEnterHand
     [SerializeField] private DeckType deckType;
     [SerializeField] private RectTransform deckTransform;
 
-    [Header("Target Manager")]
+    [Header("Target Managers")]
     [Tooltip("Drag the corresponding TokenSelectionManager here in the Inspector")]
     [SerializeField] private TokenSelectionManager tokenManager;
+
+    [Tooltip("Drag the DrawTimerManager here to restrict drawing window.")]
+    [SerializeField] private DrawTimerManager timerManager; // <-- Added reference
 
     [Header("Visual Tuning")]
     [SerializeField] private Vector3 hoverScale = new Vector3(1.08f, 1.08f, 1f);
@@ -33,13 +36,16 @@ public class DeckButton : MonoBehaviour, IPointerClickHandler, IPointerEnterHand
         originalScale = transform.localScale;
         targetScale = originalScale;
 
+        // Fallback searches if unassigned
         if (tokenManager == null)
         {
             tokenManager = GetComponentInParent<TokenSelectionManager>();
-            if (tokenManager == null)
-            {
-                tokenManager = FindFirstObjectByType<TokenSelectionManager>();
-            }
+            if (tokenManager == null) tokenManager = FindObjectOfType<TokenSelectionManager>();
+        }
+
+        if (timerManager == null)
+        {
+            timerManager = FindObjectOfType<DrawTimerManager>();
         }
     }
 
@@ -50,7 +56,11 @@ public class DeckButton : MonoBehaviour, IPointerClickHandler, IPointerEnterHand
 
     public void OnPointerEnter(PointerEventData eventData)
     {
-        targetScale = hoverScale;
+        // Only trigger hover animation if draw phase is active
+        if (timerManager != null && timerManager.IsDrawPhaseActive)
+        {
+            targetScale = hoverScale;
+        }
     }
 
     public void OnPointerExit(PointerEventData eventData)
@@ -60,6 +70,13 @@ public class DeckButton : MonoBehaviour, IPointerClickHandler, IPointerEnterHand
 
     public void OnPointerClick(PointerEventData eventData)
     {
+        // Block clicks if draw phase is not currently running
+        if (timerManager != null && !timerManager.IsDrawPhaseActive)
+        {
+            Debug.LogWarning("[DeckButton] Draw attempted outside active draw window!");
+            return;
+        }
+
         if (tokenManager != null)
         {
             tokenManager.OnDeckSelected(this);

@@ -52,6 +52,8 @@ public class DrawTimerManager : MonoBehaviour
     private bool playerHasDrawn = false;
     private Vector3 originalTimerScale = Vector3.one;
 
+    public bool IsDrawPhaseActive => isTimerRunning; // <-- Add this public property
+
     public int CurrentRound => currentRound;
     public int MaxRounds => maxRounds;
 
@@ -177,7 +179,7 @@ public class DrawTimerManager : MonoBehaviour
     {
         playerHasDrawn = false;
         currentTimer = drawWindowDuration;
-        isTimerRunning = true;
+        isTimerRunning = true; // <-- Controls draw state
 
         if (timerContainer != null)
         {

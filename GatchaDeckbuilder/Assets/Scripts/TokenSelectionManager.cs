@@ -5,23 +5,28 @@ using UnityEngine;
 public class TokenSelectionManager : MonoBehaviour
 {
     [Header("Identity Config")]
+    [Tooltip("Check this if this Token Manager belongs to the AI Rival")]
     [SerializeField] private bool isAI = false;
 
     [Header("Token Pool")]
     public List<TokenButton> tokenButtons = new List<TokenButton>();
     public Transform tokenContainer;
 
-    private int hoveredTokenCount = 0;
-    private int stagedTokenCount = 0;
-
     [Header("Hand Reference")]
     [SerializeField] private PlayerHandManager handManager;
 
     [Header("System References")]
     [SerializeField] private DrawTimerManager timerManager;
+    [SerializeField] private PityManager pityManager;
     [SerializeField] private PlayerPullController pullController;
 
-    public int StagedTokenCount => stagedTokenCount;
+    public int RemainingTokenCount => tokenButtons.Count;
+
+    private void Awake()
+    {
+        if (pityManager == null) pityManager = FindFirstObjectByType<PityManager>();
+        if (pullController == null) pullController = FindFirstObjectByType<PlayerPullController>();
+    }
 
     private void Start()
     {
@@ -47,109 +52,88 @@ public class TokenSelectionManager : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Maintains remaining token pool across rounds without resetting the balance.
+    /// </summary>
     public void ResetTokensForNewRound()
     {
-        hoveredTokenCount = 0;
-        stagedTokenCount = 0;
         tokenButtons.RemoveAll(btn => btn == null);
         ReindexTokens();
-        UpdateTokenVisuals();
+
+        Debug.Log($"[Token System] {(isAI ? "AI" : "Player")} entering new round with {tokenButtons.Count} remaining tokens.");
     }
 
-    public void HoverTokensUpTo(int count)
-    {
-        hoveredTokenCount = Mathf.Clamp(count, 0, tokenButtons.Count);
-        UpdateTokenVisuals();
-    }
-
-    public void ClearHover()
-    {
-        hoveredTokenCount = 0;
-        UpdateTokenVisuals();
-    }
-
-    public void SelectTokens(int count)
-    {
-        stagedTokenCount = Mathf.Clamp(count, 0, tokenButtons.Count);
-        UpdateTokenVisuals();
-    }
-
+    /// <summary>
+    /// Called when a player clicks directly on a deck. Consumes 1 token and draws 1 card.
+    /// </summary>
     public void OnDeckSelected(DeckButton deck)
     {
-        if (stagedTokenCount <= 0)
+        tokenButtons.RemoveAll(btn => btn == null);
+
+        if (tokenButtons.Count <= 0)
         {
-            Debug.LogWarning("[Token System] Select a token count before picking a deck!");
+            Debug.LogWarning($"[Token System] {(isAI ? "AI" : "Player")} has no tokens left to draw cards!");
             return;
         }
 
-        int countToSpend = stagedTokenCount;
-        stagedTokenCount = 0;
-
-        var results = new List<PullResult>(countToSpend);
-        for (int i = 0; i < countToSpend; i++)
-        {
-            PullResult result = deck.Type == DeckType.Action
-                ? pullController.PullAction()
-                : pullController.PullSupport();
-            results.Add(result);
-        }
-
+        // Deal 1 card from the selected deck
         if (handManager != null)
         {
-            handManager.DealPulledCards(results, deck.DeckTransform);
+            handManager.DealCardsFromTokens(1, deck.DeckTransform, deck.Type);
         }
 
-        DepleteTokens(countToSpend);
+        // Consume and destroy 1 token from the collection
+        DepleteSingleToken();
 
+        // Notify timer if human player
         if (!isAI && timerManager != null)
         {
             timerManager.NotifyCardsDrawn();
+        }
+
+        // Update pity UI if reference exists
+        if (pityManager != null && pullController != null)
+        {
+            if (deck.Type == DeckType.Action)
+            {
+                pityManager.UpdatePityDisplay(pullController.ActionPityCount);
+            }
+            else
+            {
+                pityManager.UpdatePityDisplay(pullController.SupportPityCount);
+            }
         }
     }
 
     public void ForceAutoDrawSingleToken(DeckButton targetDeck)
     {
-        if (tokenButtons.Count == 0 || targetDeck == null) return;
-
-        PullResult result = targetDeck.Type == DeckType.Action
-            ? pullController.PullAction()
-            : pullController.PullSupport();
-
-        if (handManager != null)
-        {
-            handManager.DealPulledCards(new List<PullResult> { result }, targetDeck.DeckTransform);
-        }
-
-        DepleteTokens(1);
+        OnDeckSelected(targetDeck);
     }
 
-    private void DepleteTokens(int countToDeplete)
+    private void DepleteSingleToken()
     {
-        ClearHover();
-        for (int i = countToDeplete - 1; i >= 0; i--)
+        if (tokenButtons.Count == 0) return;
+
+        int lastIndex = tokenButtons.Count - 1;
+        TokenButton btnToDestroy = tokenButtons[lastIndex];
+        tokenButtons.RemoveAt(lastIndex);
+
+        if (btnToDestroy != null)
         {
-            if (i < tokenButtons.Count)
-            {
-                TokenButton btnToDestroy = tokenButtons[i];
-                tokenButtons.RemoveAt(i);
-                Destroy(btnToDestroy.gameObject);
-            }
+            Destroy(btnToDestroy.gameObject);
         }
+
         ReindexTokens();
     }
 
     private void ReindexTokens()
     {
         for (int i = 0; i < tokenButtons.Count; i++)
-            tokenButtons[i].Setup(i + 1, this);
-    }
-
-    private void UpdateTokenVisuals()
-    {
-        for (int i = 0; i < tokenButtons.Count; i++)
         {
-            bool shouldHighlight = (i + 1) <= hoveredTokenCount || (i + 1) <= stagedTokenCount;
-            tokenButtons[i].Highlight(shouldHighlight);
+            if (tokenButtons[i] != null)
+            {
+                tokenButtons[i].Setup(i + 1, this);
+            }
         }
     }
 }
