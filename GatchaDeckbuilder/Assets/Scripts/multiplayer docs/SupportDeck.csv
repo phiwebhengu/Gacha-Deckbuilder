@@ -1,0 +1,31 @@
+ID,Name,Tier,Effect,EffectType,Copies
+1,Jade Chamber,Legendary,Increase luck by 10% for legendary pulls,Forever,1
+2,Seirai Island,Legendary,Double damage when your damage is more than 10,Forever,1
+3,Liben,Legendary,Double defense when your defense is more than 10,Forever,1
+4,Liyue Harbor Wharf,Rare,Pull 2 cards for free,Immediate,1
+5,Wangshu Inn,Rare,-1 attack from opponent each round,Forever,1
+6,Golden House,Rare,Trigger a gold pull,Immediate,1
+7,Grand Narukami Shrine,Rare,"If the total cards used that round is odd, +1 attack, or -1 attack",Forever,1
+8,Paimon,Rare,Get 2 tokens,Immediate,1
+9,Ellin,Rare,+3 dmg if you played less action cards than support cards (once per round),Forever,1
+10,Parametric Transformer,Rare,Convert all your played defence points into attack this round,Immediate,1
+11,Hanachirusato,Rare,Draw 1 card if you pull a Weapon or Artefact card,Forever,1
+12,Stadium of the Sacred Flame,Rare,Opponent's Pity counter resets to 0,Immediate,1
+13,Favonius Cathedral,Common,+2 defense if you have defense cards,Immediate,1
+14,Knights of Favonius Library,Common,Discard this pull and pull again for free,Immediate,1
+15,Dawn Winery,Common,"If a companion card is played, the effect is doubled",Immediate,1
+16,Stormterror's Lair,Common,The next Support effect you play this match is doubled,Immediate,1
+17,Vanarana,Common,Reclaim a token that was used to draw,Immediate,1
+18,Weeping Willow of the Lake,Common,"If the player pulled less than 2 cards this round, draw 2 cards",Immediate,1
+19,Frostmoon Enclave,Common,"Discard 2 cards from your collection, then pull 2 new ones for free",Immediate,1
+20,Katheryne,Common,Get a token if you win that round,Immediate,1
+21,Tubby,Common,"If a location support is played, the effect is doubled",Forever,1
+22,Xudong,Common,Your next 2 pulls costs no tokens,Immediate,1
+23,Kid Kujirai,Common,This card disappears if you have less support cards than the opponent,Forever,1
+24,Setaria,Common,"If your collection is empty, pull 2 cards for free",Forever,1
+25,Seymour,Common,Copy the first card of the opponents deck,Immediate,1
+26,Treasure-Seeking Seelie,Common,Double your attack that round,Immediate,1
+27,Memento Lens,Common,Immune all opponent's attack that round,Immediate,1
+28,Atea,Common,Reduce the cost of your next Support card pull by 1 token,Immediate,1
+29,Central Laboratory Ruins,Common,"If you own 3+ Monster cards, gain 1 attack this round",Immediate,1
+30,Mamere,Common,"If you played more Weapon/Artefact cards than your opponent this round, +2 attack",Immediate,1
