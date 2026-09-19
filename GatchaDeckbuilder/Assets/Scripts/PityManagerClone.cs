@@ -1,73 +1,51 @@
+using System;
 using UnityEngine;
-using UnityEngine.UI;
 
 public class PityManager : MonoBehaviour
 {
-    [Header("Pity Settings")]
-    [Tooltip("Maximum non-legendary pulls before forcing a Legendary card.")]
-    [SerializeField] private int maxPity = 7;
+    [SerializeField] private PullConfig pullConfig;
+    [SerializeField] private int currentPityCount = 0;
 
-    private int currentPityCount = 0;
-
-    [Header("UI Visual Settings (Optional for AI)")]
-    [Tooltip("Assign UI Image squares in order. Leave empty for AI.")]
-    [SerializeField] private Image[] pitySquareImages;
-
-    [SerializeField] private Color baseColor = new Color(0.2f, 0.2f, 0.2f, 0.6f);
-    [SerializeField] private Color highlightedColor = new Color(1f, 0.8f, 0f, 1f);
-
-    [SerializeField] private Vector3 baseSquareScale = Vector3.one;
-    [SerializeField] private Vector3 highlightedSquareScale = new Vector3(1.25f, 1.25f, 1f);
+    // Event fired whenever pity count or threshold state changes
+    public event Action<int, int> OnPityUpdated; // Parameters: (currentPity, maxPityThreshold)
 
     public int CurrentPityCount => currentPityCount;
-    public int MaxPity => maxPity;
 
     private void Start()
     {
-        UpdatePityUI();
+        // Broadcast initial values to UI on load
+        NotifyPityChanged();
     }
 
     public bool ShouldForceLegendary()
     {
-        return currentPityCount >= maxPity;
+        if (pullConfig == null) return false;
+        return currentPityCount >= pullConfig.pityThreshold;
     }
 
-    public void RegisterPull(CardRarity rarity)
+    public void RegisterPull(Rarity pulledRarity)
     {
-        if (rarity == CardRarity.Legendary)
+        if (pulledRarity == Rarity.Legendary)
         {
             currentPityCount = 0;
         }
         else
         {
             currentPityCount++;
-            if (currentPityCount > maxPity)
-            {
-                currentPityCount = maxPity;
-            }
         }
 
-        UpdatePityUI();
+        NotifyPityChanged();
     }
 
-    private void UpdatePityUI()
+    public void ResetPity()
     {
-        if (pitySquareImages == null || pitySquareImages.Length == 0) return;
+        currentPityCount = 0;
+        NotifyPityChanged();
+    }
 
-        for (int i = 0; i < pitySquareImages.Length; i++)
-        {
-            if (pitySquareImages[i] == null) continue;
-
-            if (i < currentPityCount)
-            {
-                pitySquareImages[i].color = highlightedColor;
-                pitySquareImages[i].transform.localScale = highlightedSquareScale;
-            }
-            else
-            {
-                pitySquareImages[i].color = baseColor;
-                pitySquareImages[i].transform.localScale = baseSquareScale;
-            }
-        }
+    private void NotifyPityChanged()
+    {
+        int maxPity = (pullConfig != null) ? pullConfig.pityThreshold : 0;
+        OnPityUpdated?.Invoke(currentPityCount, maxPity);
     }
 }

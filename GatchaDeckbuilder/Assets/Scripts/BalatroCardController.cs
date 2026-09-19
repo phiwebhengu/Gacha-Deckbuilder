@@ -11,18 +11,15 @@ public enum CardCategory
     Defense
 }
 
-public enum CardRarity
-{
-    Common,
-    Rare,
-    Legendary
-}
-
 public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler, IPointerClickHandler
 {
+    [Header("Gacha Config")]
+    [Tooltip("ScriptableObject determining rarity odds and rolling logic.")]
+    [SerializeField] private PullConfig pullConfig;
+
     [Header("Card Category & Rarity")]
     [SerializeField] private CardCategory category = CardCategory.Attack;
-    [SerializeField] private CardRarity rarity;
+    [SerializeField] private Rarity rarity = Rarity.Common;
 
     [Header("Card Value Settings")]
     [Tooltip("The calculated numerical value of this card based on its rarity.")]
@@ -111,7 +108,7 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
     private Canvas parentCanvas;
 
     public CardCategory Category => category;
-    public CardRarity Rarity => rarity;
+    public Rarity Rarity => rarity;
     public int CardValue => cardValue;
     public bool IsSelected => isSelected;
     public Vector3 RestingScale => restingScale;
@@ -151,66 +148,55 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
         }
     }
 
-    public void InitializeCardCategoryAndRarity(PityManager pityManager = null, bool isAI = false)
+    /// <summary>
+    /// Initializes card category randomly (50% Attack / 50% Defense) and rolls rarity using PullConfig.
+    /// Supports deterministic RNG passing for multiplayer synchronicity.
+    /// </summary>
+    public void InitializeCardCategoryAndRarity(PityManager pityManager = null, System.Random networkRng = null, PullConfig configOverride = null)
     {
+        // Use passed config override if field on component is unassigned
+        PullConfig activeConfig = configOverride != null ? configOverride : pullConfig;
+
+        System.Random rng = networkRng ?? new System.Random();
+
         // 1. Roll Category (50% Attack, 50% Defense)
-        category = (Random.value < 0.5f) ? CardCategory.Attack : CardCategory.Defense;
+        category = (rng.NextDouble() < 0.5) ? CardCategory.Attack : CardCategory.Defense;
 
-        // 2. Roll Rarity & Value
-        if (category == CardCategory.Attack)
+        // 2. Roll Rarity using active PullConfig & Pity System
+        bool forceLegendary = (pityManager != null && pityManager.ShouldForceLegendary());
+
+        if (forceLegendary)
         {
-            bool forceLegendary = (pityManager != null && pityManager.ShouldForceLegendary());
-
-            if (forceLegendary)
-            {
-                rarity = CardRarity.Legendary;
-                cardValue = Random.Range(9, 11);
-            }
-            else
-            {
-                float roll = Random.Range(0f, 100f);
-
-                if (roll < 60f)
-                {
-                    rarity = CardRarity.Common;
-                    cardValue = Random.Range(1, 6);
-                }
-                else if (roll < 90f)
-                {
-                    rarity = CardRarity.Rare;
-                    cardValue = Random.Range(6, 9);
-                }
-                else
-                {
-                    rarity = CardRarity.Legendary;
-                    cardValue = Random.Range(9, 11);
-                }
-            }
-
-            if (pityManager != null)
-            {
-                pityManager.RegisterPull(rarity);
-            }
+            rarity = Rarity.Legendary;
         }
-        else // Defense Card
+        else if (activeConfig != null)
         {
-            float roll = Random.Range(0f, 100f);
+            rarity = activeConfig.RollRarity(rng);
+        }
+        else
+        {
+            Debug.LogWarning($"[BalatroCardController] PullConfig is missing on {gameObject.name}. Defaulting to Common.");
+            rarity = Rarity.Common;
+        }
 
-            if (roll < 60f)
-            {
-                rarity = CardRarity.Common;
-                cardValue = Random.Range(1, 6);
-            }
-            else if (roll < 90f)
-            {
-                rarity = CardRarity.Rare;
-                cardValue = Random.Range(6, 9);
-            }
-            else
-            {
-                rarity = CardRarity.Legendary;
-                cardValue = Random.Range(9, 11);
-            }
+        // 3. Register with Pity System
+        if (pityManager != null)
+        {
+            pityManager.RegisterPull(rarity);
+        }
+
+        // 4. Determine Card Value
+        switch (rarity)
+        {
+            case Rarity.Common:
+                cardValue = rng.Next(1, 6);
+                break;
+            case Rarity.Rare:
+                cardValue = rng.Next(6, 9);
+                break;
+            case Rarity.Legendary:
+                cardValue = rng.Next(9, 11);
+                break;
         }
 
         ApplyRarityColor();
@@ -299,9 +285,9 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
 
         switch (rarity)
         {
-            case CardRarity.Common: targetOverlay = commonFlashOverlay; break;
-            case CardRarity.Rare: targetOverlay = rareFlashOverlay; break;
-            case CardRarity.Legendary: targetOverlay = legendaryFlashOverlay; break;
+            case Rarity.Common: targetOverlay = commonFlashOverlay; break;
+            case Rarity.Rare: targetOverlay = rareFlashOverlay; break;
+            case Rarity.Legendary: targetOverlay = legendaryFlashOverlay; break;
         }
 
         if (targetOverlay != null)
@@ -340,8 +326,8 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
         float intensity = commonShakeIntensity;
         switch (rarity)
         {
-            case CardRarity.Rare: intensity = rareShakeIntensity; break;
-            case CardRarity.Legendary: intensity = legendaryShakeIntensity; break;
+            case Rarity.Rare: intensity = rareShakeIntensity; break;
+            case Rarity.Legendary: intensity = legendaryShakeIntensity; break;
         }
 
         StartCoroutine(Routine_ScreenShake(intensity, shakeDuration));
@@ -372,9 +358,9 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
 
         switch (rarity)
         {
-            case CardRarity.Common: tierImage.color = commonColor; break;
-            case CardRarity.Rare: tierImage.color = rareColor; break;
-            case CardRarity.Legendary: tierImage.color = legendaryColor; break;
+            case Rarity.Common: tierImage.color = commonColor; break;
+            case Rarity.Rare: tierImage.color = rareColor; break;
+            case Rarity.Legendary: tierImage.color = legendaryColor; break;
         }
     }
 

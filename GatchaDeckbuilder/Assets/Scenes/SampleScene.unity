@@ -5654,6 +5654,7 @@ GameObject:
   - component: {fileID: 933931220}
   - component: {fileID: 933931219}
   - component: {fileID: 933931218}
+  - component: {fileID: 933931222}
   m_Layer: 5
   m_Name: AI_Pity_pannel
   m_TagString: Untagged
@@ -5699,19 +5700,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 86d7723030379ea48bd3bc5d9536e584, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PityManager
-  maxPity: 7
-  pitySquareImages:
-  - {fileID: 1256668297}
-  - {fileID: 1113393514}
-  - {fileID: 1328019101}
-  - {fileID: 836341048}
-  - {fileID: 1384859453}
-  - {fileID: 1350279560}
-  - {fileID: 120530413}
-  baseColor: {r: 0.2, g: 0.2, b: 0.2, a: 0.6}
-  highlightedColor: {r: 1, g: 0.8, b: 0, a: 1}
-  baseSquareScale: {x: 0.2, y: 0.2, z: 0.2}
-  highlightedSquareScale: {x: 0.3, y: 0.3, z: 0.3}
+  pullConfig: {fileID: 11400000, guid: 9d5c91d4bb09bbb43b62233be2ef5c46, type: 2}
+  currentPityCount: 0
 --- !u!114 &933931219
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -5776,6 +5766,32 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 933931216}
   m_CullTransparentMesh: 1
+--- !u!114 &933931222
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 933931216}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c32eba3d9ceae964a9ffb907e74a34c1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PityPanelUI
+  pityManager: {fileID: 933931218}
+  pityPips:
+  - {fileID: 1256668297}
+  - {fileID: 1113393514}
+  - {fileID: 1328019101}
+  - {fileID: 836341048}
+  - {fileID: 1384859453}
+  - {fileID: 1350279560}
+  - {fileID: 120530413}
+  activeColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
+  inactiveColor: {r: 0.3, g: 0.3, b: 0.3, a: 0.5}
+  activeScale: {x: 0.3, y: 0.3, z: 0.3}
+  inactiveScale: {x: 0.2, y: 0.2, z: 0.2}
+  pityCounterText: {fileID: 0}
 --- !u!1 &941501845
 GameObject:
   m_ObjectHideFlags: 0
@@ -8329,6 +8345,7 @@ MonoBehaviour:
   isAI: 0
   timerManager: {fileID: 1874854898}
   pityManager: {fileID: 1937819966}
+  pullConfig: {fileID: 11400000, guid: 9d5c91d4bb09bbb43b62233be2ef5c46, type: 2}
 --- !u!1 &1320005936
 GameObject:
   m_ObjectHideFlags: 0
@@ -11247,6 +11264,7 @@ GameObject:
   - component: {fileID: 1937819964}
   - component: {fileID: 1937819963}
   - component: {fileID: 1937819966}
+  - component: {fileID: 1937819967}
   m_Layer: 5
   m_Name: Player_Pity_pannel
   m_TagString: Untagged
@@ -11277,7 +11295,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 1, y: 1}
-  m_AnchoredPosition: {x: -296, y: -150}
+  m_AnchoredPosition: {x: -296, y: -111}
   m_SizeDelta: {x: -562.5681, y: -397.343}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &1937819963
@@ -11356,8 +11374,22 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 86d7723030379ea48bd3bc5d9536e584, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PityManager
-  maxPity: 7
-  pitySquareImages:
+  pullConfig: {fileID: 11400000, guid: 9d5c91d4bb09bbb43b62233be2ef5c46, type: 2}
+  currentPityCount: 0
+--- !u!114 &1937819967
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1937819961}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c32eba3d9ceae964a9ffb907e74a34c1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PityPanelUI
+  pityManager: {fileID: 1937819966}
+  pityPips:
   - {fileID: 1226897806}
   - {fileID: 15184367}
   - {fileID: 1078287038}
@@ -11365,10 +11397,11 @@ MonoBehaviour:
   - {fileID: 580959646}
   - {fileID: 463238186}
   - {fileID: 1161369505}
-  baseColor: {r: 0.2, g: 0.2, b: 0.2, a: 0.6}
-  highlightedColor: {r: 1, g: 0.8, b: 0, a: 1}
-  baseSquareScale: {x: 0.2, y: 0.2, z: 0.2}
-  highlightedSquareScale: {x: 0.3, y: 0.3, z: 0.3}
+  activeColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
+  inactiveColor: {r: 0.3, g: 0.3, b: 0.3, a: 0.5}
+  activeScale: {x: 0.3, y: 0.3, z: 0.3}
+  inactiveScale: {x: 0.2, y: 0.2, z: 0.2}
+  pityCounterText: {fileID: 0}
 --- !u!1 &1948435951
 GameObject:
   m_ObjectHideFlags: 0
@@ -11589,6 +11622,7 @@ MonoBehaviour:
   isAI: 1
   timerManager: {fileID: 1874854898}
   pityManager: {fileID: 933931218}
+  pullConfig: {fileID: 11400000, guid: 9d5c91d4bb09bbb43b62233be2ef5c46, type: 2}
 --- !u!224 &1994359326
 RectTransform:
   m_ObjectHideFlags: 0

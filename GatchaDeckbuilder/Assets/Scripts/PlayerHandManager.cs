@@ -44,8 +44,8 @@ public class PlayerHandManager : MonoBehaviour
     [Header("System References")]
     [SerializeField] private DrawTimerManager timerManager;
     [SerializeField] private PityManager pityManager;
+    [SerializeField] private PullConfig pullConfig; 
 
-    public PityManager PityMgr => pityManager;
 
     private List<CardUI> cardsInHand = new List<CardUI>();
 
@@ -106,7 +106,8 @@ public class PlayerHandManager : MonoBehaviour
                 yield break;
             }
 
-            controller.InitializeCardCategoryAndRarity(pityManager, isAI);
+            // Single initialization call for both Player and AI:
+            controller.InitializeCardCategoryAndRarity(pityManager, null, pullConfig);
 
             cardRect.localScale = Vector3.one;
             cardRect.position = spawnDeckTransform.position;
@@ -216,10 +217,6 @@ public class PlayerHandManager : MonoBehaviour
         UpdateHandFanLayout();
     }
 
-    /// <summary>
-    /// Moves submitted cards from the play area back to the hand.
-    /// Re-enables card selection state and recalculates fan positioning.
-    /// </summary>
     public void ReturnSubmittedCardsToHand(RectTransform containerTransform)
     {
         if (containerTransform == null) return;
@@ -239,7 +236,7 @@ public class PlayerHandManager : MonoBehaviour
                 controller.enabled = true;
                 if (controller.IsSelected)
                 {
-                    controller.ToggleSelection(); // Reset selection state visually/internally
+                    controller.ToggleSelection();
                 }
             }
 
@@ -252,7 +249,6 @@ public class PlayerHandManager : MonoBehaviour
         UpdateHandFanLayout();
     }
 
-    // Kept intact for future implementation of consumable/disappearing card types
     public void ClearSubmittedCardsJuicy(RectTransform containerTransform, float delay = 0f)
     {
         StartCoroutine(Routine_ClearCardsJuicy(containerTransform, delay));

@@ -276,6 +276,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: e956d42236777bc4eac824236d851ef4, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::BalatroCardController
+  pullConfig: {fileID: 0}
   category: 0
   rarity: 0
   cardValue: 0
@@ -306,6 +307,8 @@ MonoBehaviour:
   rareShakeIntensity: 16
   legendaryShakeIntensity: 36
   shakeDuration: 0.5
+  attackHighlightColor: {r: 1, g: 0.3, b: 0.3, a: 1}
+  defenseHighlightColor: {r: 0.3, g: 0.6, b: 1, a: 1}
 --- !u!1 &4070634781182985622
 GameObject:
   m_ObjectHideFlags: 0
