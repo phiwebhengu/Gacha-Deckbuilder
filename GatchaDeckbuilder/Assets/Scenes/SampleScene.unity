@@ -2896,8 +2896,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::DeckButton
   deckType: 1
   deckTransform: {fileID: 2020694923}
+  isSupportDeck: 1
   tokenManager: {fileID: 1434072308}
-  timerManager: {fileID: 0}
+  timerManager: {fileID: 1874854898}
   hoverScale: {x: 1.08, y: 1.08, z: 1}
   scaleSpeed: 12
 --- !u!1 &463238184
@@ -8331,6 +8332,7 @@ MonoBehaviour:
   handTransform: {fileID: 1309784092}
   targetCanvas: {fileID: 878461938}
   clickBlockerOverlay: {fileID: 1071091823}
+  supportDatabase: {fileID: 0}
   centerPointTarget: {fileID: 494689152}
   moveToCenterDuration: 0.45
   shrinkDuration: 0.12
@@ -10423,6 +10425,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::DeckButton
   deckType: 0
   deckTransform: {fileID: 1531186860}
+  isSupportDeck: 0
   tokenManager: {fileID: 1434072308}
   timerManager: {fileID: 0}
   hoverScale: {x: 1.08, y: 1.08, z: 1}
@@ -11608,6 +11611,7 @@ MonoBehaviour:
   handTransform: {fileID: 1994359326}
   targetCanvas: {fileID: 878461938}
   clickBlockerOverlay: {fileID: 0}
+  supportDatabase: {fileID: 0}
   centerPointTarget: {fileID: 0}
   moveToCenterDuration: 0.45
   shrinkDuration: 0.12
