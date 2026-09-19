@@ -17,8 +17,16 @@ public class TokenSelectionManager : MonoBehaviour
 
     [Header("System References")]
     [SerializeField] private DrawTimerManager timerManager;
+    [SerializeField] private PityManager pityManager;
+    [SerializeField] private PlayerPullController pullController;
 
     public int RemainingTokenCount => tokenButtons.Count;
+
+    private void Awake()
+    {
+        if (pityManager == null) pityManager = FindFirstObjectByType<PityManager>();
+        if (pullController == null) pullController = FindFirstObjectByType<PlayerPullController>();
+    }
 
     private void Start()
     {
@@ -45,7 +53,7 @@ public class TokenSelectionManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Resets list references for a new round while preserving remaining tokens.
+    /// Maintains remaining token pool across rounds without resetting the balance.
     /// </summary>
     public void ResetTokensForNewRound()
     {
@@ -82,6 +90,19 @@ public class TokenSelectionManager : MonoBehaviour
         {
             timerManager.NotifyCardsDrawn();
         }
+
+        // Update pity UI if reference exists
+        if (pityManager != null && pullController != null)
+        {
+            if (deck.Type == DeckType.Action)
+            {
+                pityManager.UpdatePityDisplay(pullController.ActionPityCount);
+            }
+            else
+            {
+                pityManager.UpdatePityDisplay(pullController.SupportPityCount);
+            }
+        }
     }
 
     public void ForceAutoDrawSingleToken(DeckButton targetDeck)
@@ -93,7 +114,6 @@ public class TokenSelectionManager : MonoBehaviour
     {
         if (tokenButtons.Count == 0) return;
 
-        // Destroy the last token in the pool
         int lastIndex = tokenButtons.Count - 1;
         TokenButton btnToDestroy = tokenButtons[lastIndex];
         tokenButtons.RemoveAt(lastIndex);

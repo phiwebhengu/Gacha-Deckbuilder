@@ -8,60 +8,45 @@ using TMPro;
 public enum CardCategory
 {
     Attack,
-    Defense
+    Defense,
+    Support
+}
+
+public enum CardRarity
+{
+    Common,
+    Rare,
+    Legendary
 }
 
 public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler, IPointerClickHandler
 {
-    [Header("Gacha Config")]
-    [Tooltip("ScriptableObject determining rarity odds and rolling logic.")]
-    [SerializeField] private PullConfig pullConfig;
-
     [Header("Card Category & Rarity")]
     [SerializeField] private CardCategory category = CardCategory.Attack;
-    [SerializeField] private Rarity rarity = Rarity.Common;
+    [SerializeField] private CardRarity rarity = CardRarity.Common;
 
     [Header("Card Value Settings")]
-    [Tooltip("The calculated numerical value of this card based on its rarity.")]
     [SerializeField] private int cardValue;
 
     [Header("UI References")]
-    [Tooltip("The UI Image on your button that reflects the tier's color.")]
     [SerializeField] private Image tierImage;
-
-    [Tooltip("TextMeshPro component displaying the card's numerical value.")]
     [SerializeField] private TextMeshProUGUI valueText;
-
-    [Tooltip("TextMeshPro component displaying card category (ATTACK or DEFENSE).")]
     [SerializeField] private TextMeshProUGUI categoryText;
 
-    [Header("Rarity Flash Overlays")]
-    [Tooltip("Overlay UI Image for Common flash (No Raycast Target)")]
-    [SerializeField] private Image commonFlashOverlay;
-
-    [Tooltip("Overlay UI Image for Rare flash (No Raycast Target)")]
-    [SerializeField] private Image rareFlashOverlay;
-
-    [Tooltip("Overlay UI Image for Legendary flash (No Raycast Target)")]
-    [SerializeField] private Image legendaryFlashOverlay;
-
-    [Tooltip("Peak opacity for the flash (0.0 to 1.0)")]
-    [Range(0f, 1f)]
-    [SerializeField] private float maxFlashAlpha = 0.6f;
-
-    [Tooltip("Duration in seconds of the flash fade in and fade out")]
-    [SerializeField] private float flashDuration = 0.2f;
-
     [Header("Rarity Tier Colors")]
-    [SerializeField] private Color commonColor = new Color(0.6f, 0.6f, 0.6f, 1f);     // Gray/Silver
-    [SerializeField] private Color rareColor = new Color(0.2f, 0.6f, 1f, 1f);        // Blue
-    [SerializeField] private Color legendaryColor = new Color(1f, 0.8f, 0f, 1f);     // Gold
+    [SerializeField] private Color commonColor = new Color(0.6f, 0.6f, 0.6f, 1f);
+    [SerializeField] private Color rareColor = new Color(0.2f, 0.6f, 1f, 1f);
+    [SerializeField] private Color legendaryColor = new Color(1f, 0.8f, 0f, 1f);
 
     [Header("Hover Visual Settings")]
     [SerializeField] private Vector3 hoverScale = new Vector3(1.15f, 1.15f, 1f);
     [SerializeField] private float hoverLiftAmount = 30f;
     [SerializeField] private Color highlightColor = new Color(1f, 0.9f, 0.4f, 1f);
     [SerializeField] private Image cardFrameOrOutline;
+
+    [Header("Combat Highlight Colors")]
+    [SerializeField] private Color combatHighlightColor = new Color(1f, 0.2f, 0.2f, 1f);
+    [SerializeField] private Color combatDimColor = new Color(0.3f, 0.3f, 0.3f, 0.5f);
 
     [Header("Selection Visual Settings")]
     [SerializeField] private float selectedLiftAmount = 60f;
@@ -74,28 +59,10 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
     [SerializeField] private float lerpSpeed = 12f;
 
     [Header("Scale Settings")]
-    [Tooltip("Base scale of the card while resting in hand (unselected)")]
     [SerializeField] private Vector3 restingScale = new Vector3(0.7f, 0.7f, 1f);
 
-    [Header("Reveal Juiciness Settings")]
-    [SerializeField] private Vector3 closeUpScale = new Vector3(2.0f, 2.0f, 1f);
-    [SerializeField] private Vector3 shrinkScale = new Vector3(1.6f, 1.6f, 1f);
-    [SerializeField] private Vector3 overshootScale = new Vector3(2.3f, 2.3f, 1f);
-
-    [Header("Screen Shake Settings")]
-    [SerializeField] private float commonShakeIntensity = 3f;
-    [SerializeField] private float rareShakeIntensity = 8f;
-    [SerializeField] private float legendaryShakeIntensity = 18f;
-    [SerializeField] private float shakeDuration = 0.25f;
-
-    [Header("Combat Highlight Colors")]
-    [SerializeField] private Color attackHighlightColor = new Color(1f, 0.3f, 0.3f, 1f); // Red Glow
-    [SerializeField] private Color defenseHighlightColor = new Color(0.3f, 0.6f, 1f, 1f); // Blue Glow
-
-    // Internal State Tracking
     private bool isHovered = false;
     private bool isSelected = false;
-    private bool isRevealing = false;
 
     private Vector3 baseLocalPosition;
     private Quaternion baseLocalRotation;
@@ -106,9 +73,10 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
     private Color originalColor = Color.white;
     private RectTransform rectTransform;
     private Canvas parentCanvas;
+    private CanvasGroup canvasGroup;
 
     public CardCategory Category => category;
-    public Rarity Rarity => rarity;
+    public CardRarity Rarity => rarity;
     public int CardValue => cardValue;
     public bool IsSelected => isSelected;
     public Vector3 RestingScale => restingScale;
@@ -117,6 +85,12 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
     {
         rectTransform = GetComponent<RectTransform>();
         parentCanvas = GetComponentInParent<Canvas>();
+
+        canvasGroup = GetComponent<CanvasGroup>();
+        if (canvasGroup == null)
+        {
+            canvasGroup = gameObject.AddComponent<CanvasGroup>();
+        }
 
         if (cardFrameOrOutline == null)
         {
@@ -127,76 +101,48 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
         {
             originalColor = cardFrameOrOutline.color;
         }
-
-        ResetFlashOverlays();
     }
 
-    private void ResetFlashOverlays()
+    public void ApplyPulledCardData(string cardName, string role, string tier, int value)
     {
-        SetOverlayAlpha(commonFlashOverlay, 0f);
-        SetOverlayAlpha(rareFlashOverlay, 0f);
-        SetOverlayAlpha(legendaryFlashOverlay, 0f);
-    }
-
-    private void SetOverlayAlpha(Image overlay, float alpha)
-    {
-        if (overlay != null)
+        category = role switch
         {
-            Color color = overlay.color;
-            color.a = alpha;
-            overlay.color = color;
+            "Attack" => CardCategory.Attack,
+            "Defense" => CardCategory.Defense,
+            _ => CardCategory.Support
+        };
+
+        rarity = tier switch
+        {
+            "Legendary" => CardRarity.Legendary,
+            "Rare" => CardRarity.Rare,
+            _ => CardRarity.Common
+        };
+
+        cardValue = value;
+
+        ApplyRarityColor();
+        UpdateValueTextUI();
+        UpdateCategoryTextUI();
+    }
+
+    public void InitializeCardCategoryAndRarity()
+    {
+        float roll = Random.Range(0f, 100f);
+        if (roll < 50f)
+        {
+            rarity = CardRarity.Common;
+            cardValue = Random.Range(1, 6);
         }
-    }
-
-    /// <summary>
-    /// Initializes card category randomly (50% Attack / 50% Defense) and rolls rarity using PullConfig.
-    /// Supports deterministic RNG passing for multiplayer synchronicity.
-    /// </summary>
-    public void InitializeCardCategoryAndRarity(PityManager pityManager = null, System.Random networkRng = null, PullConfig configOverride = null)
-    {
-        // Use passed config override if field on component is unassigned
-        PullConfig activeConfig = configOverride != null ? configOverride : pullConfig;
-
-        System.Random rng = networkRng ?? new System.Random();
-
-        // 1. Roll Category (50% Attack, 50% Defense)
-        category = (rng.NextDouble() < 0.5) ? CardCategory.Attack : CardCategory.Defense;
-
-        // 2. Roll Rarity using active PullConfig & Pity System
-        bool forceLegendary = (pityManager != null && pityManager.ShouldForceLegendary());
-
-        if (forceLegendary)
+        else if (roll < 80f)
         {
-            rarity = Rarity.Legendary;
-        }
-        else if (activeConfig != null)
-        {
-            rarity = activeConfig.RollRarity(rng);
+            rarity = CardRarity.Rare;
+            cardValue = Random.Range(6, 9);
         }
         else
         {
-            Debug.LogWarning($"[BalatroCardController] PullConfig is missing on {gameObject.name}. Defaulting to Common.");
-            rarity = Rarity.Common;
-        }
-
-        // 3. Register with Pity System
-        if (pityManager != null)
-        {
-            pityManager.RegisterPull(rarity);
-        }
-
-        // 4. Determine Card Value
-        switch (rarity)
-        {
-            case Rarity.Common:
-                cardValue = rng.Next(1, 6);
-                break;
-            case Rarity.Rare:
-                cardValue = rng.Next(6, 9);
-                break;
-            case Rarity.Legendary:
-                cardValue = rng.Next(9, 11);
-                break;
+            rarity = CardRarity.Legendary;
+            cardValue = Random.Range(9, 11);
         }
 
         ApplyRarityColor();
@@ -204,180 +150,106 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
         UpdateCategoryTextUI();
     }
 
-    public void PrepareForUnrevealedSpawn()
+    public void ApplyRarityColor()
     {
-        isRevealing = true;
-        if (valueText != null) valueText.gameObject.SetActive(false);
-        if (categoryText != null) categoryText.gameObject.SetActive(false);
-        if (tierImage != null) tierImage.gameObject.SetActive(false);
+        if (tierImage == null) return;
+
+        tierImage.color = rarity switch
+        {
+            CardRarity.Rare => rareColor,
+            CardRarity.Legendary => legendaryColor,
+            _ => commonColor
+        };
     }
 
-    public IEnumerator Routine_AnimateCenterReveal(
-        Vector3 centerWorldPos,
-        float moveDuration,
-        float shrinkDuration,
-        float overshootDuration,
-        float returnDuration)
+    public void UpdateValueTextUI()
     {
-        isRevealing = true;
-        transform.rotation = Quaternion.identity;
+        if (valueText != null) valueText.text = cardValue.ToString();
+    }
 
-        // 1. Move to screen center while scaling up
-        Vector3 startPos = transform.position;
-        Vector3 startScale = transform.localScale;
+    public void UpdateCategoryTextUI()
+    {
+        if (categoryText != null) categoryText.text = category.ToString();
+    }
+
+    /// <summary>
+    /// Highlights cards matching the active evaluation category and dims non-matching cards during resolution.
+    /// </summary>
+    public void HighlightCardForCategory(CardCategory activeCategory)
+    {
+        if (category == activeCategory)
+        {
+            if (cardFrameOrOutline != null) cardFrameOrOutline.color = combatHighlightColor;
+            targetScale = selectedScale;
+        }
+        else
+        {
+            if (cardFrameOrOutline != null) cardFrameOrOutline.color = combatDimColor;
+            targetScale = restingScale;
+        }
+    }
+
+    /// <summary>
+    /// Restores card visual state after combat category evaluation.
+    /// </summary>
+    public void ResetCombatHighlight()
+    {
+        UpdateTargetVisuals();
+    }
+
+    public void PrepareForUnrevealedSpawn()
+    {
+        if (canvasGroup != null) canvasGroup.alpha = 0f;
+        transform.localScale = Vector3.zero;
+    }
+
+    public IEnumerator Routine_AnimateCenterReveal(Vector3 centerTargetPos, float moveDuration, float shrinkDuration, float overshootDuration, float returnDuration)
+    {
+        if (canvasGroup != null) canvasGroup.alpha = 1f;
+
+        Vector3 startPos = rectTransform.position;
         float elapsed = 0f;
 
         while (elapsed < moveDuration)
         {
             elapsed += Time.deltaTime;
             float t = elapsed / moveDuration;
-            transform.position = Vector3.Lerp(startPos, centerWorldPos, t);
-            transform.localScale = Vector3.Lerp(startScale, closeUpScale, t);
+            rectTransform.position = Vector3.Lerp(startPos, centerTargetPos, t);
+            rectTransform.localScale = Vector3.Lerp(Vector3.zero, Vector3.one * 1.4f, t);
             yield return null;
         }
-        transform.position = centerWorldPos;
 
-        // 2. Quick Reduction in scale
+        rectTransform.position = centerTargetPos;
+
         elapsed = 0f;
         while (elapsed < shrinkDuration)
         {
             elapsed += Time.deltaTime;
             float t = elapsed / shrinkDuration;
-            transform.localScale = Vector3.Lerp(closeUpScale, shrinkScale, t);
+            rectTransform.localScale = Vector3.Lerp(Vector3.one * 1.4f, Vector3.one * 1.1f, t);
             yield return null;
         }
 
-        // Reveal UI elements
-        if (valueText != null) valueText.gameObject.SetActive(true);
-        if (categoryText != null) categoryText.gameObject.SetActive(true);
-        if (tierImage != null) tierImage.gameObject.SetActive(true);
-
-        TriggerRarityScreenShake();
-        TriggerRarityFlash();
-
-        // 3. Quick Expansion Overshoot
         elapsed = 0f;
         while (elapsed < overshootDuration)
         {
             elapsed += Time.deltaTime;
             float t = elapsed / overshootDuration;
-            transform.localScale = Vector3.Lerp(shrinkScale, overshootScale, t);
+            rectTransform.localScale = Vector3.Lerp(Vector3.one * 1.1f, Vector3.one * 1.5f, t);
             yield return null;
         }
 
-        // 4. Return to normal scale
         elapsed = 0f;
         while (elapsed < returnDuration)
         {
             elapsed += Time.deltaTime;
             float t = elapsed / returnDuration;
-            transform.localScale = Vector3.Lerp(overshootScale, Vector3.one, t);
-            yield return null;
-        }
-        transform.localScale = Vector3.one;
-
-        isRevealing = false;
-    }
-
-    private void TriggerRarityFlash()
-    {
-        Image targetOverlay = null;
-
-        switch (rarity)
-        {
-            case Rarity.Common: targetOverlay = commonFlashOverlay; break;
-            case Rarity.Rare: targetOverlay = rareFlashOverlay; break;
-            case Rarity.Legendary: targetOverlay = legendaryFlashOverlay; break;
-        }
-
-        if (targetOverlay != null)
-        {
-            StartCoroutine(Routine_FlashOverlay(targetOverlay));
-        }
-    }
-
-    private IEnumerator Routine_FlashOverlay(Image overlay)
-    {
-        float halfDuration = flashDuration * 0.5f;
-        float elapsed = 0f;
-
-        while (elapsed < halfDuration)
-        {
-            elapsed += Time.deltaTime;
-            float alpha = Mathf.Lerp(0f, maxFlashAlpha, elapsed / halfDuration);
-            SetOverlayAlpha(overlay, alpha);
+            rectTransform.localScale = Vector3.Lerp(Vector3.one * 1.5f, Vector3.one, t);
             yield return null;
         }
 
-        elapsed = 0f;
-        while (elapsed < halfDuration)
-        {
-            elapsed += Time.deltaTime;
-            float alpha = Mathf.Lerp(maxFlashAlpha, 0f, elapsed / halfDuration);
-            SetOverlayAlpha(overlay, alpha);
-            yield return null;
-        }
-
-        SetOverlayAlpha(overlay, 0f);
-    }
-
-    private void TriggerRarityScreenShake()
-    {
-        float intensity = commonShakeIntensity;
-        switch (rarity)
-        {
-            case Rarity.Rare: intensity = rareShakeIntensity; break;
-            case Rarity.Legendary: intensity = legendaryShakeIntensity; break;
-        }
-
-        StartCoroutine(Routine_ScreenShake(intensity, shakeDuration));
-    }
-
-    private IEnumerator Routine_ScreenShake(float intensity, float duration)
-    {
-        Camera mainCam = Camera.main;
-        if (mainCam == null) yield break;
-
-        Vector3 originalCamPos = mainCam.transform.localPosition;
-        float elapsed = 0f;
-
-        while (elapsed < duration)
-        {
-            elapsed += Time.deltaTime;
-            Vector2 randomOffset = Random.insideUnitCircle * intensity * 0.01f;
-            mainCam.transform.localPosition = originalCamPos + new Vector3(randomOffset.x, randomOffset.y, 0f);
-            yield return null;
-        }
-
-        mainCam.transform.localPosition = originalCamPos;
-    }
-
-    private void ApplyRarityColor()
-    {
-        if (tierImage == null) return;
-
-        switch (rarity)
-        {
-            case Rarity.Common: tierImage.color = commonColor; break;
-            case Rarity.Rare: tierImage.color = rareColor; break;
-            case Rarity.Legendary: tierImage.color = legendaryColor; break;
-        }
-    }
-
-    private void UpdateValueTextUI()
-    {
-        if (valueText != null)
-        {
-            valueText.text = cardValue.ToString();
-        }
-    }
-
-    private void UpdateCategoryTextUI()
-    {
-        if (categoryText != null)
-        {
-            categoryText.text = (category == CardCategory.Attack) ? "ATTACK" : "DEFENSE";
-        }
+        rectTransform.localScale = Vector3.one;
+        SaveBaseTransform();
     }
 
     public void SaveBaseTransform()
@@ -389,8 +261,6 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
 
     private void Update()
     {
-        if (isRevealing) return;
-
         if (isHovered && !isSelected)
         {
             CalculateCursorTilt();
@@ -404,7 +274,6 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
     private void CalculateCursorTilt()
     {
         Vector2 mousePos = Vector2.zero;
-
         if (Mouse.current != null) mousePos = Mouse.current.position.ReadValue();
         else if (Pointer.current != null) mousePos = Pointer.current.position.ReadValue();
         else return;
@@ -425,39 +294,26 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
 
     public void OnPointerEnter(PointerEventData eventData)
     {
-        if (isRevealing) return;
         isHovered = true;
         UpdateTargetVisuals();
-
         if (!isSelected) transform.SetAsLastSibling();
     }
 
     public void OnPointerExit(PointerEventData eventData)
     {
-        if (isRevealing) return;
         isHovered = false;
         UpdateTargetVisuals();
     }
 
-    public void OnPointerClick(PointerEventData eventData)
-    {
-        if (isRevealing) return;
-        ToggleSelection();
-    }
-
-    public void OnCardClicked()
-    {
-        if (isRevealing) return;
-        ToggleSelection();
-    }
+    public void OnPointerClick(PointerEventData eventData) => ToggleSelection();
 
     public void ToggleSelection()
     {
-        if (isRevealing) return;
         isSelected = !isSelected;
         UpdateTargetVisuals();
+        if (isSelected) transform.SetAsLastSibling();
 
-        EndTurnManager endTurnMgr = FindObjectOfType<EndTurnManager>();
+        EndTurnManager endTurnMgr = FindFirstObjectByType<EndTurnManager>();
         if (endTurnMgr != null)
         {
             endTurnMgr.UpdateEndTurnButtonVisibility();
@@ -485,28 +341,6 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
             targetLocalRotation = baseLocalRotation;
             targetScale = restingScale;
             if (cardFrameOrOutline != null) cardFrameOrOutline.color = originalColor;
-        }
-    }
-
-    public void HighlightCardForCategory(CardCategory targetCategory, float scaleMultiplier = 1.25f)
-    {
-        if (category != targetCategory) return;
-
-        targetScale = restingScale * scaleMultiplier;
-        Color targetHighlight = (category == CardCategory.Attack) ? attackHighlightColor : defenseHighlightColor;
-
-        if (cardFrameOrOutline != null)
-        {
-            cardFrameOrOutline.color = targetHighlight;
-        }
-    }
-
-    public void ResetCombatHighlight()
-    {
-        targetScale = restingScale;
-        if (cardFrameOrOutline != null)
-        {
-            cardFrameOrOutline.color = originalColor;
         }
     }
 }

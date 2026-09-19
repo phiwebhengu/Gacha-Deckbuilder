@@ -43,9 +43,6 @@ public class PlayerHandManager : MonoBehaviour
 
     [Header("System References")]
     [SerializeField] private DrawTimerManager timerManager;
-    [SerializeField] private PityManager pityManager;
-    [SerializeField] private PullConfig pullConfig; 
-
 
     private List<CardUI> cardsInHand = new List<CardUI>();
 
@@ -56,7 +53,7 @@ public class PlayerHandManager : MonoBehaviour
             targetCanvas = GetComponentInParent<Canvas>();
             if (targetCanvas == null)
             {
-                targetCanvas = FindObjectOfType<Canvas>();
+                targetCanvas = FindFirstObjectByType<Canvas>();
             }
         }
 
@@ -85,7 +82,7 @@ public class PlayerHandManager : MonoBehaviour
 
         Vector3 screenCenterWorldPos = (centerPointTarget != null)
             ? centerPointTarget.position
-            : targetCanvas.transform.position;
+            : (targetCanvas != null ? targetCanvas.transform.position : Vector3.zero);
 
         for (int i = 0; i < count; i++)
         {
@@ -102,15 +99,18 @@ public class PlayerHandManager : MonoBehaviour
 
             if (cardRect == null || cardScript == null || controller == null)
             {
-                Debug.LogError("[Hand Manager] Card Prefab is missing components!");
+                Debug.LogError("[Hand Manager] Card Prefab is missing required components!");
                 yield break;
             }
 
-            // Single initialization call for both Player and AI:
-            controller.InitializeCardCategoryAndRarity(pityManager, null, pullConfig);
+            // Fixed: Initialize card category and rarity with zero arguments
+            controller.InitializeCardCategoryAndRarity();
 
             cardRect.localScale = Vector3.one;
-            cardRect.position = spawnDeckTransform.position;
+            if (spawnDeckTransform != null)
+            {
+                cardRect.position = spawnDeckTransform.position;
+            }
 
             Vector3 localPos = cardRect.localPosition;
             localPos.z = 0f;
@@ -157,6 +157,8 @@ public class PlayerHandManager : MonoBehaviour
 
         for (int i = 0; i < totalCards; i++)
         {
+            if (cardsInHand[i] == null) continue;
+
             float normalizedIndex = (totalCards > 1) ? ((float)i / (totalCards - 1)) - 0.5f : 0f;
 
             float zRotation = -normalizedIndex * maxFanAngle;
@@ -181,6 +183,7 @@ public class PlayerHandManager : MonoBehaviour
         List<CardUI> selected = new List<CardUI>();
         foreach (CardUI card in cardsInHand)
         {
+            if (card == null) continue;
             BalatroCardController controller = card.GetComponent<BalatroCardController>();
             if (controller != null && controller.IsSelected)
             {
@@ -192,18 +195,24 @@ public class PlayerHandManager : MonoBehaviour
 
     public void SubmitSelectedCardsToHand(RectTransform selectedHandTarget)
     {
+        if (selectedHandTarget == null) return;
+
         List<CardUI> selectedCards = GetSelectedCards();
 
         for (int i = 0; i < selectedCards.Count; i++)
         {
             CardUI card = selectedCards[i];
+            if (card == null) continue;
 
             cardsInHand.Remove(card);
             card.transform.SetParent(selectedHandTarget, true);
 
             BalatroCardController controller = card.GetComponent<BalatroCardController>();
+            Vector3 restingScale = Vector3.one;
+
             if (controller != null)
             {
+                restingScale = controller.RestingScale;
                 controller.enabled = false;
             }
 
@@ -211,7 +220,7 @@ public class PlayerHandManager : MonoBehaviour
             float xPos = (i - (selectedCards.Count - 1) / 2f) * spacing;
             Vector3 targetPos = new Vector3(xPos, 0f, 0f);
 
-            StartCoroutine(card.AnimateToHand(targetPos, Quaternion.identity, controller.RestingScale, cardMoveDuration));
+            StartCoroutine(card.AnimateToHand(targetPos, Quaternion.identity, restingScale, cardMoveDuration));
         }
 
         UpdateHandFanLayout();

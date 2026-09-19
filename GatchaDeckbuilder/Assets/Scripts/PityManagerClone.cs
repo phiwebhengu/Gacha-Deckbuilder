@@ -6,14 +6,13 @@ public class PityManager : MonoBehaviour
     [SerializeField] private PullConfig pullConfig;
     [SerializeField] private int currentPityCount = 0;
 
-    // Event fired whenever pity count or threshold state changes
-    public event Action<int, int> OnPityUpdated; // Parameters: (currentPity, maxPityThreshold)
+    // Event fired whenever pity count or threshold state changes: (currentPity, maxPityThreshold)
+    public event Action<int, int> OnPityUpdated;
 
     public int CurrentPityCount => currentPityCount;
 
     private void Start()
     {
-        // Broadcast initial values to UI on load
         NotifyPityChanged();
     }
 
@@ -40,6 +39,12 @@ public class PityManager : MonoBehaviour
     public void ResetPity()
     {
         currentPityCount = 0;
+        NotifyPityChanged();
+    }
+
+    public void UpdatePityDisplay(int count)
+    {
+        currentPityCount = count;
         NotifyPityChanged();
     }
 
