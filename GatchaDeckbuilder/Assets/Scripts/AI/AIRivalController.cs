@@ -126,7 +126,7 @@ public class AIRivalController : MonoBehaviour
         EndTurnManager endTurnMgr = FindObjectOfType<EndTurnManager>();
         if (endTurnMgr != null)
         {
-            endTurnMgr.NotifyRivalEndedTurn("Rival is ready! End your turn.");
+           // endTurnMgr.NotifyRivalEndedTurn("Rival is ready! End your turn.");
         }
     }
 

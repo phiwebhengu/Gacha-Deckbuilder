@@ -1,4 +1,3 @@
-using GachaSystem;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -7,17 +6,16 @@ public class PlayerHandManager : MonoBehaviour
 {
     [Header("UI References")]
     [SerializeField] private GameObject cardPrefab;
-    [SerializeField] private RectTransform handTransform;  // Parent object representing the hand
-    [SerializeField] private Canvas targetCanvas;          // Main UI Canvas
+    [SerializeField] private RectTransform handTransform;
+    [SerializeField] private Canvas targetCanvas;
     [Tooltip("Invisible raycast target image activated during card reveal to block token/card clicks.")]
     [SerializeField] private GameObject clickBlockerOverlay;
 
-    [Header("Database & Deck Sources")]
-    [Tooltip("Reference to your Support Cards CSV Database ScriptableObject")]
-    [SerializeField] private SupportDeckDatabase supportDatabase;
+    [Header("Pull System Reference")]
+    [Tooltip("The real pull engine — reads real card data, handles pity and the 50/50 correctly.")]
+    [SerializeField] private PlayerPullController pullController;
 
     [Header("Reveal Animation Timings")]
-    [Tooltip("Center world point override. If left null, Screen center will be used automatically.")]
     [SerializeField] private Transform centerPointTarget;
     [SerializeField] private float moveToCenterDuration = 0.45f;
     [SerializeField] private float shrinkDuration = 0.12f;
@@ -26,30 +24,20 @@ public class PlayerHandManager : MonoBehaviour
     [SerializeField] private float postRevealPause = 0.35f;
 
     [Header("Fan Layout Settings")]
-    [Tooltip("Maximum arc spread angle for the outer cards")]
     [SerializeField] private float maxFanAngle = 30f;
-
-    [Tooltip("Horizontal spacing offset between cards")]
     [SerializeField] private float cardSpacing = 80f;
-
-    [Tooltip("Slight downward dip for outer cards to create an arc")]
     [SerializeField] private float arcHeightDip = 15f;
 
     [Header("Animation Settings")]
-    [Tooltip("Time it takes for a single card to reach the hand")]
     [SerializeField] private float cardMoveDuration = 0.4f;
-
-    [Tooltip("Delay between spawning consecutive cards from the deck")]
     [SerializeField] private float dealDelay = 0.15f;
 
     [Header("Identity Config")]
-    [Tooltip("Check this TRUE on the AI Hand Manager instance to skip close-up reveal sequences and screen shake.")]
     [SerializeField] private bool isAI = false;
 
     [Header("System References")]
     [SerializeField] private DrawTimerManager timerManager;
     [SerializeField] private PityManager pityManager;
-    [SerializeField] private PullConfig pullConfig;
 
     private List<CardUI> cardsInHand = new List<CardUI>();
 
@@ -60,7 +48,7 @@ public class PlayerHandManager : MonoBehaviour
             targetCanvas = GetComponentInParent<Canvas>();
             if (targetCanvas == null)
             {
-                targetCanvas = FindObjectOfType<Canvas>();
+                targetCanvas = FindFirstObjectByType<Canvas>();
             }
         }
 
@@ -85,6 +73,12 @@ public class PlayerHandManager : MonoBehaviour
         if (selectedDeck == null)
         {
             Debug.LogError("[Hand Manager] Selected Deck is null!");
+            yield break;
+        }
+
+        if (pullController == null)
+        {
+            Debug.LogError("[Hand Manager] No PlayerPullController assigned — cannot perform a real pull.");
             yield break;
         }
 
@@ -116,16 +110,33 @@ public class PlayerHandManager : MonoBehaviour
                 yield break;
             }
 
-            // --- BRANCHING ROUTE BASED ON DECK TYPE ---
-            if (selectedDeck.IsSupportDeck)
+            // The real pull — real card, real rarity, real pity, real 50/50.
+            PullResult result = selectedDeck.IsSupportDeck
+                ? pullController.PullSupport()
+                : pullController.PullAction();
+
+            CardCategory cardCategory;
+            int value = 0;
+            string effect = "";
+            bool isForever = false;
+
+            if (result.Deck == DeckType.Action)
             {
-                // Draw directly from CSV Support database
-                controller.InitializeAsSupportCard(supportDatabase, pityManager);
+                cardCategory = result.ActionData.Role == "Attack" ? CardCategory.Attack : CardCategory.Defense;
+                value = result.ActionData.Value;
             }
             else
             {
-                // Draw strictly Attack or Defense with standard rarity parameters
-                controller.InitializeCardCategoryAndRarity(pityManager, null, pullConfig);
+                cardCategory = CardCategory.Support;
+                effect = result.SupportData.Effect;
+                isForever = result.SupportData.EffectType == "Forever";
+            }
+
+            controller.ApplyPulledCardData(result.CardName, cardCategory, result.Tier, value, effect, isForever);
+
+            if (pityManager != null)
+            {
+                pityManager.RegisterPull(result.Tier);
             }
 
             cardRect.localScale = Vector3.one;
@@ -169,9 +180,6 @@ public class PlayerHandManager : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Removes destroyed or null references from internal tracking list.
-    /// </summary>
     private void CleanupNullCards()
     {
         cardsInHand.RemoveAll(card => card == null || card.gameObject == null);
@@ -262,7 +270,6 @@ public class PlayerHandManager : MonoBehaviour
 
         foreach (CardUI card in submittedCards)
         {
-            // Extra Unity native null check
             if (card == null || card.gameObject == null) continue;
 
             card.transform.SetParent(handTransform, true);

@@ -5,11 +5,7 @@ using UnityEngine.UI;
 using UnityEngine.SceneManagement;
 using UnityEngine.InputSystem;
 using TMPro;
-using GachaSystem;
 
-/// <summary>
-/// Container holding deterministic turn results across network RPCs.
-/// </summary>
 public struct TurnResultData
 {
     public int playerAttack;
@@ -38,12 +34,6 @@ public class EndTurnManager : MonoBehaviour
     [SerializeField] private TextMeshProUGUI opponentAttackText;
     [SerializeField] private TextMeshProUGUI opponentDefenseText;
 
-    [Header("Rival Notification Settings")]
-    [Tooltip("TextMeshPro label prompting player to finish their turn after rival lock-in.")]
-    [SerializeField] private TextMeshProUGUI rivalEndedTurnPromptText;
-    [SerializeField] private string defaultRivalPromptMessage = "Rival has ended their turn!";
-    [SerializeField] private float promptPulseSpeed = 4f;
-
     [Header("Center Difference Display")]
     [SerializeField] private TextMeshProUGUI centerDifferenceText;
     [SerializeField] private float countStepInterval = 0.08f;
@@ -64,19 +54,14 @@ public class EndTurnManager : MonoBehaviour
 
     [Header("System References")]
     [SerializeField] private PlayerHandManager handManager;
-    [SerializeField] private AIRivalController aiRival; // Fallback for singleplayer
+    [SerializeField] private AIRivalController aiRival;
     [SerializeField] private DrawTimerManager timerManager;
 
     [Header("Multiplayer Identity")]
-    [Tooltip("Toggle this when playing in online multiplayer mode.")]
     [SerializeField] private bool isMultiplayerMode = false;
 
-    // Internal State
     private int currentPlayerHP;
     private int currentOpponentHP;
-    private bool isRivalReady = false;
-    private Coroutine promptPulseCoroutine;
-
     private Vector3 originalCenterScale = Vector3.one;
     private Vector3 originalPlayerHPScale = Vector3.one;
     private Vector3 originalOpponentHPScale = Vector3.one;
@@ -103,9 +88,6 @@ public class EndTurnManager : MonoBehaviour
 
         if (endTurnButton != null) endTurnButton.onClick.AddListener(OnEndTurnClicked);
         if (raycastBlockerImage != null) raycastBlockerImage.gameObject.SetActive(false);
-
-        // Hide notification prompt initially
-        HideRivalEndedTurnPrompt();
 
         UpdateEndTurnButtonVisibility();
     }
@@ -148,78 +130,8 @@ public class EndTurnManager : MonoBehaviour
     public void UpdateEndTurnButtonVisibility()
     {
         if (handManager == null || endTurnButton == null) return;
-
-        // Prevent End Turn button from appearing while the draw phase is active
-        if (timerManager != null && timerManager.IsDrawPhaseActive)
-        {
-            endTurnButton.gameObject.SetActive(false);
-            return;
-        }
-
         bool hasSelectedCards = handManager.GetSelectedCards().Count > 0;
         endTurnButton.gameObject.SetActive(hasSelectedCards);
-    }
-
-    /// <summary>
-    /// Call this method when AI finishes card selection or when Network receives a "Rival Ended Turn" packet.
-    /// </summary>
-    public void NotifyRivalEndedTurn(string customMessage = null)
-    {
-        isRivalReady = true;
-
-        if (rivalEndedTurnPromptText != null)
-        {
-            rivalEndedTurnPromptText.text = string.IsNullOrEmpty(customMessage)
-                ? defaultRivalPromptMessage
-                : customMessage;
-
-            rivalEndedTurnPromptText.gameObject.SetActive(true);
-
-            if (promptPulseCoroutine != null) StopCoroutine(promptPulseCoroutine);
-            promptPulseCoroutine = StartCoroutine(Routine_PulsePromptUI());
-        }
-    }
-
-    /// <summary>
-    /// Hides and stops animation for the rival prompt notification.
-    /// </summary>
-    public void HideRivalEndedTurnPrompt()
-    {
-        isRivalReady = false;
-
-        if (promptPulseCoroutine != null)
-        {
-            StopCoroutine(promptPulseCoroutine);
-            promptPulseCoroutine = null;
-        }
-
-        if (rivalEndedTurnPromptText != null)
-        {
-            rivalEndedTurnPromptText.gameObject.SetActive(false);
-        }
-    }
-
-    private IEnumerator Routine_PulsePromptUI()
-    {
-        if (rivalEndedTurnPromptText == null) yield break;
-
-        Vector3 baseScale = Vector3.one;
-        while (rivalEndedTurnPromptText.gameObject.activeSelf)
-        {
-            float alpha = (Mathf.Sin(Time.time * promptPulseSpeed) + 1f) / 2f;
-            float scaleMultiplier = Mathf.Lerp(0.95f, 1.05f, alpha);
-
-            rivalEndedTurnPromptText.transform.localScale = baseScale * scaleMultiplier;
-            yield return null;
-        }
-    }
-
-    /// <summary>
-    /// Invoked over Network when remote peer finishes their turn.
-    /// </summary>
-    public void OnNetworkRivalEndedTurn()
-    {
-        NotifyRivalEndedTurn("Opponent ready! End your turn.");
     }
 
     private void OnEndTurnClicked()
@@ -228,9 +140,6 @@ public class EndTurnManager : MonoBehaviour
 
         List<CardUI> playerSelectedCards = handManager.GetSelectedCards();
         if (playerSelectedCards.Count == 0) return;
-
-        // Hide notification prompt once local player locks in turn
-        HideRivalEndedTurnPrompt();
 
         if (raycastBlockerImage != null) raycastBlockerImage.gameObject.SetActive(true);
 
@@ -241,11 +150,9 @@ public class EndTurnManager : MonoBehaviour
         if (isMultiplayerMode)
         {
             // TODO: Send client choices to Server/Host via Network RPC
-            // Server calculates results and invokes OnReceiveNetworkTurnResult() on both clients
         }
         else
         {
-            // Local AI Fallback
             if (aiRival != null) aiRival.SubmitRivalHand();
 
             TurnResultData result = CalculateTurnResult();
@@ -293,11 +200,9 @@ public class EndTurnManager : MonoBehaviour
         List<BalatroCardController> playerCards = GetControllersFromTransform(selectedHandTransform);
         List<BalatroCardController> opponentCards = (aiRival != null) ? GetControllersFromTransform(aiRival.RivalSelectedHandTransform) : new List<BalatroCardController>();
 
-        // STEP 0: PROCESS PLAYED SUPPORT CARDS
         ProcessPlayedSupportCards(playerCards, "Player");
         ProcessPlayedSupportCards(opponentCards, "Opponent");
 
-        // STEP 1: ATTACK COUNTUP
         HighlightCardsByCategory(playerCards, opponentCards, CardCategory.Attack);
         yield return StartCoroutine(Routine_CountUpPair(
             result.playerAttack, playerAttackText, originalPlayerAttackScale,
@@ -306,7 +211,6 @@ public class EndTurnManager : MonoBehaviour
         yield return new WaitForSeconds(phaseTransitionPause);
         ResetCardHighlights(playerCards, opponentCards);
 
-        // STEP 2: DEFENSE COUNTUP
         HighlightCardsByCategory(playerCards, opponentCards, CardCategory.Defense);
         yield return StartCoroutine(Routine_CountUpPair(
             result.playerDefense, playerDefenseText, originalPlayerDefenseScale,
@@ -315,7 +219,6 @@ public class EndTurnManager : MonoBehaviour
         yield return new WaitForSeconds(phaseTransitionPause);
         ResetCardHighlights(playerCards, opponentCards);
 
-        // STEP 3: CENTER NET DIFFERENCE
         int maxNetDamage = Mathf.Max(result.netDamageToOpponent, result.netDamageToPlayer);
         if (centerDifferenceText != null && maxNetDamage > 0)
         {
@@ -329,7 +232,6 @@ public class EndTurnManager : MonoBehaviour
         }
         yield return new WaitForSeconds(phaseTransitionPause);
 
-        // STEP 4: APPLY DAMAGE TO LOSING PLAYER(S)
         if (result.netDamageToPlayer > 0)
         {
             for (int i = 1; i <= result.netDamageToPlayer; i++)
@@ -356,7 +258,6 @@ public class EndTurnManager : MonoBehaviour
             }
         }
 
-        // Synchronize state with exact server authority values
         currentPlayerHP = result.finalPlayerHP;
         currentOpponentHP = result.finalOpponentHP;
         UpdateHPUI();
@@ -373,12 +274,9 @@ public class EndTurnManager : MonoBehaviour
         {
             if (card == null || card.Category != CardCategory.Support) continue;
 
-            GachaSystem.SupportCardData supportData = card.SupportData;
-            if (supportData == null) continue;
-
-            string name = supportData.cardName;
-            string desc = supportData.effectDescription;
-            string durationLabel = supportData.IsForever ? "FOREVER (Rest of Game)" : "IMMEDIATE (Current Round Only)";
+            string name = card.SupportName;
+            string desc = card.SupportEffect;
+            string durationLabel = card.IsForever ? "FOREVER (Rest of Game)" : "IMMEDIATE (Current Round Only)";
 
             Debug.Log($"[Support Trigger] {ownerName} played Support Card: '{name}' | Duration: {durationLabel} | Description: '{desc}'");
         }
@@ -491,13 +389,11 @@ public class EndTurnManager : MonoBehaviour
     {
         List<Coroutine> cleanupRoutines = new List<Coroutine>();
 
-        // Handle Player Hand Clean-Up
         if (handManager != null && selectedHandTransform != null)
         {
             cleanupRoutines.Add(StartCoroutine(Routine_ProcessContainerCleanup(handManager, selectedHandTransform)));
         }
 
-        // Handle AI Hand Clean-Up
         if (aiRival != null)
         {
             PlayerHandManager aiHandManager = aiRival.GetComponentInChildren<PlayerHandManager>();
@@ -527,21 +423,18 @@ public class EndTurnManager : MonoBehaviour
             BalatroCardController controller = card.GetComponent<BalatroCardController>();
             if (controller != null && controller.Category == CardCategory.Support)
             {
-                GachaSystem.SupportCardData supportData = controller.SupportData;
-                if (supportData != null && !supportData.IsForever)
+                if (!controller.IsForever)
                 {
                     immediateCardsToDestroy.Add(card);
                 }
             }
         }
 
-        // 1. Play juicy pop and scale-down animation for immediate cards
         if (immediateCardsToDestroy.Count > 0)
         {
             yield return StartCoroutine(Routine_AnimateImmediateCardsDisappearance(immediateCardsToDestroy));
         }
 
-        // 2. Return all remaining standard/permanent cards to hand
         ownerHandManager.ReturnSubmittedCardsToHand(selectedTransform);
     }
 
@@ -551,7 +444,6 @@ public class EndTurnManager : MonoBehaviour
         float shrinkDuration = 0.18f;
         Vector3 popScale = new Vector3(1.3f, 1.3f, 1f);
 
-        // Pop up scale
         float elapsed = 0f;
         while (elapsed < popUpDuration)
         {
@@ -565,7 +457,6 @@ public class EndTurnManager : MonoBehaviour
             yield return null;
         }
 
-        // Shrink scale to zero
         elapsed = 0f;
         while (elapsed < shrinkDuration)
         {
@@ -579,7 +470,6 @@ public class EndTurnManager : MonoBehaviour
             yield return null;
         }
 
-        // Destroy game objects
         foreach (CardUI card in cardsToClear)
         {
             if (card != null) Destroy(card.gameObject);
