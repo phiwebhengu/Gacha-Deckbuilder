@@ -422,7 +422,7 @@ MonoBehaviour:
   valueText: {fileID: 5958458397285548417}
   categoryText: {fileID: 7661684294120197866}
   nameText: {fileID: 4718246732489568857}
-  descriptionText: {fileID: 8550048241031335332}
+  descriptionText: {fileID: 0}
   commonFlashOverlay: {fileID: 8044529541200078758}
   rareFlashOverlay: {fileID: 4531209057483766486}
   legendaryFlashOverlay: {fileID: 4259400918782563864}
