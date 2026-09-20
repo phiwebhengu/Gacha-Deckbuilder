@@ -38,6 +38,8 @@ public class DrawTimerManager : MonoBehaviour
     [SerializeField] private Image radialTimerImage;
     [SerializeField] private TextMeshProUGUI timerText;
     [SerializeField] private RectTransform timerContainer;
+    [Tooltip("UI Image placed over the player's hand to block clicks during the draw phase")]
+    [SerializeField] private Image handBlockerImage;
 
     [Header("System References")]
     [SerializeField] private TokenSelectionManager tokenManager;
@@ -73,6 +75,12 @@ public class DrawTimerManager : MonoBehaviour
         if (tokenManager == null)
         {
             tokenManager = FindObjectOfType<TokenSelectionManager>();
+        }
+
+        // Hide Hand Blocker on Awake
+        if (handBlockerImage != null)
+        {
+            handBlockerImage.gameObject.SetActive(false);
         }
 
         // Hide Player's Tokens on Start
@@ -186,6 +194,11 @@ public class DrawTimerManager : MonoBehaviour
         currentTimer = drawWindowDuration;
         isTimerRunning = true;
 
+        if (handBlockerImage != null)
+        {
+            handBlockerImage.gameObject.SetActive(true);
+        }
+
         if (timerContainer != null)
         {
             timerContainer.gameObject.SetActive(true);
@@ -238,6 +251,11 @@ public class DrawTimerManager : MonoBehaviour
     private void EndDrawPhase()
     {
         isTimerRunning = false;
+
+        if (handBlockerImage != null)
+        {
+            handBlockerImage.gameObject.SetActive(false);
+        }
 
         if (timerContainer != null)
         {

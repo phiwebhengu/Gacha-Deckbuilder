@@ -101,6 +101,7 @@ public class AIRivalController : MonoBehaviour
     }
 
     // AI selects a random subset of cards currently held in hand
+    // AI selects a random subset of cards currently held in hand
     private void SelectCardsForEndTurn()
     {
         if (rivalHandManager == null) return;
@@ -120,6 +121,13 @@ public class AIRivalController : MonoBehaviour
         }
 
         Debug.Log($"[AI Rival] Highlighted {numToSelect} cards for turn lock-in.");
+
+        // Notify EndTurnManager that the rival is done so prompt UI can trigger
+        EndTurnManager endTurnMgr = FindObjectOfType<EndTurnManager>();
+        if (endTurnMgr != null)
+        {
+            endTurnMgr.NotifyRivalEndedTurn("Rival is ready! End your turn.");
+        }
     }
 
     // Called simultaneously by EndTurnManager when End Turn button is clicked

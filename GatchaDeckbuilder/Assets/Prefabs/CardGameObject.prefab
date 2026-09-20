@@ -415,9 +415,32 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::BalatroCardController
   pullConfig: {fileID: 11400000, guid: 9d5c91d4bb09bbb43b62233be2ef5c46, type: 2}
   supportDatabase: {fileID: 11400000, guid: 420e9d7d061de60448fe053bd88c67d9, type: 2}
+  attackCardSprites:
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: -8038976213705442086, guid: f5cc5726cce41634886c9cab36fed415, type: 3}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 2720535173406242035, guid: 0cc2401b9bbf77545b3e9311eea4b5a1, type: 3}
+  - {fileID: 8102358098348255977, guid: c29a8501e19ebf94790f68aa88a73620, type: 3}
+  - {fileID: 0}
+  - {fileID: 4130640169021434097, guid: 20d4314ce37eaec499b1ee88eff90c3e, type: 3}
+  - {fileID: -6470460504253458178, guid: 2e1e4efbe5f5f9e4bacd6115b301f61e, type: 3}
+  defenseCardSprites:
+  - {fileID: 5272401415994956661, guid: 4b2a066116983314a975daba3353a4cf, type: 3}
+  - {fileID: -1045133410153605164, guid: 9ba3ef3fe0c3f9d41bfdc9d879c31143, type: 3}
+  - {fileID: 5181654206020448988, guid: 81cf60897eb4f8242885727a8b6d253c, type: 3}
+  - {fileID: -5750353039905602045, guid: bd0f380e0fa628448b0aee7eba8882f5, type: 3}
+  - {fileID: -7371509505491802261, guid: 621bd94172eff0c488eb895f9fb3be3f, type: 3}
+  - {fileID: -5750353039905602045, guid: bd0f380e0fa628448b0aee7eba8882f5, type: 3}
+  - {fileID: -6270953770400647376, guid: f72b5b94cdbf70448932de6e605e4f79, type: 3}
+  - {fileID: 7028616704906629411, guid: 384ebdc662444bb4e95a4a09fc98c324, type: 3}
+  - {fileID: -855298285791758126, guid: 8ea53a4f49b84c54da98407eaccb72d3, type: 3}
+  - {fileID: 6937817954938267909, guid: 604592b513ebe7440903d2359b056c49, type: 3}
   category: 0
   rarity: 0
   cardValue: 0
+  cardArtworkImage: {fileID: 6581530244111249467}
   tierImage: {fileID: 7892028975997215374}
   valueText: {fileID: 5958458397285548417}
   categoryText: {fileID: 7661684294120197866}
@@ -520,8 +543,8 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_Sprite: {fileID: 10905, guid: 0000000000000000f000000000000000, type: 0}
-  m_Type: 1
+  m_Sprite: {fileID: 0}
+  m_Type: 0
   m_PreserveAspect: 0
   m_FillCenter: 1
   m_FillMethod: 4

@@ -38,6 +38,12 @@ public class EndTurnManager : MonoBehaviour
     [SerializeField] private TextMeshProUGUI opponentAttackText;
     [SerializeField] private TextMeshProUGUI opponentDefenseText;
 
+    [Header("Rival Notification Settings")]
+    [Tooltip("TextMeshPro label prompting player to finish their turn after rival lock-in.")]
+    [SerializeField] private TextMeshProUGUI rivalEndedTurnPromptText;
+    [SerializeField] private string defaultRivalPromptMessage = "Rival has ended their turn!";
+    [SerializeField] private float promptPulseSpeed = 4f;
+
     [Header("Center Difference Display")]
     [SerializeField] private TextMeshProUGUI centerDifferenceText;
     [SerializeField] private float countStepInterval = 0.08f;
@@ -68,6 +74,9 @@ public class EndTurnManager : MonoBehaviour
     // Internal State
     private int currentPlayerHP;
     private int currentOpponentHP;
+    private bool isRivalReady = false;
+    private Coroutine promptPulseCoroutine;
+
     private Vector3 originalCenterScale = Vector3.one;
     private Vector3 originalPlayerHPScale = Vector3.one;
     private Vector3 originalOpponentHPScale = Vector3.one;
@@ -94,6 +103,9 @@ public class EndTurnManager : MonoBehaviour
 
         if (endTurnButton != null) endTurnButton.onClick.AddListener(OnEndTurnClicked);
         if (raycastBlockerImage != null) raycastBlockerImage.gameObject.SetActive(false);
+
+        // Hide notification prompt initially
+        HideRivalEndedTurnPrompt();
 
         UpdateEndTurnButtonVisibility();
     }
@@ -136,8 +148,78 @@ public class EndTurnManager : MonoBehaviour
     public void UpdateEndTurnButtonVisibility()
     {
         if (handManager == null || endTurnButton == null) return;
+
+        // Prevent End Turn button from appearing while the draw phase is active
+        if (timerManager != null && timerManager.IsDrawPhaseActive)
+        {
+            endTurnButton.gameObject.SetActive(false);
+            return;
+        }
+
         bool hasSelectedCards = handManager.GetSelectedCards().Count > 0;
         endTurnButton.gameObject.SetActive(hasSelectedCards);
+    }
+
+    /// <summary>
+    /// Call this method when AI finishes card selection or when Network receives a "Rival Ended Turn" packet.
+    /// </summary>
+    public void NotifyRivalEndedTurn(string customMessage = null)
+    {
+        isRivalReady = true;
+
+        if (rivalEndedTurnPromptText != null)
+        {
+            rivalEndedTurnPromptText.text = string.IsNullOrEmpty(customMessage)
+                ? defaultRivalPromptMessage
+                : customMessage;
+
+            rivalEndedTurnPromptText.gameObject.SetActive(true);
+
+            if (promptPulseCoroutine != null) StopCoroutine(promptPulseCoroutine);
+            promptPulseCoroutine = StartCoroutine(Routine_PulsePromptUI());
+        }
+    }
+
+    /// <summary>
+    /// Hides and stops animation for the rival prompt notification.
+    /// </summary>
+    public void HideRivalEndedTurnPrompt()
+    {
+        isRivalReady = false;
+
+        if (promptPulseCoroutine != null)
+        {
+            StopCoroutine(promptPulseCoroutine);
+            promptPulseCoroutine = null;
+        }
+
+        if (rivalEndedTurnPromptText != null)
+        {
+            rivalEndedTurnPromptText.gameObject.SetActive(false);
+        }
+    }
+
+    private IEnumerator Routine_PulsePromptUI()
+    {
+        if (rivalEndedTurnPromptText == null) yield break;
+
+        Vector3 baseScale = Vector3.one;
+        while (rivalEndedTurnPromptText.gameObject.activeSelf)
+        {
+            float alpha = (Mathf.Sin(Time.time * promptPulseSpeed) + 1f) / 2f;
+            float scaleMultiplier = Mathf.Lerp(0.95f, 1.05f, alpha);
+
+            rivalEndedTurnPromptText.transform.localScale = baseScale * scaleMultiplier;
+            yield return null;
+        }
+    }
+
+    /// <summary>
+    /// Invoked over Network when remote peer finishes their turn.
+    /// </summary>
+    public void OnNetworkRivalEndedTurn()
+    {
+        NotifyRivalEndedTurn("Opponent ready! End your turn.");
     }
 
     private void OnEndTurnClicked()
@@ -146,6 +228,9 @@ public class EndTurnManager : MonoBehaviour
 
         List<CardUI> playerSelectedCards = handManager.GetSelectedCards();
         if (playerSelectedCards.Count == 0) return;
+
+        // Hide notification prompt once local player locks in turn
+        HideRivalEndedTurnPrompt();
 
         if (raycastBlockerImage != null) raycastBlockerImage.gameObject.SetActive(true);
 
