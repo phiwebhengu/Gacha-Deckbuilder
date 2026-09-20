@@ -108,6 +108,8 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
     [SerializeField] private Color defenseHighlightColor = new Color(0.3f, 0.6f, 1f, 1f); // Blue Glow
     [SerializeField] private Color supportHighlightColor = new Color(0.3f, 0.9f, 0.4f, 1f); // Green Glow
 
+    public GachaSystem.SupportCardData SupportData => currentSupportData;
+
     // Internal State Tracking
     private bool isHovered = false;
     private bool isSelected = false;

@@ -5,6 +5,7 @@ using UnityEngine.UI;
 using UnityEngine.SceneManagement;
 using UnityEngine.InputSystem;
 using TMPro;
+using GachaSystem;
 
 /// <summary>
 /// Container holding deterministic turn results across network RPCs.
@@ -167,9 +168,6 @@ public class EndTurnManager : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Pure calculation method. Can be executed on Server or local client.
-    /// </summary>
     public TurnResultData CalculateTurnResult()
     {
         List<BalatroCardController> playerCards = GetControllersFromTransform(selectedHandTransform);
@@ -198,9 +196,6 @@ public class EndTurnManager : MonoBehaviour
         return data;
     }
 
-    /// <summary>
-    /// Called when network RPC payload arrives from Host/Server.
-    /// </summary>
     public void OnReceiveNetworkTurnResult(TurnResultData result)
     {
         StartCoroutine(Routine_ResolveCombatSequence(result));
@@ -212,6 +207,10 @@ public class EndTurnManager : MonoBehaviour
 
         List<BalatroCardController> playerCards = GetControllersFromTransform(selectedHandTransform);
         List<BalatroCardController> opponentCards = (aiRival != null) ? GetControllersFromTransform(aiRival.RivalSelectedHandTransform) : new List<BalatroCardController>();
+
+        // STEP 0: PROCESS PLAYED SUPPORT CARDS
+        ProcessPlayedSupportCards(playerCards, "Player");
+        ProcessPlayedSupportCards(opponentCards, "Opponent");
 
         // STEP 1: ATTACK COUNTUP
         HighlightCardsByCategory(playerCards, opponentCards, CardCategory.Attack);
@@ -278,7 +277,26 @@ public class EndTurnManager : MonoBehaviour
         UpdateHPUI();
 
         yield return new WaitForSeconds(0.5f);
-        CheckNextRoundOrEndGame();
+        yield return StartCoroutine(Routine_CheckNextRoundOrEndGame());
+    }
+
+    private void ProcessPlayedSupportCards(List<BalatroCardController> cards, string ownerName)
+    {
+        if (cards == null) return;
+
+        foreach (var card in cards)
+        {
+            if (card == null || card.Category != CardCategory.Support) continue;
+
+            GachaSystem.SupportCardData supportData = card.SupportData;
+            if (supportData == null) continue;
+
+            string name = supportData.cardName;
+            string desc = supportData.effectDescription;
+            string durationLabel = supportData.IsForever ? "FOREVER (Rest of Game)" : "IMMEDIATE (Current Round Only)";
+
+            Debug.Log($"[Support Trigger] {ownerName} played Support Card: '{name}' | Duration: {durationLabel} | Description: '{desc}'");
+        }
     }
 
     private void HighlightCardsByCategory(List<BalatroCardController> playerList, List<BalatroCardController> opponentList, CardCategory category)
@@ -344,28 +362,28 @@ public class EndTurnManager : MonoBehaviour
         }
     }
 
-    private void CheckNextRoundOrEndGame()
+    private IEnumerator Routine_CheckNextRoundOrEndGame()
     {
         if (currentOpponentHP <= 0 && currentPlayerHP <= 0)
         {
             Debug.Log("[Match Over] BOTH PLAYERS KNOCKED OUT! DRAW GAME!");
-            ClearAllSubmittedCards();
-            return;
+            yield return StartCoroutine(Routine_ClearAllSubmittedCards());
+            yield break;
         }
         if (currentOpponentHP <= 0)
         {
             Debug.Log("[Match Over] PLAYER WINS BY KNOCKOUT!");
-            ClearAllSubmittedCards();
-            return;
+            yield return StartCoroutine(Routine_ClearAllSubmittedCards());
+            yield break;
         }
         if (currentPlayerHP <= 0)
         {
             Debug.Log("[Match Over] OPPONENT WINS BY KNOCKOUT!");
-            ClearAllSubmittedCards();
-            return;
+            yield return StartCoroutine(Routine_ClearAllSubmittedCards());
+            yield break;
         }
 
-        ClearAllSubmittedCards();
+        yield return StartCoroutine(Routine_ClearAllSubmittedCards());
         ResetTurnUI();
 
         if (timerManager != null)
@@ -384,13 +402,17 @@ public class EndTurnManager : MonoBehaviour
         if (centerDifferenceText != null) centerDifferenceText.text = "";
     }
 
-    private void ClearAllSubmittedCards()
+    private IEnumerator Routine_ClearAllSubmittedCards()
     {
+        List<Coroutine> cleanupRoutines = new List<Coroutine>();
+
+        // Handle Player Hand Clean-Up
         if (handManager != null && selectedHandTransform != null)
         {
-            handManager.ReturnSubmittedCardsToHand(selectedHandTransform);
+            cleanupRoutines.Add(StartCoroutine(Routine_ProcessContainerCleanup(handManager, selectedHandTransform)));
         }
 
+        // Handle AI Hand Clean-Up
         if (aiRival != null)
         {
             PlayerHandManager aiHandManager = aiRival.GetComponentInChildren<PlayerHandManager>();
@@ -398,8 +420,84 @@ public class EndTurnManager : MonoBehaviour
 
             if (aiHandManager != null && aiSelectedTransform != null)
             {
-                aiHandManager.ReturnSubmittedCardsToHand(aiSelectedTransform);
+                cleanupRoutines.Add(StartCoroutine(Routine_ProcessContainerCleanup(aiHandManager, aiSelectedTransform)));
             }
+        }
+
+        foreach (var routine in cleanupRoutines)
+        {
+            yield return routine;
+        }
+    }
+
+    private IEnumerator Routine_ProcessContainerCleanup(PlayerHandManager ownerHandManager, RectTransform selectedTransform)
+    {
+        CardUI[] cardsInContainer = selectedTransform.GetComponentsInChildren<CardUI>();
+        List<CardUI> immediateCardsToDestroy = new List<CardUI>();
+
+        foreach (CardUI card in cardsInContainer)
+        {
+            if (card == null) continue;
+
+            BalatroCardController controller = card.GetComponent<BalatroCardController>();
+            if (controller != null && controller.Category == CardCategory.Support)
+            {
+                GachaSystem.SupportCardData supportData = controller.SupportData;
+                if (supportData != null && !supportData.IsForever)
+                {
+                    immediateCardsToDestroy.Add(card);
+                }
+            }
+        }
+
+        // 1. Play juicy pop and scale-down animation for immediate cards
+        if (immediateCardsToDestroy.Count > 0)
+        {
+            yield return StartCoroutine(Routine_AnimateImmediateCardsDisappearance(immediateCardsToDestroy));
+        }
+
+        // 2. Return all remaining standard/permanent cards to hand
+        ownerHandManager.ReturnSubmittedCardsToHand(selectedTransform);
+    }
+
+    private IEnumerator Routine_AnimateImmediateCardsDisappearance(List<CardUI> cardsToClear)
+    {
+        float popUpDuration = 0.12f;
+        float shrinkDuration = 0.18f;
+        Vector3 popScale = new Vector3(1.3f, 1.3f, 1f);
+
+        // Pop up scale
+        float elapsed = 0f;
+        while (elapsed < popUpDuration)
+        {
+            elapsed += Time.deltaTime;
+            float t = elapsed / popUpDuration;
+
+            foreach (CardUI card in cardsToClear)
+            {
+                if (card != null) card.transform.localScale = Vector3.Lerp(Vector3.one, popScale, t);
+            }
+            yield return null;
+        }
+
+        // Shrink scale to zero
+        elapsed = 0f;
+        while (elapsed < shrinkDuration)
+        {
+            elapsed += Time.deltaTime;
+            float t = elapsed / shrinkDuration;
+
+            foreach (CardUI card in cardsToClear)
+            {
+                if (card != null) card.transform.localScale = Vector3.Lerp(popScale, Vector3.zero, t);
+            }
+            yield return null;
+        }
+
+        // Destroy game objects
+        foreach (CardUI card in cardsToClear)
+        {
+            if (card != null) Destroy(card.gameObject);
         }
     }
 

@@ -11,5 +11,8 @@ namespace GachaSystem
         public string effectDescription;
         public string effectType; // e.g., "Forever", "Immediate"
         public int copies;
+
+        public bool IsForever => !string.IsNullOrEmpty(effectType) &&
+                                 effectType.Equals("Forever", StringComparison.OrdinalIgnoreCase);
     }
 }

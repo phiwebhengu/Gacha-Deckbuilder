@@ -169,13 +169,25 @@ public class PlayerHandManager : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Removes destroyed or null references from internal tracking list.
+    /// </summary>
+    private void CleanupNullCards()
+    {
+        cardsInHand.RemoveAll(card => card == null || card.gameObject == null);
+    }
+
     public void UpdateHandFanLayout()
     {
+        CleanupNullCards();
+
         int totalCards = cardsInHand.Count;
         if (totalCards == 0) return;
 
         for (int i = 0; i < totalCards; i++)
         {
+            if (cardsInHand[i] == null) continue;
+
             float normalizedIndex = (totalCards > 1) ? ((float)i / (totalCards - 1)) - 0.5f : 0f;
 
             float zRotation = -normalizedIndex * maxFanAngle;
@@ -197,9 +209,13 @@ public class PlayerHandManager : MonoBehaviour
 
     public List<CardUI> GetSelectedCards()
     {
+        CleanupNullCards();
+
         List<CardUI> selected = new List<CardUI>();
         foreach (CardUI card in cardsInHand)
         {
+            if (card == null) continue;
+
             BalatroCardController controller = card.GetComponent<BalatroCardController>();
             if (controller != null && controller.IsSelected)
             {
@@ -216,6 +232,7 @@ public class PlayerHandManager : MonoBehaviour
         for (int i = 0; i < selectedCards.Count; i++)
         {
             CardUI card = selectedCards[i];
+            if (card == null) continue;
 
             cardsInHand.Remove(card);
             card.transform.SetParent(selectedHandTarget, true);
@@ -230,7 +247,7 @@ public class PlayerHandManager : MonoBehaviour
             float xPos = (i - (selectedCards.Count - 1) / 2f) * spacing;
             Vector3 targetPos = new Vector3(xPos, 0f, 0f);
 
-            StartCoroutine(card.AnimateToHand(targetPos, Quaternion.identity, controller.RestingScale, cardMoveDuration));
+            StartCoroutine(card.AnimateToHand(targetPos, Quaternion.identity, (controller != null) ? controller.RestingScale : Vector3.one, cardMoveDuration));
         }
 
         UpdateHandFanLayout();
@@ -245,7 +262,8 @@ public class PlayerHandManager : MonoBehaviour
 
         foreach (CardUI card in submittedCards)
         {
-            if (card == null) continue;
+            // Extra Unity native null check
+            if (card == null || card.gameObject == null) continue;
 
             card.transform.SetParent(handTransform, true);
 
@@ -294,7 +312,10 @@ public class PlayerHandManager : MonoBehaviour
 
             foreach (CardUI card in cardsToClear)
             {
-                if (card != null) card.transform.localScale = Vector3.Lerp(Vector3.one, popScale, t);
+                if (card != null && card.gameObject != null)
+                {
+                    card.transform.localScale = Vector3.Lerp(Vector3.one, popScale, t);
+                }
             }
             yield return null;
         }
@@ -307,14 +328,23 @@ public class PlayerHandManager : MonoBehaviour
 
             foreach (CardUI card in cardsToClear)
             {
-                if (card != null) card.transform.localScale = Vector3.Lerp(popScale, Vector3.zero, t);
+                if (card != null && card.gameObject != null)
+                {
+                    card.transform.localScale = Vector3.Lerp(popScale, Vector3.zero, t);
+                }
             }
             yield return null;
         }
 
         foreach (CardUI card in cardsToClear)
         {
-            if (card != null) Destroy(card.gameObject);
+            if (card != null)
+            {
+                cardsInHand.Remove(card);
+                Destroy(card.gameObject);
+            }
         }
+
+        CleanupNullCards();
     }
 }
