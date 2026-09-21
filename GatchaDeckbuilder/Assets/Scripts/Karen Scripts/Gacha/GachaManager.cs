@@ -1,67 +1,63 @@
-﻿using JetBrains.Annotations;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Unity.Netcode;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 
 public class GachaManager : NetworkBehaviour
 {
     public static GachaManager Instance { get; private set; }
 
-    [Header("CSV File References (server only needs these)")]
-    public TextAsset actionDeckCsv;
-    public TextAsset supportDeckCsv;
+    [Header("Pull Config (ScriptableObject)")]
+    public PullConfig pullConfig;
 
-    [Header("Pull Settings")]
+    [Header("Starting State")]
     public int startingTokens = 10;
-    public int pityThreshold = 5;
-
-    // ---------- Server-only state ----------
 
     private class PlayerGachaState
     {
         public int Tokens;
-        public CardTierPool<ActionCardData> ActionPool;
-        public CardTierPool<SupportCardData> SupportPool;
+        public PityState ActionPity = new PityState();
+        public PityState SupportPity = new PityState();
+        public System.Random Rng;
+        public int FeaturedActionCardId;
+        public int FeaturedSupportCardId;
     }
 
     private List<ActionCardData> actionCardSource;
     private List<SupportCardData> supportCardSource;
     private readonly Dictionary<ulong, PlayerGachaState> playerStates = new Dictionary<ulong, PlayerGachaState>();
 
-    // ---------- Local ("this client's own result") events for UI ----------
-    // These only ever fire on a client for THAT client's own pulls.
-
     public event Action<int> OnMyTokensChanged;
-    public event Action<ActionCardData, int> OnMyActionCardPulled;   // card, pulls left until pity
-    public event Action<SupportCardData, int> OnMySupportCardPulled; // card, pulls left until pity
-    public event Action<string> OnPullFailed;                        // reason, e.g. "Out of tokens"
+    public event Action<PullResult> OnMyPullResolved;
+    public event Action<string> OnPullFailed;
     public event Action<ulong> OnOpponentDrewCard;
+    public event Action<int, int> OnFeaturedCardsSet;
+    public event Action<int, int, bool> OnPityUpdated;
 
     private void Awake()
     {
-        if (IsClient)
-        {
-            Instance = this;
-        }
+        if (IsClient) Instance = this;
     }
 
     public override void OnNetworkSpawn()
     {
         if (!IsServer) return;
 
-        actionCardSource = actionDeckCsv != null ? CardLoader.LoadActionDeck(actionDeckCsv) : null;
-        supportCardSource = supportDeckCsv != null ? CardLoader.LoadSupportDeck(supportDeckCsv) : null;
+        var deckMgr = FindFirstObjectByType<DeckManager>();
+        if (deckMgr != null)
+        {
+            actionCardSource = deckMgr.loadedActionCards;
+            supportCardSource = deckMgr.loadedSupportCards;
+        }
 
-        if (actionCardSource == null) Debug.LogWarning("⚠️ GachaNetworkManager: Action Deck CSV is not assigned.");
-        if (supportCardSource == null) Debug.LogWarning("⚠️ GachaNetworkManager: Support Deck CSV is not assigned.");
+        if (actionCardSource == null || actionCardSource.Count == 0)
+            Debug.LogWarning("⚠️ GachaManager: Action deck not loaded.");
+        if (supportCardSource == null || supportCardSource.Count == 0)
+            Debug.LogWarning("⚠️ GachaManager: Support deck not loaded.");
 
         foreach (ulong clientId in NetworkManager.Singleton.ConnectedClientsIds)
             RegisterPlayer(clientId);
 
-        // Late joiners go through Synchronize, not a Load event — OnSynchronizeComplete
-        // is what fires once THEIR sync (scenes + NetworkObjects) is actually done.
         NetworkManager.Singleton.SceneManager.OnSynchronizeComplete += HandleSynchronizeComplete;
         NetworkManager.Singleton.OnClientDisconnectCallback += UnregisterPlayer;
     }
@@ -69,39 +65,48 @@ public class GachaManager : NetworkBehaviour
     public override void OnNetworkDespawn()
     {
         if (!IsServer || NetworkManager.Singleton == null) return;
-
         if (NetworkManager.Singleton.SceneManager != null)
             NetworkManager.Singleton.SceneManager.OnSynchronizeComplete -= HandleSynchronizeComplete;
         NetworkManager.Singleton.OnClientDisconnectCallback -= UnregisterPlayer;
     }
 
-    private void HandleSynchronizeComplete(ulong clientId)
-    {
-        RegisterPlayer(clientId);
-    }
+    private void HandleSynchronizeComplete(ulong clientId) => RegisterPlayer(clientId);
 
     private void RegisterPlayer(ulong clientId)
     {
         if (playerStates.ContainsKey(clientId)) return;
-        if (actionCardSource == null || supportCardSource == null) return;
-
-        var state = new PlayerGachaState
+        int seed = Environment.TickCount ^ (int)clientId;
+        playerStates[clientId] = new PlayerGachaState
         {
             Tokens = startingTokens,
-            ActionPool = new CardTierPool<ActionCardData>(actionCardSource, c => c.Tier, pityThreshold),
-            SupportPool = new CardTierPool<SupportCardData>(supportCardSource, c => c.Tier, pityThreshold)
+            Rng = new System.Random(seed)
         };
-        playerStates[clientId] = state;
-
-        SendTokensClientRpc(state.Tokens, ToTarget(clientId));
+        SendTokensClientRpc(startingTokens, ToTarget(clientId));
     }
 
-    private void UnregisterPlayer(ulong clientId)
+    private void UnregisterPlayer(ulong clientId) => playerStates.Remove(clientId);
+
+    public void SetFeaturedCards(int actionId, int supportId)
     {
-        playerStates.Remove(clientId);
+        if (!IsServer) return;
+        foreach (var state in playerStates.Values)
+        {
+            state.FeaturedActionCardId = actionId;
+            state.FeaturedSupportCardId = supportId;
+        }
+        NotifyFeaturedCardsClientRpc(actionId, supportId);
     }
 
-    // ---------- Public API — call these from UI ----------
+    // --- NEW METHOD: Allows UI to safely fetch tokens if it missed the initial RPC ---
+    public int GetLocalPlayerTokens()
+    {
+        if (NetworkManager == null || !NetworkManager.IsListening) return startingTokens;
+        if (playerStates.TryGetValue(NetworkManager.LocalClientId, out var state))
+        {
+            return state.Tokens;
+        }
+        return startingTokens; // Fallback
+    }
 
     public void RequestPullAction() => RequestPullActionServerRpc();
     public void RequestPullSupport() => RequestPullSupportServerRpc();
@@ -110,29 +115,15 @@ public class GachaManager : NetworkBehaviour
     private void RequestPullActionServerRpc(ServerRpcParams rpcParams = default)
     {
         ulong clientId = rpcParams.Receive.SenderClientId;
-        ClientRpcParams target = ToTarget(clientId);
-
-        if (!playerStates.TryGetValue(clientId, out var state))
-        {
-            SendPullFailedClientRpc("Not ready yet — try again in a moment.", target);
-            return;
-        }
-        if (state.Tokens <= 0)
-        {
-            SendPullFailedClientRpc("Out of tokens.", target);
-            return;
-        }
+        var target = ToTarget(clientId);
+        if (!playerStates.TryGetValue(clientId, out var state)) { SendPullFailedClientRpc("Not ready yet.", target); return; }
+        if (state.Tokens <= 0) { SendPullFailedClientRpc("Out of tokens.", target); return; }
 
         state.Tokens--;
-        ActionCardData drawn = state.ActionPool.Pull();
+        PullResult result = GachaEngine.PullAction(pullConfig, state.ActionPity, state.Rng, actionCardSource, state.FeaturedActionCardId);
 
-        // 1. Send the actual card details ONLY to the player who pulled
         SendTokensClientRpc(state.Tokens, target);
-        SendActionCardClientRpc(
-            drawn.Id, drawn.Name, drawn.Category, drawn.Tier, drawn.WeaponType, drawn.Value, drawn.Role,
-            state.ActionPool.PullsUntilGuaranteedLegendary, target);
-
-        // 2. ADD THIS: Tell everyone else that this player drew a card
+        DispatchPullResult(result, state.ActionPity.PullsSinceLegendary, target);
         NotifyOpponentDrewCardClientRpc(clientId);
     }
 
@@ -140,87 +131,60 @@ public class GachaManager : NetworkBehaviour
     private void RequestPullSupportServerRpc(ServerRpcParams rpcParams = default)
     {
         ulong clientId = rpcParams.Receive.SenderClientId;
-        ClientRpcParams target = ToTarget(clientId);
-
-        if (!playerStates.TryGetValue(clientId, out var state))
-        {
-            SendPullFailedClientRpc("Not ready yet — try again in a moment.", target);
-            return;
-        }
-        if (state.Tokens <= 0)
-        {
-            SendPullFailedClientRpc("Out of tokens.", target);
-            return;
-        }
+        var target = ToTarget(clientId);
+        if (!playerStates.TryGetValue(clientId, out var state)) { SendPullFailedClientRpc("Not ready yet.", target); return; }
+        if (state.Tokens <= 0) { SendPullFailedClientRpc("Out of tokens.", target); return; }
 
         state.Tokens--;
-        SupportCardData drawn = state.SupportPool.Pull();
+        PullResult result = GachaEngine.PullSupport(pullConfig, state.SupportPity, state.Rng, supportCardSource, state.FeaturedSupportCardId);
 
-        // 1. Send the actual card details ONLY to the player who pulled
         SendTokensClientRpc(state.Tokens, target);
-        SendSupportCardClientRpc(
-            drawn.Id, drawn.Name, drawn.Tier, drawn.Effect, drawn.EffectType,
-            state.SupportPool.PullsUntilGuaranteedLegendary, target);
-
-        // 2. ADD THIS: Tell everyone else that this player drew a card
+        DispatchPullResult(result, state.SupportPity.PullsSinceLegendary, target);
         NotifyOpponentDrewCardClientRpc(clientId);
     }
 
-    // ---------- ClientRpc results — each is targeted, so only the ----------
-    // ---------- requesting client's copy of this script ever runs them. ----------
+    [ClientRpc] private void NotifyFeaturedCardsClientRpc(int actionId, int supportId) => OnFeaturedCardsSet?.Invoke(actionId, supportId);
 
     [ClientRpc]
     private void NotifyOpponentDrewCardClientRpc(ulong drawerClientId)
     {
-        // If I am the one who drew the card, ignore this message
-        if (drawerClientId == NetworkManager.Singleton.LocalClientId) return;
-
-        // Fire the event for the local UI to handle
-        OnOpponentDrewCard?.Invoke(drawerClientId);
+        if (drawerClientId != NetworkManager.Singleton.LocalClientId) OnOpponentDrewCard?.Invoke(drawerClientId);
     }
 
-    [ClientRpc]
-    private void SendTokensClientRpc(int tokens, ClientRpcParams rpcParams = default)
-    {
-        OnMyTokensChanged?.Invoke(tokens);
-    }
+    [ClientRpc] private void SendTokensClientRpc(int tokens, ClientRpcParams rpcParams = default) => OnMyTokensChanged?.Invoke(tokens);
+    [ClientRpc] private void SendPullFailedClientRpc(string reason, ClientRpcParams rpcParams = default) => OnPullFailed?.Invoke(reason);
 
     [ClientRpc]
-    private void SendPullFailedClientRpc(string reason, ClientRpcParams rpcParams = default)
+    private void SendPullResultClientRpc(int deckType, int tier, int cardId, string cardName, bool pityTriggered, bool was5050Roll, bool won5050, int pullsSinceLegendary, ClientRpcParams rpcParams = default)
     {
-        OnPullFailed?.Invoke(reason);
-    }
+        OnPityUpdated?.Invoke(pullsSinceLegendary, pullConfig.pityThreshold, deckType == 0);
 
-    [ClientRpc]
-    private void SendActionCardClientRpc(int id, string name, string category, string tier, string weaponType,
-        int value, string role, int pullsUntilPity, ClientRpcParams rpcParams = default)
-    {
-        var card = new ActionCardData
+        var result = new PullResult
         {
-            Id = id,
-            Name = name,
-            Category = category,
-            Tier = tier,
-            WeaponType = weaponType,
-            Value = value,
-            Role = role
+            Deck = (DeckType)deckType,
+            Tier = (Rarity)tier,
+            CardId = cardId,
+            CardName = cardName,
+            PityTriggered = pityTriggered,
+            Was5050Roll = was5050Roll,
+            Won5050 = won5050
         };
-        OnMyActionCardPulled?.Invoke(card, pullsUntilPity);
+
+        var deckMgr = FindFirstObjectByType<DeckManager>();
+        if (deckMgr != null)
+        {
+            if (result.Deck == DeckType.Action)
+                result.ActionData = deckMgr.loadedActionCards?.Find(c => c.Id == cardId);
+            else
+                result.SupportData = deckMgr.loadedSupportCards?.Find(c => c.Id == cardId);
+        }
+
+        OnMyPullResolved?.Invoke(result);
     }
 
-    [ClientRpc]
-    private void SendSupportCardClientRpc(int id, string name, string tier, string effect, string effectType,
-        int pullsUntilPity, ClientRpcParams rpcParams = default)
+    private void DispatchPullResult(PullResult result, int pullsSinceLegendary, ClientRpcParams rpcParams)
     {
-        var card = new SupportCardData
-        {
-            Id = id,
-            Name = name,
-            Tier = tier,
-            Effect = effect,
-            EffectType = effectType
-        };
-        OnMySupportCardPulled?.Invoke(card, pullsUntilPity);
+        SendPullResultClientRpc((int)result.Deck, (int)result.Tier, result.CardId, result.CardName, result.PityTriggered, result.Was5050Roll, result.Won5050, pullsSinceLegendary, rpcParams);
     }
 
     private ClientRpcParams ToTarget(ulong clientId) => new ClientRpcParams

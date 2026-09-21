@@ -26,8 +26,8 @@ public static class GachaEngine
     }
 
     public static PullResult PullAction(
-        PullConfig config, PityState state, Random rng,
-        List<ActionCardData> pool, int featuredCardId)
+    PullConfig config, PityState state, Random rng,
+    List<ActionCardData> pool, int featuredCardId)
     {
         var (tier, pityTriggered) = RollTier(config, state, rng);
         string tierStr = tier.ToString();
@@ -39,9 +39,20 @@ public static class GachaEngine
         if (was5050)
         {
             won5050 = Resolve5050(state, rng);
-            chosen = won5050
-                ? pool.First(c => c.Id == featuredCardId)
-                : PickRandom(pool.Where(c => c.Tier == tierStr && c.Id != featuredCardId).ToList(), rng);
+
+            // SAFE: Use FirstOrDefault and provide a fallback
+            var featuredCard = pool.FirstOrDefault(c => c.Id == featuredCardId);
+            var otherLegendaries = pool.Where(c => c.Tier == tierStr && c.Id != featuredCardId).ToList();
+
+            if (featuredCard != null && otherLegendaries.Count > 0)
+            {
+                chosen = won5050 ? featuredCard : PickRandom(otherLegendaries, rng);
+            }
+            else
+            {
+                // Fallback: just pick any legendary if featured isn't set yet
+                chosen = PickRandom(pool.Where(c => c.Tier == tierStr).ToList(), rng);
+            }
             state.RegisterLegendaryPull();
         }
         else
@@ -79,9 +90,20 @@ public static class GachaEngine
         if (was5050)
         {
             won5050 = Resolve5050(state, rng);
-            chosen = won5050
-                ? pool.First(c => c.Id == featuredCardId)
-                : PickRandom(pool.Where(c => c.Tier == tierStr && c.Id != featuredCardId).ToList(), rng);
+
+            // SAFE: Use FirstOrDefault and provide a fallback
+            var featuredCard = pool.FirstOrDefault(c => c.Id == featuredCardId);
+            var otherLegendaries = pool.Where(c => c.Tier == tierStr && c.Id != featuredCardId).ToList();
+
+            if (featuredCard != null && otherLegendaries.Count > 0)
+            {
+                chosen = won5050 ? featuredCard : PickRandom(otherLegendaries, rng);
+            }
+            else
+            {
+                // Fallback: just pick any legendary if featured isn't set yet
+                chosen = PickRandom(pool.Where(c => c.Tier == tierStr).ToList(), rng);
+            }
             state.RegisterLegendaryPull();
         }
         else
@@ -104,7 +126,6 @@ public static class GachaEngine
             Won5050 = won5050
         };
     }
-
     private static T PickRandom<T>(List<T> list, Random rng) => list[rng.Next(0, list.Count)];
 
     private static void LogPull(DeckType deck, Rarity tier, bool pity, bool was5050, bool won5050, string name)

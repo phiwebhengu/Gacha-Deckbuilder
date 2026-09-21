@@ -14,10 +14,9 @@ public class DeckManager : MonoBehaviour
     public List<ActionCardData> loadedActionCards;
     public List<SupportCardData> loadedSupportCards;
 
-    void Start()
+    void Awake()
     {
         LoadDecks();
-        //DrawAndDisplayRandomActionCard();
     }
 
     void LoadDecks()

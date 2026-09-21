@@ -1,15 +1,15 @@
+using System;
 using System.Collections;
-using System.Collections.Generic;
-using UnityEngine;
-using UnityEngine.UI;
 using TMPro;
+using Unity.Netcode;
+using UnityEngine;
 
-public class DrawTimerManager : MonoBehaviour
+public class DrawTimerManager : NetworkBehaviour
 {
     [Header("Match & Round Settings")]
     [SerializeField] private int maxRounds = 4;
 
-    [Header("Round Display UI References")]
+    [Header("Round Display UI")]
     [SerializeField] private TextMeshProUGUI roundDisplayText;
     [SerializeField] private CanvasGroup roundDisplayCanvasGroup;
     [SerializeField] private float roundTextFadeDuration = 0.8f;
@@ -17,122 +17,82 @@ public class DrawTimerManager : MonoBehaviour
 
     [Header("Timer Settings")]
     [SerializeField] private float drawWindowDuration = 5f;
-    [SerializeField] private float pulseSpeed = 8f;
-    [SerializeField] private float pulseScaleAmount = 0.15f;
 
-    [Header("Countdown Juice Settings")]
-    [Tooltip("Text component used to display Ready... Set... Draw!")]
+    [Header("Countdown Juice")]
     [SerializeField] private TextMeshProUGUI countdownText;
-
-    [Tooltip("Time in seconds each countdown word stays on screen")]
     [SerializeField] private float wordDisplayDuration = 0.6f;
-
-    [Tooltip("Starting scale multiplier when a word appears before shrinking back to 1.0")]
     [SerializeField] private float popStartScaleMultiplier = 1.8f;
-
-    [Tooltip("Speed at which the word shrinks down to normal scale")]
     [SerializeField] private float shrinkSpeed = 10f;
 
-    [Header("UI References")]
-    [SerializeField] private Button startDrawButton;
-    [SerializeField] private Image radialTimerImage;
+    [Header("Timer UI References")]
     [SerializeField] private TextMeshProUGUI timerText;
-    [SerializeField] private RectTransform timerContainer;
-    [Tooltip("UI Image placed over the player's hand to block clicks during the draw phase")]
-    [SerializeField] private Image handBlockerImage;
+    [SerializeField] private GameObject preGamePanel;
 
     [Header("System References")]
-    [SerializeField] private TokenSelectionManager tokenManager;
-    [SerializeField] private List<DeckButton> availableDecks = new List<DeckButton>();
-
-    [Header("AI Rival Integration")]
-    [SerializeField] private AIRivalController aiRival;
+    [SerializeField] private GachaManager gachaManager;
 
     private int currentRound = 1;
-    private float currentTimer;
     private bool isTimerRunning = false;
     private bool playerHasDrawn = false;
-    private Vector3 originalTimerScale = Vector3.one;
+    private double roundStartTime;
 
     public bool IsDrawPhaseActive => isTimerRunning;
-
     public int CurrentRound => currentRound;
-    public int MaxRounds => maxRounds;
+    public event Action<bool> OnDrawPhaseChanged;
 
     private void Awake()
     {
-        if (timerContainer != null)
-        {
-            originalTimerScale = timerContainer.localScale;
-            timerContainer.gameObject.SetActive(false);
-        }
-
-        if (startDrawButton != null)
-        {
-            startDrawButton.onClick.AddListener(OnStartButtonClicked);
-        }
-
-        if (tokenManager == null)
-        {
-            tokenManager = FindObjectOfType<TokenSelectionManager>();
-        }
-
-        // Hide Hand Blocker on Awake
-        if (handBlockerImage != null)
-        {
-            handBlockerImage.gameObject.SetActive(false);
-        }
-
-        // Hide Player's Tokens on Start
-        if (tokenManager != null)
-        {
-            tokenManager.gameObject.SetActive(false);
-        }
-
-        // Hide AI's Tokens on Start
-        if (aiRival != null)
-        {
-            aiRival.StopAIDrawPhase();
-        }
-
-        // Hide countdown text on start
-        if (countdownText != null)
-        {
-            countdownText.gameObject.SetActive(false);
-        }
-
-        if (roundDisplayCanvasGroup != null)
-        {
-            roundDisplayCanvasGroup.alpha = 0f;
-        }
+        // Hide all UI elements initially
+        if (roundDisplayCanvasGroup != null) roundDisplayCanvasGroup.alpha = 0f;
+        if (countdownText != null) countdownText.gameObject.SetActive(false);
+        if (timerText != null) timerText.gameObject.SetActive(false); // Hide timer until draw phase
 
         UpdateTimerUI(1f, drawWindowDuration);
     }
 
-    private void OnStartButtonClicked()
+    public void RequestStartRound(int roundNumber = 1)
     {
-        if (startDrawButton != null)
+        if (!IsSpawned)
         {
-            startDrawButton.gameObject.SetActive(false);
+            Debug.LogError("[DrawTimer] RequestStartRound called, but this NetworkBehaviour is not spawned!");
+            return;
         }
 
-        StartCoroutine(Routine_StartRoundSequence());
+        if (IsServer)
+        {
+            Debug.Log($"[DrawTimer] Host/Server requesting start for Round {roundNumber}");
+            RequestStartRoundServerRpc(roundNumber);
+        }
+        else
+        {
+            Debug.LogWarning("[DrawTimer] Client tried to start round. Only server can initiate.");
+        }
     }
 
-    public void TriggerNextRound()
+    [ServerRpc(RequireOwnership = false)]
+    private void RequestStartRoundServerRpc(int roundNumber)
     {
-        currentRound++;
+        Debug.Log("[DrawTimer] ServerRPC received. Starting round sequence.");
+        StartRoundClientRpc(roundNumber, NetworkManager.Singleton.LocalTime.Time);
+    }
+
+    [ClientRpc]
+    private void StartRoundClientRpc(int roundNumber, double startTime)
+    {
+        Debug.Log($"[DrawTimer] ClientRPC received. Starting sequence for Round {roundNumber}");
+        currentRound = roundNumber;
+        playerHasDrawn = false;
+        isTimerRunning = false; // Keep false until the countdown actually finishes
+
         StartCoroutine(Routine_StartRoundSequence());
     }
 
     private IEnumerator Routine_StartRoundSequence()
     {
-        // 1. Display and Fade-Out Round Banner Text
         if (roundDisplayText != null && roundDisplayCanvasGroup != null)
         {
             roundDisplayText.text = $"ROUND {currentRound}";
             roundDisplayCanvasGroup.alpha = 1f;
-
             yield return new WaitForSeconds(roundTextHoldDuration);
 
             float elapsed = 0f;
@@ -142,11 +102,9 @@ public class DrawTimerManager : MonoBehaviour
                 roundDisplayCanvasGroup.alpha = Mathf.Lerp(1f, 0f, elapsed / roundTextFadeDuration);
                 yield return null;
             }
-
             roundDisplayCanvasGroup.alpha = 0f;
         }
 
-        // 2. Execute Ready... Set... Draw!
         yield return StartCoroutine(Routine_ExecuteCountdown());
     }
 
@@ -155,14 +113,13 @@ public class DrawTimerManager : MonoBehaviour
         if (countdownText != null)
         {
             countdownText.gameObject.SetActive(true);
-
             yield return StartCoroutine(Routine_AnimateWord("READY"));
             yield return StartCoroutine(Routine_AnimateWord("SET"));
             yield return StartCoroutine(Routine_AnimateWord("DRAW!"));
-
-            countdownText.gameObject.SetActive(false);
+            countdownText.gameObject.SetActive(false); // Countdown disappears
         }
 
+        // NOW start the actual timer
         StartDrawPhase();
     }
 
@@ -170,73 +127,64 @@ public class DrawTimerManager : MonoBehaviour
     {
         countdownText.text = word;
         RectTransform textRect = countdownText.rectTransform;
-
-        Vector3 oversizedScale = Vector3.one * popStartScaleMultiplier;
-        Vector3 targetScale = Vector3.one;
-
-        textRect.localScale = oversizedScale;
+        textRect.localScale = Vector3.one * popStartScaleMultiplier;
 
         float elapsedTime = 0f;
-
         while (elapsedTime < wordDisplayDuration)
         {
             elapsedTime += Time.deltaTime;
-            textRect.localScale = Vector3.Lerp(textRect.localScale, targetScale, Time.deltaTime * shrinkSpeed);
+            textRect.localScale = Vector3.Lerp(textRect.localScale, Vector3.one, Time.deltaTime * shrinkSpeed);
             yield return null;
         }
-
-        textRect.localScale = targetScale;
+        textRect.localScale = Vector3.one;
     }
 
-    public void StartDrawPhase()
+    private void StartDrawPhase()
     {
         playerHasDrawn = false;
-        currentTimer = drawWindowDuration;
         isTimerRunning = true;
 
-        if (handBlockerImage != null)
+        // 1. Make the timer visible now that the countdown is done
+        if (timerText != null)
         {
-            handBlockerImage.gameObject.SetActive(true);
+            timerText.gameObject.SetActive(true);
         }
 
-        if (timerContainer != null)
+        // 2. Set the start time to EXACTLY NOW, so the timer begins at the full drawWindowDuration
+        if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening)
         {
-            timerContainer.gameObject.SetActive(true);
+            roundStartTime = NetworkManager.Singleton.LocalTime.Time;
+        }
+        else
+        {
+            roundStartTime = Time.time;
         }
 
-        if (tokenManager != null)
-        {
-            tokenManager.gameObject.SetActive(true);
-            tokenManager.ResetTokensForNewRound();
-        }
-
-        if (aiRival != null)
-        {
-            aiRival.StartAIDrawPhase();
-        }
-
-        StartCoroutine(Routine_RunTimer());
+        OnDrawPhaseChanged?.Invoke(true);
+        Debug.Log("[DrawTimer] Draw phase officially ACTIVE. Timer started.");
     }
 
-    private IEnumerator Routine_RunTimer()
+    private void Update()
     {
-        while (currentTimer > 0f)
+        if (!isTimerRunning) return;
+
+        if (NetworkManager.Singleton == null) return;
+
+        double currentTime = NetworkManager.Singleton.IsListening
+            ? NetworkManager.Singleton.LocalTime.Time
+            : Time.time;
+
+        double elapsed = currentTime - roundStartTime;
+        float timeRemaining = (float)(drawWindowDuration - elapsed);
+
+        if (timeRemaining <= 0f)
         {
-            currentTimer -= Time.deltaTime;
-            float fillRatio = Mathf.Clamp01(currentTimer / drawWindowDuration);
-
-            UpdateTimerUI(fillRatio, currentTimer);
-
-            if (timerContainer != null)
-            {
-                float pulse = 1f + (Mathf.Sin(Time.time * pulseSpeed) * pulseScaleAmount * (1f - fillRatio));
-                timerContainer.localScale = originalTimerScale * pulse;
-            }
-
-            yield return null;
+            timeRemaining = 0f;
+            EndDrawPhase();
         }
 
-        EndDrawPhase();
+        float fillRatio = Mathf.Clamp01(timeRemaining / drawWindowDuration);
+        UpdateTimerUI(fillRatio, timeRemaining);
     }
 
     public void NotifyCardsDrawn()
@@ -244,70 +192,57 @@ public class DrawTimerManager : MonoBehaviour
         if (isTimerRunning)
         {
             playerHasDrawn = true;
-            Debug.Log("[Draw Timer] Player drew cards! Selection window remains open until time runs out.");
+            Debug.Log("[DrawTimer] Player drew cards!");
         }
     }
 
     private void EndDrawPhase()
     {
         isTimerRunning = false;
+        OnDrawPhaseChanged?.Invoke(false);
 
-        if (handBlockerImage != null)
-        {
-            handBlockerImage.gameObject.SetActive(false);
-        }
+        if (preGamePanel != null) preGamePanel.SetActive(false);
 
-        if (timerContainer != null)
-        {
-            timerContainer.localScale = originalTimerScale;
-            timerContainer.gameObject.SetActive(false);
-        }
-
-        if (tokenManager != null)
-        {
-            tokenManager.gameObject.SetActive(false);
-        }
-
-        if (aiRival != null)
-        {
-            aiRival.StopAIDrawPhase();
-        }
+        // Hide the timer when the phase is over
+        if (timerText != null) timerText.gameObject.SetActive(false);
 
         if (!playerHasDrawn)
         {
-            Debug.Log("[Draw Timer] Time expired with zero selections! Executing random auto-draw penalty.");
-            StartCoroutine(Routine_ExecuteAutoDrawPenalty());
+            Debug.Log("[DrawTimer] Time expired! Executing random auto-draw penalty.");
+            ExecuteAutoDrawPenalty();
         }
 
         UpdateTimerUI(0f, 0f);
     }
 
-    private IEnumerator Routine_ExecuteAutoDrawPenalty()
+    private void ExecuteAutoDrawPenalty()
     {
-        if (tokenManager == null || availableDecks.Count == 0) yield break;
-
-        // Filter available decks to make sure support deck buttons can be picked if added
-        int randomIndex = Random.Range(0, availableDecks.Count);
-        DeckButton chosenDeck = availableDecks[randomIndex];
-
-        tokenManager.gameObject.SetActive(true);
-        tokenManager.ForceAutoDrawSingleToken(chosenDeck);
-
-        yield return new WaitForSeconds(0.5f);
-
-        tokenManager.gameObject.SetActive(false);
+        bool isAction = UnityEngine.Random.value > 0.5f;
+        ExecuteGachaPull(isAction);
     }
 
     private void UpdateTimerUI(float fillRatio, float timeRemaining)
     {
-        if (radialTimerImage != null)
-        {
-            radialTimerImage.fillAmount = fillRatio;
-        }
-
         if (timerText != null)
         {
             timerText.text = Mathf.CeilToInt(Mathf.Max(0f, timeRemaining)).ToString();
+        }
+    }
+
+    public void ExecuteGachaPull(bool isActionDeck)
+    {
+        if (gachaManager == null) gachaManager = FindFirstObjectByType<GachaManager>();
+
+        if (gachaManager != null)
+        {
+            if (isActionDeck) gachaManager.RequestPullAction();
+            else gachaManager.RequestPullSupport();
+
+            NotifyCardsDrawn();
+        }
+        else
+        {
+            Debug.LogError("[DrawTimer] GachaManager not found! Cannot execute pull.");
         }
     }
 }

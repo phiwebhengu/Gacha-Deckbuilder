@@ -5,127 +5,128 @@ using System.Collections;
 
 public class GachaUI : MonoBehaviour
 {
-    [Header("Token Display")]
-    public TMP_Text tokenText;
-    public string tokenFormat = "Tokens: {0}";
+    [Header("Token Display")] public TMP_Text tokenText; public string tokenFormat = "Tokens: {0}";
+    [Header("Pull Buttons")] public Button pullActionButton; public Button pullSupportButton;
+    [Header("Opponent Visuals")] public GameObject cardBackPrefab; public Transform OpponentCardContainer;
+    [Header("Card Visuals")] public GameObject cardPrefab; public Transform CardContainer;
 
-    [Header("Pull Buttons")]
-    public Button pullActionButton;
-    public Button pullSupportButton;
+    [Header("System References")]
+    public DrawTimerManager drawTimerManager;
 
-    [Header("Opponent Card Visuals")]
-    public GameObject cardBackPrefab; // A simple UI Image of a card back
-    public Transform OpponentCardContainer;
-
-    [Header("Card Visuals (optional — same wiring as the old GachaManager)")]
-    public GameObject cardPrefab;
-    public Transform CardContainer;
-
-    private int currentTokens;
     private GachaManager mgr;
+    private int currentTokens = 0;
+    private bool isDrawPhaseActive = true;
 
-    void OnEnable()
-    {
-        StartCoroutine(SubscribeWhenReady());
-    }
+    private void OnEnable() => StartCoroutine(SubscribeWhenReady());
 
-    void OnDisable()
+    private void OnDisable()
     {
         StopAllCoroutines();
-        Unsubscribe();
+        if (mgr != null)
+        {
+            mgr.OnMyTokensChanged -= UpdateTokens;
+            mgr.OnMyPullResolved -= HandlePullResolved;
+            mgr.OnPullFailed -= HandlePullFailed;
+            mgr.OnOpponentDrewCard -= HandleOpponentDrewCard;
+        }
+        if (drawTimerManager != null)
+        {
+            drawTimerManager.OnDrawPhaseChanged -= UpdateButtonInteractability;
+        }
     }
 
     private IEnumerator SubscribeWhenReady()
     {
-        // Find the LOCAL instance of the GachaManager
-        while (mgr == null)
+        while (mgr == null || !mgr.IsSpawned)
         {
-            // Use FindFirstObjectByType (Unity 2023+) or FindObjectOfType (older Unity)
             mgr = FindFirstObjectByType<GachaManager>();
-
-            // Ensure we found it AND it has finished spawning over the network
-            if (mgr != null && mgr.IsSpawned)
-            {
-                break;
-            }
-
             yield return null;
         }
 
-        // Now safely subscribe to the LOCAL manager's events
         mgr.OnMyTokensChanged += UpdateTokens;
-        mgr.OnMyActionCardPulled += HandleActionPulled;
-        mgr.OnMySupportCardPulled += HandleSupportPulled;
+        mgr.OnMyPullResolved += HandlePullResolved;
         mgr.OnPullFailed += HandlePullFailed;
         mgr.OnOpponentDrewCard += HandleOpponentDrewCard;
-    }
 
-    private void Unsubscribe()
-    {
-        if (mgr == null) return;
+        // --- CRITICAL FIX: Proactively fetch tokens in case we missed the initial RPC ---
+        currentTokens = mgr.GetLocalPlayerTokens();
+        if (tokenText != null) tokenText.text = string.Format(tokenFormat, currentTokens);
 
-        mgr.OnMyTokensChanged -= UpdateTokens;
-        mgr.OnMyActionCardPulled -= HandleActionPulled;
-        mgr.OnMySupportCardPulled -= HandleSupportPulled;
-        mgr.OnPullFailed -= HandlePullFailed;
-        mgr.OnOpponentDrewCard -= HandleOpponentDrewCard;
+        if (drawTimerManager != null)
+        {
+            drawTimerManager.OnDrawPhaseChanged += UpdateButtonInteractability;
+            isDrawPhaseActive = drawTimerManager.IsDrawPhaseActive;
+        }
 
-        mgr = null;
+        // --- CRITICAL FIX: Force an initial button state evaluation ---
+        UpdateButtonInteractability(isDrawPhaseActive);
     }
 
     private void UpdateTokens(int tokens)
     {
         currentTokens = tokens;
         if (tokenText != null) tokenText.text = string.Format(tokenFormat, tokens);
-        if (pullActionButton != null) pullActionButton.interactable = tokens > 0;
-        if (pullSupportButton != null) pullSupportButton.interactable = tokens > 0;
+        UpdateButtonInteractability(isDrawPhaseActive);
     }
 
-    private void HandleActionPulled(ActionCardData card, int pullsUntilPity)
+    private void UpdateButtonInteractability(bool phaseActive)
     {
-        Debug.Log($"<color=cyan>You pulled Action Card:</color> {card.Name} ({card.Tier}) — {pullsUntilPity} pulls to pity.");
+        isDrawPhaseActive = phaseActive;
 
-        if (cardPrefab == null || CardContainer == null) return;
+        bool timerAllowsPull = (drawTimerManager == null) || isDrawPhaseActive;
+        bool canPull = currentTokens > 0 && timerAllowsPull;
 
-        Sprite sprite = GetCardSprite(card.Id, isActionCard: true);
-        GameObject newCardObj = Instantiate(cardPrefab, CardContainer);
-        CardVisual visual = newCardObj.GetComponent<CardVisual>();
-        visual?.Setup(card, sprite);
+        if (pullActionButton != null) pullActionButton.interactable = canPull;
+        if (pullSupportButton != null) pullSupportButton.interactable = canPull;
     }
 
-    private void HandleSupportPulled(SupportCardData card, int pullsUntilPity)
+    private void HandlePullResolved(PullResult result)
     {
-        Debug.Log($"<color=magenta>You pulled Support Card:</color> {card.Name} ({card.Tier}) — {pullsUntilPity} pulls to pity.");
+        string tag = "";
+        if (result.PityTriggered) tag += " [PITY]";
+        if (result.Was5050Roll) tag += result.Won5050 ? " [50/50 WON]" : " [50/50 LOST]";
+        Debug.Log($"<color=cyan>Pulled {result.Deck}:</color> {result.CardName} ({result.Tier}){tag}");
 
         if (cardPrefab == null || CardContainer == null) return;
+        bool isAction = result.Deck == DeckType.Action;
+        Sprite sprite = GetCardSprite(result.CardId, isAction);
+        var obj = Instantiate(cardPrefab, CardContainer);
 
-        Sprite sprite = GetCardSprite(card.Id, isActionCard: false);
-        GameObject newCardObj = Instantiate(cardPrefab, CardContainer);
-        CardVisual visual = newCardObj.GetComponent<CardVisual>();
-        // Requires a CardVisual.Setup(SupportCardData, Sprite) overload —
-        // same gap noted for the old GachaManager's support-pull spawner.
-        visual?.Setup(card, sprite);
+        var visual = obj.GetComponent<CardVisual>();
+        if (visual != null)
+        {
+            if (isAction) visual.Setup(result.ActionData, sprite);
+            else visual.Setup(result.SupportData, sprite);
+        }
+
+        var juice = obj.GetComponent<PullRevealJuice>();
+        if (juice != null) juice.PlayReveal(result.Tier);
     }
 
     private void HandlePullFailed(string reason)
     {
         Debug.LogWarning($"Pull failed: {reason}");
+        // Re-enable buttons if the pull fails so the player can try again
+        if (pullActionButton != null) pullActionButton.interactable = true;
+        if (pullSupportButton != null) pullSupportButton.interactable = true;
     }
 
-    private Sprite GetCardSprite(int cardId, bool isActionCard)
-    {
-        string folder = isActionCard ? "CardSprites/Action/" : "CardSprites/Support/";
-        return Resources.Load<Sprite>($"{folder}{cardId}");
-    }
+    private Sprite GetCardSprite(int cardId, bool isActionCard) => Resources.Load<Sprite>($"CardSprites/{(isActionCard ? "Action" : "Support")}/{cardId}");
 
     private void HandleOpponentDrewCard(ulong opponentClientId)
     {
-        Debug.Log($"<color=yellow>Opponent (Client {opponentClientId}) drew a card!</color>");
+        if (cardBackPrefab != null && OpponentCardContainer != null) Instantiate(cardBackPrefab, OpponentCardContainer);
+    }
 
-        if (cardBackPrefab == null || OpponentCardContainer == null) return;
+    public void OnClickPullAction()
+    {
+        if (pullActionButton != null) pullActionButton.interactable = false;
+        if (mgr != null) mgr.RequestPullAction();
+    }
 
-        // Simply instantiate the card back. 
-        // Note: This does NOT need to be a NetworkObject because it's just a local UI element.
-        Instantiate(cardBackPrefab, OpponentCardContainer);
+    public void OnClickPullSupport()
+    {
+        if (pullSupportButton != null) pullSupportButton.interactable = false;
+        if (mgr != null) mgr.RequestPullSupport();
     }
 }

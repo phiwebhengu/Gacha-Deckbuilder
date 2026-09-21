@@ -372,7 +372,7 @@ public class UIManager : NetworkBehaviour
             playerSceneStates[clientId] = PlayerSceneState.InGame;
             Debug.Log($"Marked Client {clientId} as InGame");
         }
-        NetworkManager.Singleton.SceneManager.LoadScene("GameScene", LoadSceneMode.Single);
+        NetworkManager.Singleton.SceneManager.LoadScene("Game", LoadSceneMode.Single);
     }
 
     void UpdateStartButtonState()

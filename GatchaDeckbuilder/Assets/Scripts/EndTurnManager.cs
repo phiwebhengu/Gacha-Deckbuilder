@@ -372,7 +372,7 @@ public class EndTurnManager : MonoBehaviour
         if (timerManager != null)
         {
             ResetTurnBlocker();
-            timerManager.TriggerNextRound();
+            //timerManager.TriggerNextRound();
         }
     }
 

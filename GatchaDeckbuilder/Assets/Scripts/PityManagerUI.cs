@@ -1,60 +1,46 @@
-using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.UI;
 using TMPro;
 
 public class PityPanelUI : MonoBehaviour
 {
     [Header("Dependencies")]
-    [SerializeField] private PityManager pityManager;
+    [SerializeField] private GachaManager gachaManager;
+    [Tooltip("Set to true if this panel displays Action deck pity, false for Support")]
+    [SerializeField] private bool isActionDeckPanel = true;
 
-    [Header("Pip Indicator System")]
-    [Tooltip("List of UI Image elements representing pity pips/gems in sequence.")]
-    [SerializeField] private List<Image> pityPips = new List<Image>();
+    [Header("Text Display")]
+    [SerializeField] private TextMeshProUGUI pityText;
+    [SerializeField] private string textFormat = "Action Pity: {0}/{1}";
+    [SerializeField] private bool showMaxThreshold = true;
 
-    [Header("Pip Visual States")]
-    [SerializeField] private Color activeColor = Color.yellow;
-    [SerializeField] private Color inactiveColor = new Color(0.3f, 0.3f, 0.3f, 0.5f);
-    [SerializeField] private Vector3 activeScale = new Vector3(1.2f, 1.2f, 1f);
-    [SerializeField] private Vector3 inactiveScale = Vector3.one;
-
-    [Header("Optional UI Components")]
-    [SerializeField] private TextMeshProUGUI pityCounterText;
+    [Header("Color Coding")]
+    [SerializeField] private bool useColorCoding = true;
+    [SerializeField] private Color nearPityColor = Color.yellow;
+    [SerializeField] private Color normalColor = Color.white;
 
     private void OnEnable()
     {
-        if (pityManager != null)
-        {
-            pityManager.OnPityUpdated += RefreshPityUI;
-        }
+        if (gachaManager == null) gachaManager = FindFirstObjectByType<GachaManager>();
+        if (gachaManager != null) gachaManager.OnPityUpdated += RefreshPityUI;
     }
 
     private void OnDisable()
     {
-        if (pityManager != null)
-        {
-            pityManager.OnPityUpdated -= RefreshPityUI;
-        }
+        if (gachaManager != null) gachaManager.OnPityUpdated -= RefreshPityUI;
     }
 
-    private void RefreshPityUI(int current, int maxThreshold)
+    private void RefreshPityUI(int currentPity, int maxThreshold, bool isAction)
     {
-        // Update text counter if assigned
-        if (pityCounterText != null)
+        if (isAction != isActionDeckPanel || pityText == null) return;
+
+        string displayText = showMaxThreshold ? string.Format(textFormat, currentPity, maxThreshold) : string.Format(textFormat, currentPity);
+        pityText.text = displayText;
+
+        if (useColorCoding)
         {
-            pityCounterText.text = $"Pity: {current} / {maxThreshold}";
-        }
-
-        // Update pip indicators
-        for (int i = 0; i < pityPips.Count; i++)
-        {
-            if (pityPips[i] == null) continue;
-
-            bool isActive = i < current;
-
-            pityPips[i].color = isActive ? activeColor : inactiveColor;
-            pityPips[i].transform.localScale = isActive ? activeScale : inactiveScale;
+            int pullsLeft = maxThreshold - currentPity;
+            pityText.color = (pullsLeft <= 2) ? nearPityColor : normalColor; // Turns yellow at 2 or fewer pulls left
         }
     }
 }
