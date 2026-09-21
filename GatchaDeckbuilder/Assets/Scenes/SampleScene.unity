@@ -3495,6 +3495,212 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::TokenScript
   tokenIndex: 4
+--- !u!1 &531142027
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 531142028}
+  - component: {fileID: 531142030}
+  - component: {fileID: 531142029}
+  m_Layer: 0
+  m_Name: GameObject
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &531142028
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 531142027}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 520.25, y: 256.625, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &531142029
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 531142027}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 03bf9ef8219d6a146be29f348d5d9dbe, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::DeckManager
+  actionDeckCsv: {fileID: 4900000, guid: ea35c383af237a0418ba8dee8a238fef, type: 3}
+  supportDeckCsv: {fileID: 4900000, guid: b04994634792304418828f774d56a639, type: 3}
+  loadedActionCards:
+  - Id: 0
+    Name: 
+    Category: 
+    Tier: 
+    WeaponType: 
+    Value: 0
+    Role: 
+    Copies: 0
+  - Id: 0
+    Name: 
+    Category: 
+    Tier: 
+    WeaponType: 
+    Value: 0
+    Role: 
+    Copies: 0
+  - Id: 0
+    Name: 
+    Category: 
+    Tier: 
+    WeaponType: 
+    Value: 0
+    Role: 
+    Copies: 0
+  - Id: 0
+    Name: 
+    Category: 
+    Tier: 
+    WeaponType: 
+    Value: 0
+    Role: 
+    Copies: 0
+  - Id: 0
+    Name: 
+    Category: 
+    Tier: 
+    WeaponType: 
+    Value: 0
+    Role: 
+    Copies: 0
+  - Id: 0
+    Name: 
+    Category: 
+    Tier: 
+    WeaponType: 
+    Value: 0
+    Role: 
+    Copies: 0
+  - Id: 0
+    Name: 
+    Category: 
+    Tier: 
+    WeaponType: 
+    Value: 0
+    Role: 
+    Copies: 0
+  - Id: 0
+    Name: 
+    Category: 
+    Tier: 
+    WeaponType: 
+    Value: 0
+    Role: 
+    Copies: 0
+  - Id: 0
+    Name: 
+    Category: 
+    Tier: 
+    WeaponType: 
+    Value: 0
+    Role: 
+    Copies: 0
+  - Id: 0
+    Name: 
+    Category: 
+    Tier: 
+    WeaponType: 
+    Value: 0
+    Role: 
+    Copies: 0
+  loadedSupportCards:
+  - Id: 0
+    Name: 
+    Tier: 
+    Effect: 
+    EffectType: 
+    Copies: 0
+  - Id: 0
+    Name: 
+    Tier: 
+    Effect: 
+    EffectType: 
+    Copies: 0
+  - Id: 0
+    Name: 
+    Tier: 
+    Effect: 
+    EffectType: 
+    Copies: 0
+  - Id: 0
+    Name: 
+    Tier: 
+    Effect: 
+    EffectType: 
+    Copies: 0
+  - Id: 0
+    Name: 
+    Tier: 
+    Effect: 
+    EffectType: 
+    Copies: 0
+  - Id: 0
+    Name: 
+    Tier: 
+    Effect: 
+    EffectType: 
+    Copies: 0
+  - Id: 0
+    Name: 
+    Tier: 
+    Effect: 
+    EffectType: 
+    Copies: 0
+  - Id: 0
+    Name: 
+    Tier: 
+    Effect: 
+    EffectType: 
+    Copies: 0
+  - Id: 0
+    Name: 
+    Tier: 
+    Effect: 
+    EffectType: 
+    Copies: 0
+  - Id: 0
+    Name: 
+    Tier: 
+    Effect: 
+    EffectType: 
+    Copies: 0
+  cardPrefab: {fileID: 1725016993749560061, guid: 2d59a3a3ed9659a4a923fec40f1183dc, type: 3}
+  cardContainer: {fileID: 0}
+--- !u!114 &531142030
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 531142027}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 82c258a90704f3e47b8c4bfb02294d8b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlayerPullController
+  deckManager: {fileID: 531142029}
+  actionConfig: {fileID: 11400000, guid: 9d5c91d4bb09bbb43b62233be2ef5c46, type: 2}
+  supportConfig: {fileID: 11400000, guid: 9d5c91d4bb09bbb43b62233be2ef5c46, type: 2}
 --- !u!1 &539235932
 GameObject:
   m_ObjectHideFlags: 0
@@ -4369,9 +4575,6 @@ MonoBehaviour:
   playerDefenseText: {fileID: 1021878323}
   opponentAttackText: {fileID: 785349909}
   opponentDefenseText: {fileID: 2029369175}
-  rivalEndedTurnPromptText: {fileID: 1568670500}
-  defaultRivalPromptMessage: Rival has ended their turn!
-  promptPulseSpeed: 4
   centerDifferenceText: {fileID: 2104973448}
   countStepInterval: 0.08
   popScaleMultiplier: 1.35
@@ -8337,7 +8540,7 @@ MonoBehaviour:
   handTransform: {fileID: 1309784092}
   targetCanvas: {fileID: 878461938}
   clickBlockerOverlay: {fileID: 1071091823}
-  supportDatabase: {fileID: 0}
+  pullController: {fileID: 531142030}
   centerPointTarget: {fileID: 494689152}
   moveToCenterDuration: 0.45
   shrinkDuration: 0.12
@@ -8352,7 +8555,6 @@ MonoBehaviour:
   isAI: 0
   timerManager: {fileID: 1874854898}
   pityManager: {fileID: 1937819966}
-  pullConfig: {fileID: 11400000, guid: 9d5c91d4bb09bbb43b62233be2ef5c46, type: 2}
 --- !u!1 &1320005936
 GameObject:
   m_ObjectHideFlags: 0
@@ -11754,7 +11956,7 @@ MonoBehaviour:
   handTransform: {fileID: 1994359326}
   targetCanvas: {fileID: 878461938}
   clickBlockerOverlay: {fileID: 0}
-  supportDatabase: {fileID: 0}
+  pullController: {fileID: 531142030}
   centerPointTarget: {fileID: 0}
   moveToCenterDuration: 0.45
   shrinkDuration: 0.12
@@ -11769,7 +11971,6 @@ MonoBehaviour:
   isAI: 1
   timerManager: {fileID: 1874854898}
   pityManager: {fileID: 933931218}
-  pullConfig: {fileID: 11400000, guid: 9d5c91d4bb09bbb43b62233be2ef5c46, type: 2}
 --- !u!224 &1994359326
 RectTransform:
   m_ObjectHideFlags: 0
@@ -12708,3 +12909,4 @@ SceneRoots:
   - {fileID: 2141252327}
   - {fileID: 641801879}
   - {fileID: 65760416}
+  - {fileID: 531142028}
