@@ -29,7 +29,9 @@ public class SupportCardData
 
 public static class CardLoader
 {
-    // ---------- Public entry points ----------
+    // ---------- Deck-building loaders (unchanged) ----------
+    // These expand each row into 'Copies' entries, which is what you want
+    // when building an actual playable deck to draw from without replacement.
 
     public static List<ActionCardData> LoadActionDeck(TextAsset csvFile)
     {
@@ -167,4 +169,3 @@ public static class CardLoader
         return rows;
     }
 }
-

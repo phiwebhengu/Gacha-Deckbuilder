@@ -1,5 +1,4 @@
 ﻿using UnityEngine;
-using UnityEngine.UI;
 using System.Collections.Generic;
 
 public class DeckManager : MonoBehaviour
@@ -15,15 +14,10 @@ public class DeckManager : MonoBehaviour
     public List<ActionCardData> loadedActionCards;
     public List<SupportCardData> loadedSupportCards;
 
-    // Drag your UI Card Prefab here
-    public GameObject cardPrefab;
-    // Drag the UI Panel where cards should appear
-    public Transform cardContainer;
-
     void Start()
     {
         LoadDecks();
-        DrawAndDisplayRandomActionCard();
+        //DrawAndDisplayRandomActionCard();
     }
 
     void LoadDecks()
@@ -56,29 +50,5 @@ public class DeckManager : MonoBehaviour
         // Assumes sprites are named "1", "2", "18", etc. inside Assets/Resources/CardSprites/
         string folder = isActionCard ? "CardSprites/Action/" : "CardSprites/Support/";
         return Resources.Load<Sprite>($"{folder}{cardId}");
-    }
-
-    void DrawAndDisplayRandomActionCard()
-    {
-        if (loadedActionCards == null || loadedActionCards.Count == 0) return;
-
-        // Pick a random card
-        int randomIndex = Random.Range(0, loadedActionCards.Count);
-        ActionCardData drawnCard = loadedActionCards[randomIndex];
-
-        // Instantiate the visual card
-        if (cardPrefab != null && cardContainer != null)
-        {
-            GameObject newCardObj = Instantiate(cardPrefab, cardContainer);
-
-            // Populate the visual card with data
-            CardVisual visual = newCardObj.GetComponent<CardVisual>();
-            if (visual != null)
-            {
-                visual.Setup(drawnCard, GetCardSprite(drawnCard.Id, true));
-                Debug.Log($"<color=green>✅ Drew and Displayed:</color> " +
-                      $"<b>{drawnCard.Name}</b> ");
-            }
-        }
     }
 }
