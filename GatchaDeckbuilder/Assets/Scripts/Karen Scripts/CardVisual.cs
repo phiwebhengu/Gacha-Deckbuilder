@@ -4,16 +4,23 @@ using UnityEngine.UI;
 
 public class CardVisual : MonoBehaviour
 {
-    [Header("UI References")]
+    [Header("Visual References")]
     [Tooltip("The main Image component displaying the card art")]
     public Image cardImage;
 
-    [Header("VFX / Juice")]
     [Tooltip("An overlay image used for the glowing pop effect")]
     [SerializeField] private Image glowOverlay;
 
+    [Tooltip("Optional: An image to color-code based on rarity (e.g., a border or background element)")]
+    [SerializeField] private Image tierImage;
+
+    [Header("Rarity Tier Colors")]
+    [SerializeField] private Color commonColor = new Color(0.6f, 0.6f, 0.6f, 1f);
+    [SerializeField] private Color rareColor = new Color(0.2f, 0.6f, 1f, 1f);
+    [SerializeField] private Color legendaryColor = new Color(1f, 0.8f, 0f, 1f);
+
     /// <summary>
-    /// Sets up the visual representation of an Action Card.
+    /// Sets up the visual representation of an Action Card (Art + Rarity Color only).
     /// </summary>
     public void Setup(ActionCardData data, Sprite sprite)
     {
@@ -21,10 +28,11 @@ public class CardVisual : MonoBehaviour
         {
             cardImage.sprite = sprite;
         }
+        ApplyRarityColor(data.Tier);
     }
 
     /// <summary>
-    /// Sets up the visual representation of a Support Card.
+    /// Sets up the visual representation of a Support Card (Art + Rarity Color only).
     /// </summary>
     public void Setup(SupportCardData data, Sprite sprite)
     {
@@ -32,6 +40,7 @@ public class CardVisual : MonoBehaviour
         {
             cardImage.sprite = sprite;
         }
+        ApplyRarityColor(data.Tier);
     }
 
     /// <summary>
@@ -55,8 +64,26 @@ public class CardVisual : MonoBehaviour
         else
         {
             // Fallback to Common if the string doesn't match the enum
-            Debug.LogWarning($"Could not parse tier '{tierString}'. Defaulting to Common.");
             PlayReveal(Rarity.Common);
+        }
+    }
+
+    private void ApplyRarityColor(string tierString)
+    {
+        if (tierImage == null) return;
+
+        if (System.Enum.TryParse(tierString, true, out Rarity tier))
+        {
+            tierImage.color = tier switch
+            {
+                Rarity.Legendary => legendaryColor,
+                Rarity.Rare => rareColor,
+                _ => commonColor
+            };
+        }
+        else
+        {
+            tierImage.color = commonColor;
         }
     }
 
@@ -65,9 +92,9 @@ public class CardVisual : MonoBehaviour
         // Determine animation parameters based on rarity
         (float popScale, float duration, Color glowColor) = tier switch
         {
-            Rarity.Legendary => (1.5f, 0.35f, new Color(1f, 0.85f, 0.2f, 0.9f)), // Gold glow
-            Rarity.Rare => (1.25f, 0.22f, new Color(0.7f, 0.4f, 1f, 0.6f)), // Purple glow
-            _ => (1.1f, 0.15f, new Color(1f, 1f, 1f, 0.3f)),      // White glow (Common)
+            Rarity.Legendary => (1.5f, 0.35f, legendaryColor * 1.5f), // Boosted for glow
+            Rarity.Rare => (1.25f, 0.22f, rareColor * 1.5f),
+            _ => (1.1f, 0.15f, commonColor * 1.5f),
         };
 
         Vector3 startScale = transform.localScale;

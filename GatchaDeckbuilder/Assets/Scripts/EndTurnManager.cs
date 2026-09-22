@@ -1,10 +1,11 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using UnityEngine.UI;
-using UnityEngine.SceneManagement;
 using UnityEngine.InputSystem;
 using TMPro;
+using Unity.Netcode;
 
 public struct TurnResultData
 {
@@ -18,11 +19,14 @@ public struct TurnResultData
     public int finalOpponentHP;
 }
 
-public class EndTurnManager : MonoBehaviour
+public class EndTurnManager : NetworkBehaviour
 {
     [Header("Health & Points Settings")]
-    [SerializeField] private int playerMaxHP = 20;
-    [SerializeField] private int opponentMaxHP = 20;
+    [SerializeField] private int startingHP = 20;
+
+    [Header("Network State")]
+    public NetworkVariable<int> Player1_HP = new NetworkVariable<int>(20, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
+    public NetworkVariable<int> Player2_HP = new NetworkVariable<int>(20, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
 
     [Header("HP UI References")]
     [SerializeField] private TextMeshProUGUI playerHPText;
@@ -54,33 +58,35 @@ public class EndTurnManager : MonoBehaviour
 
     [Header("System References")]
     [SerializeField] private PlayerHandManager handManager;
-    [SerializeField] private AIRivalController aiRival;
     [SerializeField] private DrawTimerManager timerManager;
-
-    [Header("Multiplayer Identity")]
-    [SerializeField] private bool isMultiplayerMode = false;
 
     private int currentPlayerHP;
     private int currentOpponentHP;
+    private Dictionary<ulong, int[]> pendingTurns = new Dictionary<ulong, int[]>();
+    private bool isPlayer1 = true;
+
     private Vector3 originalCenterScale = Vector3.one;
     private Vector3 originalPlayerHPScale = Vector3.one;
     private Vector3 originalOpponentHPScale = Vector3.one;
-
     private Vector3 originalPlayerAttackScale = Vector3.one;
     private Vector3 originalPlayerDefenseScale = Vector3.one;
     private Vector3 originalOpponentAttackScale = Vector3.one;
     private Vector3 originalOpponentDefenseScale = Vector3.one;
-
     private Vector3 originalCamPos;
 
-    public int CurrentPlayerHP => currentPlayerHP;
-    public int CurrentOpponentHP => currentOpponentHP;
+    public override void OnNetworkSpawn()
+    {
+        // Deterministic client assignment: the client with the smallest ID is Player 1
+        var allClients = new List<ulong>(NetworkManager.Singleton.ConnectedClientsIds);
+        allClients.Sort();
+        isPlayer1 = (NetworkManager.LocalClientId == allClients[0]);
+
+        currentPlayerHP = isPlayer1 ? Player1_HP.Value : Player2_HP.Value;
+        currentOpponentHP = isPlayer1 ? Player2_HP.Value : Player1_HP.Value;
+    }
 
     private void Start()
     {
-        currentPlayerHP = playerMaxHP;
-        currentOpponentHP = opponentMaxHP;
-
         if (mainCamera == null) mainCamera = Camera.main;
         if (mainCamera != null) originalCamPos = mainCamera.transform.localPosition;
 
@@ -99,30 +105,12 @@ public class EndTurnManager : MonoBehaviour
             originalCenterScale = centerDifferenceText.transform.localScale;
             centerDifferenceText.text = "";
         }
-
         if (playerHPText != null) originalPlayerHPScale = playerHPText.transform.localScale;
         if (opponentHPText != null) originalOpponentHPScale = opponentHPText.transform.localScale;
-
-        if (playerAttackText != null)
-        {
-            originalPlayerAttackScale = playerAttackText.transform.localScale;
-            playerAttackText.text = "0";
-        }
-        if (playerDefenseText != null)
-        {
-            originalPlayerDefenseScale = playerDefenseText.transform.localScale;
-            playerDefenseText.text = "0";
-        }
-        if (opponentAttackText != null)
-        {
-            originalOpponentAttackScale = opponentAttackText.transform.localScale;
-            opponentAttackText.text = "0";
-        }
-        if (opponentDefenseText != null)
-        {
-            originalOpponentDefenseScale = opponentDefenseText.transform.localScale;
-            opponentDefenseText.text = "0";
-        }
+        if (playerAttackText != null) { originalPlayerAttackScale = playerAttackText.transform.localScale; playerAttackText.text = "0"; }
+        if (playerDefenseText != null) { originalPlayerDefenseScale = playerDefenseText.transform.localScale; playerDefenseText.text = "0"; }
+        if (opponentAttackText != null) { originalOpponentAttackScale = opponentAttackText.transform.localScale; opponentAttackText.text = "0"; }
+        if (opponentDefenseText != null) { originalOpponentDefenseScale = opponentDefenseText.transform.localScale; opponentDefenseText.text = "0"; }
 
         UpdateHPUI();
     }
@@ -137,60 +125,148 @@ public class EndTurnManager : MonoBehaviour
     private void OnEndTurnClicked()
     {
         if (handManager == null || selectedHandTransform == null) return;
-
         List<CardUI> playerSelectedCards = handManager.GetSelectedCards();
         if (playerSelectedCards.Count == 0) return;
 
         if (raycastBlockerImage != null) raycastBlockerImage.gameObject.SetActive(true);
-
         handManager.SubmitSelectedCardsToHand(selectedHandTransform);
-
         if (endTurnButton != null) endTurnButton.gameObject.SetActive(false);
 
-        if (isMultiplayerMode)
+        int[] selectedIds = handManager.GetSelectedCardIds().ToArray();
+
+        // Always send to server, server will wait for the other player
+        SubmitTurnServerRpc(selectedIds);
+    }
+
+    [ServerRpc(RequireOwnership = false)]
+    private void SubmitTurnServerRpc(int[] selectedCardIds, ServerRpcParams rpcParams = default)
+    {
+        ulong clientId = rpcParams.Receive.SenderClientId;
+        pendingTurns[clientId] = selectedCardIds;
+
+        // Strict 1v1: Wait for exactly 2 players to submit
+        if (pendingTurns.Count >= 2)
         {
-            // TODO: Send client choices to Server/Host via Network RPC
+            ResolveAndBroadcastCombat();
+        }
+    }
+
+    private void ResolveAndBroadcastCombat()
+    {
+        ulong[] keys = pendingTurns.Keys.ToArray();
+        ulong idA = keys[0];
+        ulong idB = keys[1];
+
+        int[] cardsA = pendingTurns[idA];
+        int[] cardsB = pendingTurns[idB];
+
+        bool aIsPlayer1 = IsPlayer1Id(idA);
+
+        // Calculate result from Player A's perspective
+        var resultA = CalculateTurnResultFromIds(cardsA, cardsB);
+        int currentHpA = aIsPlayer1 ? Player1_HP.Value : Player2_HP.Value;
+        int currentHpB = aIsPlayer1 ? Player2_HP.Value : Player1_HP.Value;
+
+        resultA.finalPlayerHP = Mathf.Max(0, currentHpA - resultA.netDamageToPlayer);
+        resultA.finalOpponentHP = Mathf.Max(0, currentHpB - resultA.netDamageToOpponent);
+
+        // Update Server NetworkVariables (Source of Truth)
+        if (aIsPlayer1)
+        {
+            Player1_HP.Value = resultA.finalPlayerHP;
+            Player2_HP.Value = resultA.finalOpponentHP;
         }
         else
         {
-            if (aiRival != null) aiRival.SubmitRivalHand();
-
-            TurnResultData result = CalculateTurnResult();
-            StartCoroutine(Routine_ResolveCombatSequence(result));
+            Player2_HP.Value = resultA.finalPlayerHP;
+            Player1_HP.Value = resultA.finalOpponentHP;
         }
+
+        // Send tailored result to Player A
+        SendResultToClient(idA, resultA);
+
+        // Calculate and send tailored result to Player B
+        var resultB = CalculateTurnResultFromIds(cardsB, cardsA);
+        resultB.finalPlayerHP = resultA.finalOpponentHP;
+        resultB.finalOpponentHP = resultA.finalPlayerHP;
+        SendResultToClient(idB, resultB);
+
+        pendingTurns.Clear();
     }
 
-    public TurnResultData CalculateTurnResult()
+    private bool IsPlayer1Id(ulong clientId)
     {
-        List<BalatroCardController> playerCards = GetControllersFromTransform(selectedHandTransform);
-        List<BalatroCardController> opponentCards = (aiRival != null) ? GetControllersFromTransform(aiRival.RivalSelectedHandTransform) : new List<BalatroCardController>();
-
-        int pAttack = CalculateTotalValueForCategory(playerCards, CardCategory.Attack);
-        int pDefense = CalculateTotalValueForCategory(playerCards, CardCategory.Defense);
-        int oAttack = CalculateTotalValueForCategory(opponentCards, CardCategory.Attack);
-        int oDefense = CalculateTotalValueForCategory(opponentCards, CardCategory.Defense);
-
-        int damageToOpponent = Mathf.Max(0, pAttack - oDefense);
-        int damageToPlayer = Mathf.Max(0, oAttack - pDefense);
-
-        TurnResultData data = new TurnResultData
-        {
-            playerAttack = pAttack,
-            playerDefense = pDefense,
-            opponentAttack = oAttack,
-            opponentDefense = oDefense,
-            netDamageToPlayer = damageToPlayer,
-            netDamageToOpponent = damageToOpponent,
-            finalPlayerHP = Mathf.Max(0, currentPlayerHP - damageToPlayer),
-            finalOpponentHP = Mathf.Max(0, currentOpponentHP - damageToOpponent)
-        };
-
-        return data;
+        var allClients = new List<ulong>(NetworkManager.Singleton.ConnectedClientsIds);
+        allClients.Sort();
+        return clientId == allClients[0];
     }
 
-    public void OnReceiveNetworkTurnResult(TurnResultData result)
+    private void SendResultToClient(ulong clientId, TurnResultData result)
+    {
+        ClientRpcParams targetParams = new ClientRpcParams
+        {
+            Send = new ClientRpcSendParams { TargetClientIds = new[] { clientId } }
+        };
+        ResolveCombatClientRpc(result, targetParams);
+    }
+
+    [ClientRpc]
+    private void ResolveCombatClientRpc(TurnResultData result, ClientRpcParams rpcParams = default)
     {
         StartCoroutine(Routine_ResolveCombatSequence(result));
+    }
+
+    private TurnResultData CalculateTurnResultFromIds(int[] myCardIds, int[] opponentCardIds)
+    {
+        var deckMgr = FindFirstObjectByType<DeckManager>();
+        if (deckMgr == null) return new TurnResultData();
+
+        int myAttack = 0, myDefense = 0;
+        int oppAttack = 0, oppDefense = 0;
+
+        foreach (int id in myCardIds)
+        {
+            var card = deckMgr.loadedActionCards?.Find(c => c.Id == id);
+            if (card != null)
+            {
+                if (card.Role == "Attack") myAttack += card.Value;
+                else if (card.Role == "Defense") myDefense += card.Value;
+            }
+            else
+            {
+                var support = deckMgr.loadedSupportCards?.Find(c => c.Id == id);
+                if (support != null)
+                {
+                    // TODO: Expand this to apply Support effects (e.g., myAttack += 5)
+                    Debug.Log($"[Server] Processing Support Card: {support.Name}");
+                }
+            }
+        }
+
+        foreach (int id in opponentCardIds)
+        {
+            var card = deckMgr.loadedActionCards?.Find(c => c.Id == id);
+            if (card != null)
+            {
+                if (card.Role == "Attack") oppAttack += card.Value;
+                else if (card.Role == "Defense") oppDefense += card.Value;
+            }
+        }
+
+        int damageToOpponent = Mathf.Max(0, myAttack - oppDefense);
+        int damageToMe = Mathf.Max(0, oppAttack - myDefense);
+
+        return new TurnResultData
+        {
+            playerAttack = myAttack,
+            playerDefense = myDefense,
+            opponentAttack = oppAttack,
+            opponentDefense = oppDefense,
+            netDamageToPlayer = damageToMe,
+            netDamageToOpponent = damageToOpponent,
+            finalPlayerHP = 0, // Set by server before sending
+            finalOpponentHP = 0 // Set by server before sending
+        };
     }
 
     private IEnumerator Routine_ResolveCombatSequence(TurnResultData result)
@@ -198,26 +274,24 @@ public class EndTurnManager : MonoBehaviour
         yield return new WaitForSeconds(cardMovementWaitDelay);
 
         List<BalatroCardController> playerCards = GetControllersFromTransform(selectedHandTransform);
-        List<BalatroCardController> opponentCards = (aiRival != null) ? GetControllersFromTransform(aiRival.RivalSelectedHandTransform) : new List<BalatroCardController>();
+        // Opponent cards are not visually submitted to this client's screen in the same way, 
+        // so we only highlight the local player's cards for the juice.
 
-        ProcessPlayedSupportCards(playerCards, "Player");
-        ProcessPlayedSupportCards(opponentCards, "Opponent");
-
-        HighlightCardsByCategory(playerCards, opponentCards, CardCategory.Attack);
+        HighlightCardsByCategory(playerCards, new List<BalatroCardController>(), CardCategory.Attack);
         yield return StartCoroutine(Routine_CountUpPair(
             result.playerAttack, playerAttackText, originalPlayerAttackScale,
             result.opponentAttack, opponentAttackText, originalOpponentAttackScale
         ));
         yield return new WaitForSeconds(phaseTransitionPause);
-        ResetCardHighlights(playerCards, opponentCards);
+        ResetCardHighlights(playerCards, new List<BalatroCardController>());
 
-        HighlightCardsByCategory(playerCards, opponentCards, CardCategory.Defense);
+        HighlightCardsByCategory(playerCards, new List<BalatroCardController>(), CardCategory.Defense);
         yield return StartCoroutine(Routine_CountUpPair(
             result.playerDefense, playerDefenseText, originalPlayerDefenseScale,
             result.opponentDefense, opponentDefenseText, originalOpponentDefenseScale
         ));
         yield return new WaitForSeconds(phaseTransitionPause);
-        ResetCardHighlights(playerCards, opponentCards);
+        ResetCardHighlights(playerCards, new List<BalatroCardController>());
 
         int maxNetDamage = Mathf.Max(result.netDamageToOpponent, result.netDamageToPlayer);
         if (centerDifferenceText != null && maxNetDamage > 0)
@@ -232,13 +306,13 @@ public class EndTurnManager : MonoBehaviour
         }
         yield return new WaitForSeconds(phaseTransitionPause);
 
+        // Animate HP drops locally, then sync to server truth
         if (result.netDamageToPlayer > 0)
         {
             for (int i = 1; i <= result.netDamageToPlayer; i++)
             {
                 currentPlayerHP = Mathf.Max(0, currentPlayerHP - 1);
                 UpdateHPUI();
-
                 if (playerHPText != null) StartCoroutine(Routine_PopText(playerHPText.transform, originalPlayerHPScale));
                 StartCoroutine(Routine_CameraShake());
                 yield return new WaitForSeconds(countStepInterval);
@@ -251,35 +325,19 @@ public class EndTurnManager : MonoBehaviour
             {
                 currentOpponentHP = Mathf.Max(0, currentOpponentHP - 1);
                 UpdateHPUI();
-
                 if (opponentHPText != null) StartCoroutine(Routine_PopText(opponentHPText.transform, originalOpponentHPScale));
                 StartCoroutine(Routine_CameraShake());
                 yield return new WaitForSeconds(countStepInterval);
             }
         }
 
+        // Sync local visual HP to the authoritative server HP
         currentPlayerHP = result.finalPlayerHP;
         currentOpponentHP = result.finalOpponentHP;
         UpdateHPUI();
 
         yield return new WaitForSeconds(0.5f);
         yield return StartCoroutine(Routine_CheckNextRoundOrEndGame());
-    }
-
-    private void ProcessPlayedSupportCards(List<BalatroCardController> cards, string ownerName)
-    {
-        if (cards == null) return;
-
-        foreach (var card in cards)
-        {
-            if (card == null || card.Category != CardCategory.Support) continue;
-
-            string name = card.SupportName;
-            string desc = card.SupportEffect;
-            string durationLabel = card.IsForever ? "FOREVER (Rest of Game)" : "IMMEDIATE (Current Round Only)";
-
-            Debug.Log($"[Support Trigger] {ownerName} played Support Card: '{name}' | Duration: {durationLabel} | Description: '{desc}'");
-        }
     }
 
     private void HighlightCardsByCategory(List<BalatroCardController> playerList, List<BalatroCardController> opponentList, CardCategory category)
@@ -298,7 +356,6 @@ public class EndTurnManager : MonoBehaviour
     {
         List<BalatroCardController> list = new List<BalatroCardController>();
         if (container == null) return list;
-
         CardUI[] cards = container.GetComponentsInChildren<CardUI>();
         foreach (CardUI card in cards)
         {
@@ -308,25 +365,9 @@ public class EndTurnManager : MonoBehaviour
         return list;
     }
 
-    private int CalculateTotalValueForCategory(List<BalatroCardController> cards, CardCategory targetCategory)
-    {
-        int total = 0;
-        foreach (BalatroCardController card in cards)
-        {
-            if (card != null && card.Category == targetCategory)
-            {
-                total += card.CardValue;
-            }
-        }
-        return total;
-    }
-
-    private IEnumerator Routine_CountUpPair(
-        int playerTargetVal, TextMeshProUGUI playerText, Vector3 playerScale,
-        int opponentTargetVal, TextMeshProUGUI opponentText, Vector3 opponentScale)
+    private IEnumerator Routine_CountUpPair(int playerTargetVal, TextMeshProUGUI playerText, Vector3 playerScale, int opponentTargetVal, TextMeshProUGUI opponentText, Vector3 opponentScale)
     {
         int maxSteps = Mathf.Max(playerTargetVal, opponentTargetVal);
-
         for (int step = 1; step <= maxSteps; step++)
         {
             if (step <= playerTargetVal && playerText != null)
@@ -334,13 +375,11 @@ public class EndTurnManager : MonoBehaviour
                 playerText.text = step.ToString();
                 StartCoroutine(Routine_PopText(playerText.transform, playerScale));
             }
-
             if (step <= opponentTargetVal && opponentText != null)
             {
                 opponentText.text = step.ToString();
                 StartCoroutine(Routine_PopText(opponentText.transform, opponentScale));
             }
-
             yield return new WaitForSeconds(countStepInterval);
         }
     }
@@ -372,7 +411,8 @@ public class EndTurnManager : MonoBehaviour
         if (timerManager != null)
         {
             ResetTurnBlocker();
-            //timerManager.TriggerNextRound();
+            // Uncomment this when you are ready to loop rounds:
+            // timerManager.RequestStartRound(timerManager.CurrentRound + 1);
         }
     }
 
@@ -387,27 +427,9 @@ public class EndTurnManager : MonoBehaviour
 
     private IEnumerator Routine_ClearAllSubmittedCards()
     {
-        List<Coroutine> cleanupRoutines = new List<Coroutine>();
-
         if (handManager != null && selectedHandTransform != null)
         {
-            cleanupRoutines.Add(StartCoroutine(Routine_ProcessContainerCleanup(handManager, selectedHandTransform)));
-        }
-
-        if (aiRival != null)
-        {
-            PlayerHandManager aiHandManager = aiRival.GetComponentInChildren<PlayerHandManager>();
-            RectTransform aiSelectedTransform = aiRival.RivalSelectedHandTransform;
-
-            if (aiHandManager != null && aiSelectedTransform != null)
-            {
-                cleanupRoutines.Add(StartCoroutine(Routine_ProcessContainerCleanup(aiHandManager, aiSelectedTransform)));
-            }
-        }
-
-        foreach (var routine in cleanupRoutines)
-        {
-            yield return routine;
+            yield return StartCoroutine(Routine_ProcessContainerCleanup(handManager, selectedHandTransform));
         }
     }
 
@@ -419,14 +441,10 @@ public class EndTurnManager : MonoBehaviour
         foreach (CardUI card in cardsInContainer)
         {
             if (card == null) continue;
-
             BalatroCardController controller = card.GetComponent<BalatroCardController>();
-            if (controller != null && controller.Category == CardCategory.Support)
+            if (controller != null && controller.Category == CardCategory.Support && !controller.IsForever)
             {
-                if (!controller.IsForever)
-                {
-                    immediateCardsToDestroy.Add(card);
-                }
+                immediateCardsToDestroy.Add(card);
             }
         }
 
@@ -449,11 +467,7 @@ public class EndTurnManager : MonoBehaviour
         {
             elapsed += Time.deltaTime;
             float t = elapsed / popUpDuration;
-
-            foreach (CardUI card in cardsToClear)
-            {
-                if (card != null) card.transform.localScale = Vector3.Lerp(Vector3.one, popScale, t);
-            }
+            foreach (CardUI card in cardsToClear) if (card != null) card.transform.localScale = Vector3.Lerp(Vector3.one, popScale, t);
             yield return null;
         }
 
@@ -462,50 +476,37 @@ public class EndTurnManager : MonoBehaviour
         {
             elapsed += Time.deltaTime;
             float t = elapsed / shrinkDuration;
-
-            foreach (CardUI card in cardsToClear)
-            {
-                if (card != null) card.transform.localScale = Vector3.Lerp(popScale, Vector3.zero, t);
-            }
+            foreach (CardUI card in cardsToClear) if (card != null) card.transform.localScale = Vector3.Lerp(popScale, Vector3.zero, t);
             yield return null;
         }
 
-        foreach (CardUI card in cardsToClear)
-        {
-            if (card != null) Destroy(card.gameObject);
-        }
+        foreach (CardUI card in cardsToClear) if (card != null) Destroy(card.gameObject);
     }
 
     private IEnumerator Routine_PopText(Transform textTransform, Vector3 baseScale)
     {
         Vector3 targetScale = baseScale * popScaleMultiplier;
         float elapsed = 0f;
-
         while (elapsed < popDuration)
         {
             elapsed += Time.deltaTime;
             textTransform.localScale = Vector3.Lerp(baseScale, targetScale, elapsed / popDuration);
             yield return null;
         }
-
         elapsed = 0f;
-
         while (elapsed < popDuration)
         {
             elapsed += Time.deltaTime;
             textTransform.localScale = Vector3.Lerp(targetScale, baseScale, elapsed / popDuration);
             yield return null;
         }
-
         textTransform.localScale = baseScale;
     }
 
     private IEnumerator Routine_CameraShake()
     {
         if (mainCamera == null) yield break;
-
         float elapsed = 0f;
-
         while (elapsed < shakeDuration)
         {
             elapsed += Time.deltaTime;
@@ -513,7 +514,6 @@ public class EndTurnManager : MonoBehaviour
             mainCamera.transform.localPosition = originalCamPos + new Vector3(randomOffset.x, randomOffset.y, 0f);
             yield return null;
         }
-
         mainCamera.transform.localPosition = originalCamPos;
     }
 
@@ -523,7 +523,7 @@ public class EndTurnManager : MonoBehaviour
         if (opponentHPText != null) opponentHPText.text = $"{currentOpponentHP}";
     }
 
-    public void ResetTurnBlocker()
+    private void ResetTurnBlocker()
     {
         if (raycastBlockerImage != null) raycastBlockerImage.gameObject.SetActive(false);
     }

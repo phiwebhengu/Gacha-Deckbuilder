@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -13,10 +14,6 @@ public class PlayerHandManager : MonoBehaviour
 
     [Header("Reveal Animation Timings")]
     [SerializeField] private Transform centerPointTarget;
-    [SerializeField] private float moveToCenterDuration = 0.45f;
-    [SerializeField] private float shrinkDuration = 0.12f;
-    [SerializeField] private float overshootDuration = 0.12f;
-    [SerializeField] private float returnToNormalDuration = 0.15f;
     [SerializeField] private float postRevealPause = 0.35f;
 
     [Header("Fan Layout Settings")]
@@ -28,12 +25,10 @@ public class PlayerHandManager : MonoBehaviour
     [SerializeField] private float cardMoveDuration = 0.4f;
     [SerializeField] private float dealDelay = 0.15f;
 
-    [Header("Identity Config")]
-    [SerializeField] private bool isAI = false;
-
     [Header("System References")]
     [SerializeField] private DrawTimerManager timerManager;
-    [SerializeField] private PityManager pityManager;
+    [SerializeField] private GachaManager gachaManager; // Replaced undefined pullController
+    [SerializeField] private DeckManager deckManager;   // Added to fetch sprites
 
     private List<CardUI> cardsInHand = new List<CardUI>();
 
@@ -54,41 +49,58 @@ public class PlayerHandManager : MonoBehaviour
         }
     }
 
-    public void DealCardsFromTokens(int count, DeckButton selectedDeck)
+    public void DealCardsFromTokens(int count, DeckType deckToPull)
     {
-        if (!isAI && timerManager != null)
+        // Removed isAI check: Always notify the timer when the local player draws
+        if (timerManager != null)
         {
             timerManager.NotifyCardsDrawn();
         }
 
-        StartCoroutine(Routine_DealCards(count, selectedDeck));
+        StartCoroutine(Routine_DealCards(count, deckToPull));
     }
 
-    private IEnumerator Routine_DealCards(int count, DeckButton selectedDeck)
+    private IEnumerator Routine_DealCards(int count, DeckType deckToPull)
     {
-        if (selectedDeck == null)
+        if (gachaManager == null)
         {
-            Debug.LogError("[Hand Manager] Selected Deck is null!");
+            Debug.LogError("[Hand Manager] GachaManager not assigned!");
             yield break;
         }
 
-        if (pullController == null)
-        {
-            Debug.LogError("[Hand Manager] No PlayerPullController assigned — cannot perform a real pull.");
-            yield break;
-        }
-
-        if (!isAI && clickBlockerOverlay != null)
-        {
+        if (clickBlockerOverlay != null)
             clickBlockerOverlay.SetActive(true);
-        }
-
-        Vector3 screenCenterWorldPos = (centerPointTarget != null)
-            ? centerPointTarget.position
-            : targetCanvas.transform.position;
 
         for (int i = 0; i < count; i++)
         {
+            // 1. Request the pull based on the enum
+            if (deckToPull == DeckType.Support)
+                gachaManager.RequestPullSupport();
+            else
+                gachaManager.RequestPullAction();
+
+            // 2. Wait for the server to resolve the pull and send the ClientRpc event
+            PullResult result = null;
+            Action<PullResult> onPullResolved = (res) => { result = res; };
+            gachaManager.OnMyPullResolved += onPullResolved;
+
+            float timeout = 2f;
+            float elapsed = 0f;
+            while (result == null && elapsed < timeout)
+            {
+                yield return null;
+                elapsed += Time.deltaTime;
+            }
+
+            gachaManager.OnMyPullResolved -= onPullResolved;
+
+            if (result == null)
+            {
+                Debug.LogError("[Hand Manager] Pull timed out or failed!");
+                yield break;
+            }
+
+            // 3. Instantiate the card
             GameObject newCardObj = Instantiate(cardPrefab, handTransform, false);
 
             if (targetCanvas != null && !newCardObj.transform.IsChildOf(targetCanvas.transform))
@@ -96,84 +108,55 @@ public class PlayerHandManager : MonoBehaviour
                 newCardObj.transform.SetParent(handTransform, false);
             }
 
-            RectTransform cardRect = newCardObj.GetComponent<RectTransform>();
             CardUI cardScript = newCardObj.GetComponent<CardUI>();
             BalatroCardController controller = newCardObj.GetComponent<BalatroCardController>();
+            CardVisual visual = newCardObj.GetComponent<CardVisual>();
 
-            if (cardRect == null || cardScript == null || controller == null)
+            if (cardScript == null || controller == null || visual == null)
             {
-                Debug.LogError("[Hand Manager] Card Prefab is missing components!");
+                Debug.LogError("[Hand Manager] Card Prefab is missing CardUI, BalatroCardController, or CardVisual!");
+                Destroy(newCardObj);
                 yield break;
             }
 
-            // The real pull — real card, real rarity, real pity, real 50/50.
-            PullResult result = selectedDeck.IsSupportDeck
-                ? pullController.PullSupport()
-                : pullController.PullAction();
-
-            CardCategory cardCategory;
-            int value = 0;
-            string effect = "";
-            bool isForever = false;
-
+            // 4. Setup the visual using the new CardVisual component
+            Sprite sprite = GetCardSprite(result.CardId, result.Deck == DeckType.Action);
             if (result.Deck == DeckType.Action)
-            {
-                cardCategory = result.ActionData.Role == "Attack" ? CardCategory.Attack : CardCategory.Defense;
-                value = result.ActionData.Value;
-            }
+                visual.Setup(result.ActionData, sprite);
             else
+                visual.Setup(result.SupportData, sprite);
+
+            controller.SetCardId(result.CardId);
+
+            if (result.Deck == DeckType.Support)
             {
-                cardCategory = CardCategory.Support;
-                effect = result.SupportData.Effect;
-                isForever = result.SupportData.EffectType == "Forever";
+                controller.SetCardMetadata(result.SupportData.EffectType == "Forever");
             }
 
-            controller.ApplyPulledCardData(result.CardName, cardCategory, result.Tier, value, effect, isForever);
+            // 5. Play the reveal animation
+            visual.PlayReveal(result.Tier);
 
-            if (pityManager != null)
-            {
-                pityManager.RegisterPull(result.Tier);
-            }
+            // Wait for the reveal animation to complete (max duration is ~0.35s for Legendary) + pause
+            yield return new WaitForSeconds(0.4f + postRevealPause);
 
-            cardRect.localScale = Vector3.one;
-            cardRect.position = selectedDeck.DeckTransform.position;
-
-            Vector3 localPos = cardRect.localPosition;
-            localPos.z = 0f;
-            cardRect.localPosition = localPos;
-
-            newCardObj.transform.SetAsLastSibling();
-
-            if (isAI)
-            {
-                cardsInHand.Add(cardScript);
-                UpdateHandFanLayout();
-            }
-            else
-            {
-                controller.PrepareForUnrevealedSpawn();
-
-                yield return StartCoroutine(controller.Routine_AnimateCenterReveal(
-                    screenCenterWorldPos,
-                    moveToCenterDuration,
-                    shrinkDuration,
-                    overshootDuration,
-                    returnToNormalDuration
-                ));
-
-                yield return new WaitForSeconds(postRevealPause);
-
-                cardsInHand.Add(cardScript);
-                UpdateHandFanLayout();
-            }
+            // 6. Add to hand and fan out
+            cardsInHand.Add(cardScript);
+            UpdateHandFanLayout();
 
             yield return new WaitForSeconds(dealDelay);
         }
 
-        if (!isAI && clickBlockerOverlay != null)
+        if (clickBlockerOverlay != null)
         {
             clickBlockerOverlay.SetActive(false);
         }
+    }
+
+    private Sprite GetCardSprite(int cardId, bool isActionCard)
+    {
+        // Fallback to Resources.load matching your DeckManager structure
+        string folder = isActionCard ? "CardSprites/Action/" : "CardSprites/Support/";
+        return Resources.Load<Sprite>($"{folder}{cardId}");
     }
 
     private void CleanupNullCards()
@@ -349,5 +332,20 @@ public class PlayerHandManager : MonoBehaviour
         }
 
         CleanupNullCards();
+    }
+    public List<int> GetSelectedCardIds()
+    {
+        CleanupNullCards();
+        List<int> ids = new List<int>();
+        foreach (CardUI card in cardsInHand)
+        {
+            if (card == null) continue;
+            BalatroCardController controller = card.GetComponent<BalatroCardController>();
+            if (controller != null && controller.IsSelected)
+            {
+                ids.Add(controller.CardId);
+            }
+        }
+        return ids;
     }
 }
