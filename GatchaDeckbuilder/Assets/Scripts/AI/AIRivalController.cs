@@ -11,20 +11,36 @@ public class AIRivalController : MonoBehaviour
     [SerializeField] private DeckButton actionDeck;
     [SerializeField] private DeckButton supportDeck;
 
+    [Header("Timer System Link")]
+    [SerializeField] private DrawTimerManager drawTimerManager;
+
     [Header("Decision Timing")]
     [SerializeField] private float minDecisionDelay = 0.6f;
     [SerializeField] private float maxDecisionDelay = 1.8f;
-    [SerializeField] private float multiDrawDelay = 0.5f;
+
+    [Header("Draw Timing (Human-like Delays)")]
+    [SerializeField] private float minDrawDelay = 0.3f;
+    [SerializeField] private float maxDrawDelay = 0.85f;
+    [SerializeField] private float minMultiDrawDelay = 0.4f;
+    [SerializeField] private float maxMultiDrawDelay = 0.9f;
 
     [Header("Tactical Behavior")]
     [Range(0f, 1f)]
     [SerializeField] private float splitDeckChance = 0.65f;
 
     private Coroutine aiDecisionCoroutine;
+    private Coroutine currentDrawCoroutine;
 
-    // Public getters to safely share references with EndTurnManager
     public RectTransform RivalSelectedHandTransform => rivalSelectedHandTransform;
     public PlayerHandManager RivalHandManager => rivalHandManager;
+
+    private void Awake()
+    {
+        if (drawTimerManager == null)
+        {
+            drawTimerManager = FindObjectOfType<DrawTimerManager>();
+        }
+    }
 
     public void StartAIDrawPhase()
     {
@@ -32,11 +48,7 @@ public class AIRivalController : MonoBehaviour
 
         rivalTokenManager.gameObject.SetActive(true);
 
-        if (aiDecisionCoroutine != null)
-        {
-            StopCoroutine(aiDecisionCoroutine);
-        }
-
+        StopAllRunningCoroutines();
         aiDecisionCoroutine = StartCoroutine(Routine_MakeAIDecision());
     }
 
@@ -45,7 +57,10 @@ public class AIRivalController : MonoBehaviour
         float initialDelay = Random.Range(minDecisionDelay, maxDecisionDelay);
         yield return new WaitForSeconds(initialDelay);
 
-        int availableTokens = rivalTokenManager.tokenButtons.Count;
+        // Terminate if timer expired during initial delay
+        if (drawTimerManager != null && !drawTimerManager.IsDrawPhaseActive) yield break;
+
+        int availableTokens = rivalTokenManager.RemainingTokenCount;
 
         if (availableTokens <= 0)
         {
@@ -53,6 +68,7 @@ public class AIRivalController : MonoBehaviour
             yield break;
         }
 
+        // Variance: Randomize token spend amount based on current pool
         int totalTokensToSpend = Random.Range(1, availableTokens + 1);
         bool shouldSplit = (totalTokensToSpend > 1) && (Random.value < splitDeckChance) && (actionDeck != null && supportDeck != null);
 
@@ -68,21 +84,32 @@ public class AIRivalController : MonoBehaviour
             int firstCount = focusActionFirst ? actionTokens : supportTokens;
             int secondCount = focusActionFirst ? supportTokens : actionTokens;
 
-            yield return StartCoroutine(Routine_ExecuteDraw(firstCount, firstDeck));
-            yield return new WaitForSeconds(multiDrawDelay);
-            yield return StartCoroutine(Routine_ExecuteDraw(secondCount, secondDeck));
+            currentDrawCoroutine = StartCoroutine(Routine_ExecuteDraw(firstCount, firstDeck));
+            yield return currentDrawCoroutine;
+
+            if (drawTimerManager != null && !drawTimerManager.IsDrawPhaseActive) yield break;
+
+            float pauseBetweenDecks = Random.Range(minMultiDrawDelay, maxMultiDrawDelay);
+            yield return new WaitForSeconds(pauseBetweenDecks);
+
+            if (drawTimerManager != null && !drawTimerManager.IsDrawPhaseActive) yield break;
+
+            currentDrawCoroutine = StartCoroutine(Routine_ExecuteDraw(secondCount, secondDeck));
+            yield return currentDrawCoroutine;
         }
         else
         {
             DeckButton chosenDeck = GetRandomAvailableDeck();
             if (chosenDeck != null)
             {
-                yield return StartCoroutine(Routine_ExecuteDraw(totalTokensToSpend, chosenDeck));
+                currentDrawCoroutine = StartCoroutine(Routine_ExecuteDraw(totalTokensToSpend, chosenDeck));
+                yield return currentDrawCoroutine;
             }
         }
 
-        // Wait for card dealing animations to settle before selecting cards
-        yield return new WaitForSeconds(0.6f);
+        if (drawTimerManager != null && !drawTimerManager.IsDrawPhaseActive) yield break;
+
+        yield return new WaitForSeconds(0.4f);
         SelectCardsForEndTurn();
     }
 
@@ -92,16 +119,17 @@ public class AIRivalController : MonoBehaviour
 
         for (int i = 0; i < tokenCount; i++)
         {
-            // Stop if AI runs out of tokens mid-sequence
+            // Strict timer guard check before executing each draw
+            if (drawTimerManager != null && !drawTimerManager.IsDrawPhaseActive) yield break;
             if (rivalTokenManager.RemainingTokenCount <= 0) yield break;
 
             rivalTokenManager.OnDeckSelected(deck);
-            yield return new WaitForSeconds(0.35f);
+
+            float randomDrawInterval = Random.Range(minDrawDelay, maxDrawDelay);
+            yield return new WaitForSeconds(randomDrawInterval);
         }
     }
 
-    // AI selects a random subset of cards currently held in hand
-    // AI selects a random subset of cards currently held in hand
     private void SelectCardsForEndTurn()
     {
         if (rivalHandManager == null) return;
@@ -119,18 +147,8 @@ public class AIRivalController : MonoBehaviour
                 cardController.ToggleSelection();
             }
         }
-
-        Debug.Log($"[AI Rival] Highlighted {numToSelect} cards for turn lock-in.");
-
-        // Notify EndTurnManager that the rival is done so prompt UI can trigger
-        EndTurnManager endTurnMgr = FindObjectOfType<EndTurnManager>();
-        if (endTurnMgr != null)
-        {
-           // endTurnMgr.NotifyRivalEndedTurn("Rival is ready! End your turn.");
-        }
     }
 
-    // Called simultaneously by EndTurnManager when End Turn button is clicked
     public void SubmitRivalHand()
     {
         if (rivalHandManager != null && rivalSelectedHandTransform != null)
@@ -139,10 +157,6 @@ public class AIRivalController : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Clears and animates the destruction of cards sitting in the rival's played hand slot.
-    /// Called by EndTurnManager between rounds.
-    /// </summary>
     public void ClearRivalSubmittedCards()
     {
         if (rivalHandManager != null && rivalSelectedHandTransform != null)
@@ -162,10 +176,7 @@ public class AIRivalController : MonoBehaviour
 
     public void StopAIDrawPhase()
     {
-        if (aiDecisionCoroutine != null)
-        {
-            StopCoroutine(aiDecisionCoroutine);
-        }
+        StopAllRunningCoroutines();
 
         if (rivalTokenManager != null)
         {
@@ -173,5 +184,18 @@ public class AIRivalController : MonoBehaviour
         }
     }
 
-
+    private void StopAllRunningCoroutines()
+    {
+        if (aiDecisionCoroutine != null)
+        {
+            StopCoroutine(aiDecisionCoroutine);
+            aiDecisionCoroutine = null;
+        }
+        if (currentDrawCoroutine != null)
+        {
+            StopCoroutine(currentDrawCoroutine);
+            currentDrawCoroutine = null;
+        }
+        StopAllCoroutines(); // Clears any orphan sub-coroutines running on this MonoBehaviour
+    }
 }

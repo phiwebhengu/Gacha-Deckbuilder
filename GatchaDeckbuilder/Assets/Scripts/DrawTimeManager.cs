@@ -360,7 +360,8 @@ public class DrawTimerManager : MonoBehaviour
         if (tokenManager != null)
         {
             tokenManager.gameObject.SetActive(true);
-            tokenManager.ResetTokensForNewRound();
+            // Note: Remove ResetTokensForNewRound() here if tokens are intended 
+            // to persist continuously across rounds without refilling.
         }
 
         if (aiRival != null)

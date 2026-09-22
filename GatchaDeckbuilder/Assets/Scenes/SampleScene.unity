@@ -13418,7 +13418,10 @@ MonoBehaviour:
   supportDeck: {fileID: 443327276}
   minDecisionDelay: 0.8
   maxDecisionDelay: 2.5
-  multiDrawDelay: 0.5
+  minDrawDelay: 1
+  maxDrawDelay: 2
+  minMultiDrawDelay: 1
+  maxMultiDrawDelay: 2
   splitDeckChance: 0.65
 --- !u!1 &2020694922
 GameObject:

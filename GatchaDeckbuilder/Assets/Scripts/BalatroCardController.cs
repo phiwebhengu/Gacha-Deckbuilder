@@ -22,7 +22,6 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
     [Tooltip("The numerical value of this card (Attack/Defense only; 0 for Support).")]
     [SerializeField] private int cardValue;
 
-    // Plain data set directly from a real pull result — no rolling happens in this class anymore.
     private string supportName = "";
     private string supportEffect = "";
     private bool isForeverEffect = false;
@@ -46,6 +45,10 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
 
     [Tooltip("TextMeshPro component displaying the support effect text description.")]
     [SerializeField] private TextMeshProUGUI descriptionText;
+
+    [Header("Card Hidden / Obscure Settings")]
+    [Tooltip("UI Image placed over the card face to obscure stats/details until revealed.")]
+    [SerializeField] private GameObject cardObscureOverlay;
 
     [Header("Rarity Flash Overlays")]
     [SerializeField] private Image commonFlashOverlay;
@@ -120,6 +123,7 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
     private bool isHovered = false;
     private bool isSelected = false;
     private bool isRevealing = false;
+    private bool isObscured = false;
 
     private Vector3 baseLocalPosition;
     private Quaternion baseLocalRotation;
@@ -135,6 +139,7 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
     public Rarity Rarity => rarity;
     public int CardValue => cardValue;
     public bool IsSelected => isSelected;
+    public bool IsObscured => isObscured;
     public Vector3 RestingScale => restingScale;
 
     private void Awake()
@@ -179,6 +184,66 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
         ResetFlashOverlays();
     }
 
+    /// <summary>
+    /// Enables or disables the obscure image overlay to hide stats/details.
+    /// </summary>
+    public void SetCardObscured(bool obscure)
+    {
+        isObscured = obscure;
+
+        if (cardObscureOverlay != null)
+        {
+            cardObscureOverlay.SetActive(obscure);
+        }
+
+        if (obscure)
+        {
+            if (valueText != null) valueText.gameObject.SetActive(false);
+            if (categoryText != null) categoryText.gameObject.SetActive(false);
+            if (nameText != null) nameText.gameObject.SetActive(false);
+            if (descriptionText != null) descriptionText.gameObject.SetActive(false);
+            if (tierImage != null) tierImage.gameObject.SetActive(false);
+        }
+        else
+        {
+            RevealCardVisuals();
+        }
+    }
+
+    /// <summary>
+    /// Disables obscuring overlay and restores category/value UI elements.
+    /// </summary>
+    public void RevealCard()
+    {
+        SetCardObscured(false);
+    }
+
+    public void RevealCardVisuals()
+    {
+        if (cardObscureOverlay != null)
+        {
+            cardObscureOverlay.SetActive(false);
+        }
+
+        isObscured = false;
+
+        if (categoryText != null) categoryText.gameObject.SetActive(true);
+        if (tierImage != null) tierImage.gameObject.SetActive(true);
+
+        if (category == CardCategory.Support)
+        {
+            if (nameText != null) nameText.gameObject.SetActive(true);
+            if (descriptionText != null) descriptionText.gameObject.SetActive(true);
+            if (valueText != null) valueText.gameObject.SetActive(false);
+        }
+        else
+        {
+            if (valueText != null) valueText.gameObject.SetActive(true);
+            if (nameText != null) nameText.gameObject.SetActive(false);
+            if (descriptionText != null) descriptionText.gameObject.SetActive(false);
+        }
+    }
+
     private void ResetFlashOverlays()
     {
         SetOverlayAlpha(commonFlashOverlay, 0f);
@@ -217,11 +282,6 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
         src.PlayOneShot(clip);
     }
 
-    /// <summary>
-    /// The only way a card's data gets set now. Category, rarity, value, and (for Support)
-    /// the name/effect/Forever flag all come from a real GachaEngine pull result — nothing here
-    /// is rolled or randomly selected.
-    /// </summary>
     public void ApplyPulledCardData(string cardName, CardCategory cardCategory, Rarity cardRarity, int value, string effectText = "", bool isForever = false)
     {
         category = cardCategory;
@@ -241,6 +301,7 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
     public void PrepareForUnrevealedSpawn()
     {
         isRevealing = true;
+        if (cardObscureOverlay != null) cardObscureOverlay.SetActive(true);
         if (valueText != null) valueText.gameObject.SetActive(false);
         if (categoryText != null) categoryText.gameObject.SetActive(false);
         if (nameText != null) nameText.gameObject.SetActive(false);
@@ -281,21 +342,7 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
             yield return null;
         }
 
-        if (categoryText != null) categoryText.gameObject.SetActive(true);
-        if (tierImage != null) tierImage.gameObject.SetActive(true);
-
-        if (category == CardCategory.Support)
-        {
-            if (nameText != null) nameText.gameObject.SetActive(true);
-            if (descriptionText != null) descriptionText.gameObject.SetActive(true);
-            if (valueText != null) valueText.gameObject.SetActive(false);
-        }
-        else
-        {
-            if (valueText != null) valueText.gameObject.SetActive(true);
-            if (nameText != null) nameText.gameObject.SetActive(false);
-            if (descriptionText != null) descriptionText.gameObject.SetActive(false);
-        }
+        RevealCardVisuals();
 
         TriggerRarityScreenShake();
         TriggerRarityFlash();

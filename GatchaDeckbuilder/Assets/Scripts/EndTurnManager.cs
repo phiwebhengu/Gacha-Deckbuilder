@@ -190,7 +190,6 @@ public class EndTurnManager : MonoBehaviour
         Vector3 baseScale = targetButton.transform.localScale;
         Vector3 hoverScale = baseScale * 1.08f;
 
-        // Pointer Enter (Hover)
         EventTrigger.Entry entryHover = new EventTrigger.Entry
         {
             eventID = EventTriggerType.PointerEnter
@@ -202,7 +201,6 @@ public class EndTurnManager : MonoBehaviour
         });
         trigger.triggers.Add(entryHover);
 
-        // Pointer Exit
         EventTrigger.Entry entryExit = new EventTrigger.Entry
         {
             eventID = EventTriggerType.PointerExit
@@ -286,6 +284,9 @@ public class EndTurnManager : MonoBehaviour
 
         List<BalatroCardController> playerCards = GetControllersFromTransform(selectedHandTransform);
         List<BalatroCardController> opponentCards = (aiRival != null) ? GetControllersFromTransform(aiRival.RivalSelectedHandTransform) : new List<BalatroCardController>();
+
+        foreach (var card in playerCards) card.RevealCardVisuals();
+        foreach (var card in opponentCards) card.RevealCardVisuals();
 
         ProcessPlayedSupportCards(playerCards, "Player");
         ProcessPlayedSupportCards(opponentCards, "Opponent");
