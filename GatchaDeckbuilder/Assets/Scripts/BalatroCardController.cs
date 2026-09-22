@@ -96,6 +96,27 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
     [SerializeField] private Color defenseHighlightColor = new Color(0.3f, 0.6f, 1f, 1f);
     [SerializeField] private Color supportHighlightColor = new Color(0.3f, 0.9f, 0.4f, 1f);
 
+    [Header("Audio Settings")]
+    [SerializeField] private AudioSource audioSource;
+    [SerializeField] private AudioSource secondaryAudioSource;
+    [SerializeField] private AudioClip hoverSFX;
+    [SerializeField] private AudioClip selectSFX;
+    [SerializeField] private AudioClip flashSFX;
+    [SerializeField] private AudioClip legendaryFlashSecondarySFX;
+    [SerializeField] private AudioClip commonShakeSFX;
+    [SerializeField] private AudioClip rareShakeSFX;
+    [SerializeField] private AudioClip legendaryShakeSFX;
+
+    [Header("Rarity Flash Pitch Settings")]
+    [SerializeField] private float commonFlashPitch = 0.9f;
+    [SerializeField] private float rareFlashPitch = 1.1f;
+    [SerializeField] private float legendaryFlashPitch = 1.3f;
+
+    [Header("Audio Pitch Juiciness")]
+    [SerializeField] private bool randomizePitch = true;
+    [SerializeField] private float minPitch = 0.95f;
+    [SerializeField] private float maxPitch = 1.05f;
+
     private bool isHovered = false;
     private bool isSelected = false;
     private bool isRevealing = false;
@@ -120,6 +141,30 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
     {
         rectTransform = GetComponent<RectTransform>();
         parentCanvas = GetComponentInParent<Canvas>();
+
+        if (audioSource == null)
+        {
+            audioSource = GetComponent<AudioSource>();
+            if (audioSource == null)
+            {
+                audioSource = gameObject.AddComponent<AudioSource>();
+                audioSource.playOnAwake = false;
+            }
+        }
+
+        if (secondaryAudioSource == null)
+        {
+            AudioSource[] sources = GetComponents<AudioSource>();
+            if (sources.Length > 1)
+            {
+                secondaryAudioSource = sources[1];
+            }
+            else
+            {
+                secondaryAudioSource = gameObject.AddComponent<AudioSource>();
+                secondaryAudioSource.playOnAwake = false;
+            }
+        }
 
         if (cardFrameOrOutline == null)
         {
@@ -149,6 +194,27 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
             color.a = alpha;
             overlay.color = color;
         }
+    }
+
+    private void PlaySound(AudioClip clip, float overridePitch = -1f, AudioSource targetSource = null)
+    {
+        AudioSource src = targetSource != null ? targetSource : audioSource;
+        if (clip == null || src == null) return;
+
+        if (overridePitch > 0f)
+        {
+            src.pitch = overridePitch;
+        }
+        else if (randomizePitch)
+        {
+            src.pitch = Random.Range(minPitch, maxPitch);
+        }
+        else
+        {
+            src.pitch = 1f;
+        }
+
+        src.PlayOneShot(clip);
     }
 
     /// <summary>
@@ -259,16 +325,33 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
     private void TriggerRarityFlash()
     {
         Image targetOverlay = null;
+        float flashPitch = commonFlashPitch;
 
         switch (rarity)
         {
-            case Rarity.Common: targetOverlay = commonFlashOverlay; break;
-            case Rarity.Rare: targetOverlay = rareFlashOverlay; break;
-            case Rarity.Legendary: targetOverlay = legendaryFlashOverlay; break;
+            case Rarity.Common:
+                targetOverlay = commonFlashOverlay;
+                flashPitch = commonFlashPitch;
+                break;
+            case Rarity.Rare:
+                targetOverlay = rareFlashOverlay;
+                flashPitch = rareFlashPitch;
+                break;
+            case Rarity.Legendary:
+                targetOverlay = legendaryFlashOverlay;
+                flashPitch = legendaryFlashPitch;
+                break;
         }
 
         if (targetOverlay != null)
         {
+            PlaySound(flashSFX, flashPitch);
+
+            if (rarity == Rarity.Legendary && legendaryFlashSecondarySFX != null)
+            {
+                PlaySound(legendaryFlashSecondarySFX, 1.0f, secondaryAudioSource);
+            }
+
             StartCoroutine(Routine_FlashOverlay(targetOverlay));
         }
     }
@@ -301,12 +384,25 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
     private void TriggerRarityScreenShake()
     {
         float intensity = commonShakeIntensity;
+        AudioClip shakeClip = commonShakeSFX;
+
         switch (rarity)
         {
-            case Rarity.Rare: intensity = rareShakeIntensity; break;
-            case Rarity.Legendary: intensity = legendaryShakeIntensity; break;
+            case Rarity.Common:
+                intensity = commonShakeIntensity;
+                shakeClip = commonShakeSFX;
+                break;
+            case Rarity.Rare:
+                intensity = rareShakeIntensity;
+                shakeClip = rareShakeSFX;
+                break;
+            case Rarity.Legendary:
+                intensity = legendaryShakeIntensity;
+                shakeClip = legendaryShakeSFX;
+                break;
         }
 
+        PlaySound(shakeClip);
         StartCoroutine(Routine_ScreenShake(intensity, shakeDuration));
     }
 
@@ -444,6 +540,12 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
     public void OnPointerEnter(PointerEventData eventData)
     {
         if (isRevealing) return;
+
+        if (!isHovered)
+        {
+            PlaySound(hoverSFX);
+        }
+
         isHovered = true;
         UpdateTargetVisuals();
 
@@ -473,6 +575,9 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
     {
         if (isRevealing) return;
         isSelected = !isSelected;
+
+        PlaySound(selectSFX);
+
         UpdateTargetVisuals();
 
         EndTurnManager endTurnMgr = FindFirstObjectByType<EndTurnManager>();

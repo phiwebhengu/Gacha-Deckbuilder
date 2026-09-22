@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.EventSystems;
 using TMPro;
 
 public class DrawTimerManager : MonoBehaviour
@@ -33,6 +34,31 @@ public class DrawTimerManager : MonoBehaviour
     [Tooltip("Speed at which the word shrinks down to normal scale")]
     [SerializeField] private float shrinkSpeed = 10f;
 
+    [Header("Button Polish Settings")]
+    [SerializeField] private float buttonHoverScaleMultiplier = 1.1f;
+    [SerializeField] private Color buttonHoverColor = new Color(1f, 0.9f, 0.5f, 1f);
+
+    [Header("Damage Overlay Settings")]
+    [Tooltip("UI Image that flashes red or overlay visual when player takes incremental HP damage")]
+    [SerializeField] private Image damageOverlayImage;
+    [SerializeField] private float damageFlashDuration = 0.15f;
+    [Range(0f, 1f)]
+    [SerializeField] private float maxDamageOverlayAlpha = 0.75f;
+    [Tooltip("Base color to apply when flashing (e.g., pure red for blood flash)")]
+    [SerializeField] private Color damageFlashColor = Color.red;
+
+    [Header("Audio Settings")]
+    [SerializeField] private AudioSource audioSource;
+    [SerializeField] private AudioClip startButtonHoverSFX;
+    [SerializeField] private AudioClip startButtonClickSFX;
+    [SerializeField] private AudioClip roundStartSFX;
+    [SerializeField] private AudioClip timerTickSFX;
+
+    [Header("Countdown Audio Settings")]
+    [SerializeField] private AudioClip countdownWordSFX;
+    [Tooltip("Pitch multiplier applied to the SFX when 'DRAW!' is displayed")]
+    [SerializeField] private float drawWordPitchMultiplier = 1.35f;
+
     [Header("UI References")]
     [SerializeField] private Button startDrawButton;
     [SerializeField] private Image radialTimerImage;
@@ -54,13 +80,26 @@ public class DrawTimerManager : MonoBehaviour
     private bool playerHasDrawn = false;
     private Vector3 originalTimerScale = Vector3.one;
 
-    public bool IsDrawPhaseActive => isTimerRunning;
+    private Vector3 originalButtonScale = Vector3.one;
+    private Color originalButtonColor = Color.white;
+    private Image buttonImage;
 
+    private int lastLoggedSecond = -1;
+    private Coroutine activeDamageFlashCoroutine;
+    private CanvasGroup damageOverlayCanvasGroup;
+
+    public bool IsDrawPhaseActive => isTimerRunning;
     public int CurrentRound => currentRound;
     public int MaxRounds => maxRounds;
 
     private void Awake()
     {
+        if (audioSource == null)
+        {
+            audioSource = GetComponent<AudioSource>();
+            if (audioSource == null) audioSource = gameObject.AddComponent<AudioSource>();
+        }
+
         if (timerContainer != null)
         {
             originalTimerScale = timerContainer.localScale;
@@ -69,7 +108,30 @@ public class DrawTimerManager : MonoBehaviour
 
         if (startDrawButton != null)
         {
+            originalButtonScale = startDrawButton.transform.localScale;
+            buttonImage = startDrawButton.GetComponent<Image>();
+            if (buttonImage != null) originalButtonColor = buttonImage.color;
+
             startDrawButton.onClick.AddListener(OnStartButtonClicked);
+            AddHoverAndExitListenersToButton(startDrawButton);
+        }
+
+        // Consolidated Damage Overlay Setup
+        if (damageOverlayImage != null)
+        {
+            damageOverlayImage.raycastTarget = false;
+            damageOverlayImage.gameObject.SetActive(true);
+            damageOverlayImage.transform.SetAsLastSibling(); // Bring to front of UI canvas
+
+            damageOverlayCanvasGroup = damageOverlayImage.GetComponent<CanvasGroup>();
+
+            // Apply solid color (RGB) without altering alpha directly
+            Color baseColor = damageFlashColor;
+            baseColor.a = 1f;
+            damageOverlayImage.color = baseColor;
+
+            // Start fully hidden
+            ApplyOverlayAlpha(0f);
         }
 
         if (tokenManager == null)
@@ -77,25 +139,21 @@ public class DrawTimerManager : MonoBehaviour
             tokenManager = FindObjectOfType<TokenSelectionManager>();
         }
 
-        // Hide Hand Blocker on Awake
         if (handBlockerImage != null)
         {
             handBlockerImage.gameObject.SetActive(false);
         }
 
-        // Hide Player's Tokens on Start
         if (tokenManager != null)
         {
             tokenManager.gameObject.SetActive(false);
         }
 
-        // Hide AI's Tokens on Start
         if (aiRival != null)
         {
             aiRival.StopAIDrawPhase();
         }
 
-        // Hide countdown text on start
         if (countdownText != null)
         {
             countdownText.gameObject.SetActive(false);
@@ -109,14 +167,106 @@ public class DrawTimerManager : MonoBehaviour
         UpdateTimerUI(1f, drawWindowDuration);
     }
 
+    private void AddHoverAndExitListenersToButton(Button btn)
+    {
+        EventTrigger trigger = btn.gameObject.GetComponent<EventTrigger>();
+        if (trigger == null) trigger = btn.gameObject.AddComponent<EventTrigger>();
+
+        EventTrigger.Entry enterEntry = new EventTrigger.Entry { eventID = EventTriggerType.PointerEnter };
+        enterEntry.callback.AddListener((data) =>
+        {
+            PlaySFX(startButtonHoverSFX);
+            btn.transform.localScale = originalButtonScale * buttonHoverScaleMultiplier;
+            if (buttonImage != null) buttonImage.color = buttonHoverColor;
+        });
+        trigger.triggers.Add(enterEntry);
+
+        EventTrigger.Entry exitEntry = new EventTrigger.Entry { eventID = EventTriggerType.PointerExit };
+        exitEntry.callback.AddListener((data) =>
+        {
+            btn.transform.localScale = originalButtonScale;
+            if (buttonImage != null) buttonImage.color = originalButtonColor;
+        });
+        trigger.triggers.Add(exitEntry);
+    }
+
     private void OnStartButtonClicked()
     {
+        PlaySFX(startButtonClickSFX);
+
         if (startDrawButton != null)
         {
+            startDrawButton.transform.localScale = originalButtonScale;
+            if (buttonImage != null) buttonImage.color = originalButtonColor;
             startDrawButton.gameObject.SetActive(false);
         }
 
         StartCoroutine(Routine_StartRoundSequence());
+    }
+
+    /// <summary>
+    /// Instantly spikes overlay opacity to peak visual levels and handles high-frequency damage calls smoothly.
+    /// </summary>
+    public void FlashDamageOverlay()
+    {
+        if (damageOverlayImage == null)
+        {
+            Debug.LogWarning("[DrawTimerManager] FlashDamageOverlay called, but damageOverlayImage reference is missing!");
+            return;
+        }
+
+        ApplyOverlayAlpha(maxDamageOverlayAlpha);
+
+        if (activeDamageFlashCoroutine != null)
+        {
+            StopCoroutine(activeDamageFlashCoroutine);
+        }
+
+        activeDamageFlashCoroutine = StartCoroutine(Routine_FadeOutOverlay());
+    }
+
+    private IEnumerator Routine_FadeOutOverlay()
+    {
+        float elapsed = 0f;
+        float startingAlpha = GetCurrentOverlayAlpha();
+
+        while (elapsed < damageFlashDuration)
+        {
+            elapsed += Time.deltaTime;
+            float currentAlpha = Mathf.Lerp(startingAlpha, 0f, elapsed / damageFlashDuration);
+            ApplyOverlayAlpha(currentAlpha);
+            yield return null;
+        }
+
+        ApplyOverlayAlpha(0f);
+        activeDamageFlashCoroutine = null;
+    }
+
+    private float GetCurrentOverlayAlpha()
+    {
+        if (damageOverlayCanvasGroup != null)
+        {
+            return damageOverlayCanvasGroup.alpha;
+        }
+        else if (damageOverlayImage != null)
+        {
+            return damageOverlayImage.color.a;
+        }
+        return 0f;
+    }
+
+    private void ApplyOverlayAlpha(float alpha)
+    {
+        if (damageOverlayCanvasGroup != null)
+        {
+            damageOverlayCanvasGroup.alpha = alpha;
+        }
+        else if (damageOverlayImage != null)
+        {
+            Color c = damageOverlayImage.color;
+            c.a = alpha;
+            damageOverlayImage.color = c;
+        }
     }
 
     public void TriggerNextRound()
@@ -127,11 +277,12 @@ public class DrawTimerManager : MonoBehaviour
 
     private IEnumerator Routine_StartRoundSequence()
     {
-        // 1. Display and Fade-Out Round Banner Text
         if (roundDisplayText != null && roundDisplayCanvasGroup != null)
         {
             roundDisplayText.text = $"ROUND {currentRound}";
             roundDisplayCanvasGroup.alpha = 1f;
+
+            PlaySFX(roundStartSFX);
 
             yield return new WaitForSeconds(roundTextHoldDuration);
 
@@ -146,7 +297,6 @@ public class DrawTimerManager : MonoBehaviour
             roundDisplayCanvasGroup.alpha = 0f;
         }
 
-        // 2. Execute Ready... Set... Draw!
         yield return StartCoroutine(Routine_ExecuteCountdown());
     }
 
@@ -156,9 +306,9 @@ public class DrawTimerManager : MonoBehaviour
         {
             countdownText.gameObject.SetActive(true);
 
-            yield return StartCoroutine(Routine_AnimateWord("READY"));
-            yield return StartCoroutine(Routine_AnimateWord("SET"));
-            yield return StartCoroutine(Routine_AnimateWord("DRAW!"));
+            yield return StartCoroutine(Routine_AnimateWord("READY", 1.0f));
+            yield return StartCoroutine(Routine_AnimateWord("SET", 1.0f));
+            yield return StartCoroutine(Routine_AnimateWord("DRAW!", drawWordPitchMultiplier));
 
             countdownText.gameObject.SetActive(false);
         }
@@ -166,7 +316,7 @@ public class DrawTimerManager : MonoBehaviour
         StartDrawPhase();
     }
 
-    private IEnumerator Routine_AnimateWord(string word)
+    private IEnumerator Routine_AnimateWord(string word, float pitchMultiplier = 1.0f)
     {
         countdownText.text = word;
         RectTransform textRect = countdownText.rectTransform;
@@ -175,6 +325,8 @@ public class DrawTimerManager : MonoBehaviour
         Vector3 targetScale = Vector3.one;
 
         textRect.localScale = oversizedScale;
+
+        PlaySFXWithPitch(countdownWordSFX, pitchMultiplier);
 
         float elapsedTime = 0f;
 
@@ -193,6 +345,7 @@ public class DrawTimerManager : MonoBehaviour
         playerHasDrawn = false;
         currentTimer = drawWindowDuration;
         isTimerRunning = true;
+        lastLoggedSecond = Mathf.CeilToInt(currentTimer);
 
         if (handBlockerImage != null)
         {
@@ -224,6 +377,13 @@ public class DrawTimerManager : MonoBehaviour
         {
             currentTimer -= Time.deltaTime;
             float fillRatio = Mathf.Clamp01(currentTimer / drawWindowDuration);
+
+            int currentSecond = Mathf.CeilToInt(Mathf.Max(0f, currentTimer));
+            if (currentSecond != lastLoggedSecond && currentSecond >= 0)
+            {
+                lastLoggedSecond = currentSecond;
+                PlaySFX(timerTickSFX);
+            }
 
             UpdateTimerUI(fillRatio, currentTimer);
 
@@ -286,7 +446,6 @@ public class DrawTimerManager : MonoBehaviour
     {
         if (tokenManager == null || availableDecks.Count == 0) yield break;
 
-        // Filter available decks to make sure support deck buttons can be picked if added
         int randomIndex = Random.Range(0, availableDecks.Count);
         DeckButton chosenDeck = availableDecks[randomIndex];
 
@@ -309,5 +468,17 @@ public class DrawTimerManager : MonoBehaviour
         {
             timerText.text = Mathf.CeilToInt(Mathf.Max(0f, timeRemaining)).ToString();
         }
+    }
+
+    private void PlaySFX(AudioClip clip)
+    {
+        PlaySFXWithPitch(clip, 1.0f);
+    }
+
+    private void PlaySFXWithPitch(AudioClip clip, float pitch)
+    {
+        if (clip == null || audioSource == null) return;
+        audioSource.pitch = pitch;
+        audioSource.PlayOneShot(clip);
     }
 }

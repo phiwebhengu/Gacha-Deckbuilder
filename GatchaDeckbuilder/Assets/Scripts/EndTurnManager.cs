@@ -3,8 +3,12 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.SceneManagement;
-using UnityEngine.InputSystem;
+using UnityEngine.EventSystems;
 using TMPro;
+
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 public struct TurnResultData
 {
@@ -47,10 +51,32 @@ public class EndTurnManager : MonoBehaviour
     [SerializeField] private float shakeIntensity = 0.25f;
     [SerializeField] private float shakeDuration = 0.08f;
 
+    [Header("Audio Settings & Juicing SFX")]
+    [SerializeField] private AudioSource audioSource;
+    [SerializeField] private AudioClip attackHighlightSFX;
+    [SerializeField] private AudioClip defenseHighlightSFX;
+    [SerializeField] private AudioClip attackDefenseCountSFX;
+    [SerializeField] private AudioClip netDamageCountSFX;
+    [SerializeField] private AudioClip hpDamageTickSFX;
+    [SerializeField] private AudioClip buttonHoverSFX;
+    [SerializeField] private AudioClip victorySFX;
+    [SerializeField] private AudioClip defeatSFX;
+
+    [Header("Pitch Scaling Pitch Tuning")]
+    [SerializeField] private float countMinPitch = 0.85f;
+    [SerializeField] private float countMaxPitch = 1.4f;
+
     [Header("UI References")]
     [SerializeField] private Button endTurnButton;
     [SerializeField] private RectTransform selectedHandTransform;
     [SerializeField] private Image raycastBlockerImage;
+
+    [Header("Game Over UI References")]
+    [SerializeField] private GameObject gameOverPanel;
+    [SerializeField] private TextMeshProUGUI victoryText;
+    [SerializeField] private TextMeshProUGUI lossText;
+    [SerializeField] private Button restartButton;
+    [SerializeField] private Button quitButton;
 
     [Header("System References")]
     [SerializeField] private PlayerHandManager handManager;
@@ -72,6 +98,7 @@ public class EndTurnManager : MonoBehaviour
     private Vector3 originalOpponentDefenseScale = Vector3.one;
 
     private Vector3 originalCamPos;
+    private Coroutine activeCombatCoroutine;
 
     public int CurrentPlayerHP => currentPlayerHP;
     public int CurrentOpponentHP => currentOpponentHP;
@@ -84,11 +111,22 @@ public class EndTurnManager : MonoBehaviour
         if (mainCamera == null) mainCamera = Camera.main;
         if (mainCamera != null) originalCamPos = mainCamera.transform.localPosition;
 
+        if (audioSource == null)
+        {
+            audioSource = GetComponent<AudioSource>();
+            if (audioSource == null) audioSource = gameObject.AddComponent<AudioSource>();
+        }
+
         CacheAndResetUI();
 
         if (endTurnButton != null) endTurnButton.onClick.AddListener(OnEndTurnClicked);
         if (raycastBlockerImage != null) raycastBlockerImage.gameObject.SetActive(false);
 
+        if (gameOverPanel != null) gameOverPanel.SetActive(false);
+        if (victoryText != null) victoryText.gameObject.SetActive(false);
+        if (lossText != null) lossText.gameObject.SetActive(false);
+
+        SetupGameOverButtons();
         UpdateEndTurnButtonVisibility();
     }
 
@@ -127,6 +165,55 @@ public class EndTurnManager : MonoBehaviour
         UpdateHPUI();
     }
 
+    private void SetupGameOverButtons()
+    {
+        if (restartButton != null)
+        {
+            restartButton.onClick.AddListener(OnRestartButtonClicked);
+            AddHoverAndExitListenersToButton(restartButton);
+        }
+
+        if (quitButton != null)
+        {
+            quitButton.onClick.AddListener(OnQuitButtonClicked);
+            AddHoverAndExitListenersToButton(quitButton);
+        }
+    }
+
+    private void AddHoverAndExitListenersToButton(Button targetButton)
+    {
+        if (targetButton == null) return;
+
+        EventTrigger trigger = targetButton.gameObject.GetComponent<EventTrigger>();
+        if (trigger == null) trigger = targetButton.gameObject.AddComponent<EventTrigger>();
+
+        Vector3 baseScale = targetButton.transform.localScale;
+        Vector3 hoverScale = baseScale * 1.08f;
+
+        // Pointer Enter (Hover)
+        EventTrigger.Entry entryHover = new EventTrigger.Entry
+        {
+            eventID = EventTriggerType.PointerEnter
+        };
+        entryHover.callback.AddListener((data) =>
+        {
+            targetButton.transform.localScale = hoverScale;
+            PlaySFX(buttonHoverSFX);
+        });
+        trigger.triggers.Add(entryHover);
+
+        // Pointer Exit
+        EventTrigger.Entry entryExit = new EventTrigger.Entry
+        {
+            eventID = EventTriggerType.PointerExit
+        };
+        entryExit.callback.AddListener((data) =>
+        {
+            targetButton.transform.localScale = baseScale;
+        });
+        trigger.triggers.Add(entryExit);
+    }
+
     public void UpdateEndTurnButtonVisibility()
     {
         if (handManager == null || endTurnButton == null) return;
@@ -156,7 +243,7 @@ public class EndTurnManager : MonoBehaviour
             if (aiRival != null) aiRival.SubmitRivalHand();
 
             TurnResultData result = CalculateTurnResult();
-            StartCoroutine(Routine_ResolveCombatSequence(result));
+            activeCombatCoroutine = StartCoroutine(Routine_ResolveCombatSequence(result));
         }
     }
 
@@ -190,7 +277,7 @@ public class EndTurnManager : MonoBehaviour
 
     public void OnReceiveNetworkTurnResult(TurnResultData result)
     {
-        StartCoroutine(Routine_ResolveCombatSequence(result));
+        activeCombatCoroutine = StartCoroutine(Routine_ResolveCombatSequence(result));
     }
 
     private IEnumerator Routine_ResolveCombatSequence(TurnResultData result)
@@ -203,22 +290,29 @@ public class EndTurnManager : MonoBehaviour
         ProcessPlayedSupportCards(playerCards, "Player");
         ProcessPlayedSupportCards(opponentCards, "Opponent");
 
+        // --- ATTACK PHASE ---
         HighlightCardsByCategory(playerCards, opponentCards, CardCategory.Attack);
+        PlaySFX(attackHighlightSFX);
         yield return StartCoroutine(Routine_CountUpPair(
             result.playerAttack, playerAttackText, originalPlayerAttackScale,
-            result.opponentAttack, opponentAttackText, originalOpponentAttackScale
+            result.opponentAttack, opponentAttackText, originalOpponentAttackScale,
+            attackDefenseCountSFX
         ));
         yield return new WaitForSeconds(phaseTransitionPause);
         ResetCardHighlights(playerCards, opponentCards);
 
+        // --- DEFENSE PHASE ---
         HighlightCardsByCategory(playerCards, opponentCards, CardCategory.Defense);
+        PlaySFX(defenseHighlightSFX);
         yield return StartCoroutine(Routine_CountUpPair(
             result.playerDefense, playerDefenseText, originalPlayerDefenseScale,
-            result.opponentDefense, opponentDefenseText, originalOpponentDefenseScale
+            result.opponentDefense, opponentDefenseText, originalOpponentDefenseScale,
+            attackDefenseCountSFX
         ));
         yield return new WaitForSeconds(phaseTransitionPause);
         ResetCardHighlights(playerCards, opponentCards);
 
+        // --- CENTER NET DAMAGE CALCULATION ---
         int maxNetDamage = Mathf.Max(result.netDamageToOpponent, result.netDamageToPlayer);
         if (centerDifferenceText != null && maxNetDamage > 0)
         {
@@ -226,32 +320,39 @@ public class EndTurnManager : MonoBehaviour
             for (int i = 1; i <= maxNetDamage; i++)
             {
                 centerDifferenceText.text = i.ToString();
+                PlayPitchEscalatedSound(netDamageCountSFX, i, maxNetDamage);
                 StartCoroutine(Routine_PopText(centerDifferenceText.transform, originalCenterScale));
                 yield return new WaitForSeconds(countStepInterval);
             }
         }
         yield return new WaitForSeconds(phaseTransitionPause);
 
+        // --- APPLY DAMAGE TO PLAYER ---
         if (result.netDamageToPlayer > 0)
         {
-            for (int i = 1; i <= result.netDamageToPlayer; i++)
+            int totalDamage = result.netDamageToPlayer;
+            for (int i = 1; i <= totalDamage; i++)
             {
                 currentPlayerHP = Mathf.Max(0, currentPlayerHP - 1);
                 UpdateHPUI();
 
+                PlaySFX(hpDamageTickSFX);
                 if (playerHPText != null) StartCoroutine(Routine_PopText(playerHPText.transform, originalPlayerHPScale));
                 StartCoroutine(Routine_CameraShake());
                 yield return new WaitForSeconds(countStepInterval);
             }
         }
 
+        // --- APPLY DAMAGE TO OPPONENT ---
         if (result.netDamageToOpponent > 0)
         {
-            for (int i = 1; i <= result.netDamageToOpponent; i++)
+            int totalDamage = result.netDamageToOpponent;
+            for (int i = 1; i <= totalDamage; i++)
             {
                 currentOpponentHP = Mathf.Max(0, currentOpponentHP - 1);
                 UpdateHPUI();
 
+                PlaySFX(hpDamageTickSFX);
                 if (opponentHPText != null) StartCoroutine(Routine_PopText(opponentHPText.transform, originalOpponentHPScale));
                 StartCoroutine(Routine_CameraShake());
                 yield return new WaitForSeconds(countStepInterval);
@@ -323,7 +424,8 @@ public class EndTurnManager : MonoBehaviour
 
     private IEnumerator Routine_CountUpPair(
         int playerTargetVal, TextMeshProUGUI playerText, Vector3 playerScale,
-        int opponentTargetVal, TextMeshProUGUI opponentText, Vector3 opponentScale)
+        int opponentTargetVal, TextMeshProUGUI opponentText, Vector3 opponentScale,
+        AudioClip countClip)
     {
         int maxSteps = Mathf.Max(playerTargetVal, opponentTargetVal);
 
@@ -341,8 +443,27 @@ public class EndTurnManager : MonoBehaviour
                 StartCoroutine(Routine_PopText(opponentText.transform, opponentScale));
             }
 
+            PlayPitchEscalatedSound(countClip, step, maxSteps);
             yield return new WaitForSeconds(countStepInterval);
         }
+    }
+
+    private void PlayPitchEscalatedSound(AudioClip clip, int currentStep, int totalSteps)
+    {
+        if (clip == null || audioSource == null || totalSteps <= 0) return;
+
+        float t = (totalSteps > 1) ? (float)(currentStep - 1) / (totalSteps - 1) : 1f;
+        float pitch = Mathf.Lerp(countMinPitch, countMaxPitch, t);
+
+        audioSource.pitch = pitch;
+        audioSource.PlayOneShot(clip);
+    }
+
+    private void PlaySFX(AudioClip clip)
+    {
+        if (clip == null || audioSource == null) return;
+        audioSource.pitch = 1.0f;
+        audioSource.PlayOneShot(clip);
     }
 
     private IEnumerator Routine_CheckNextRoundOrEndGame()
@@ -350,19 +471,19 @@ public class EndTurnManager : MonoBehaviour
         if (currentOpponentHP <= 0 && currentPlayerHP <= 0)
         {
             Debug.Log("[Match Over] BOTH PLAYERS KNOCKED OUT! DRAW GAME!");
-            yield return StartCoroutine(Routine_ClearAllSubmittedCards());
+            TriggerGameOver(isPlayerWinner: false);
             yield break;
         }
         if (currentOpponentHP <= 0)
         {
             Debug.Log("[Match Over] PLAYER WINS BY KNOCKOUT!");
-            yield return StartCoroutine(Routine_ClearAllSubmittedCards());
+            TriggerGameOver(isPlayerWinner: true);
             yield break;
         }
         if (currentPlayerHP <= 0)
         {
             Debug.Log("[Match Over] OPPONENT WINS BY KNOCKOUT!");
-            yield return StartCoroutine(Routine_ClearAllSubmittedCards());
+            TriggerGameOver(isPlayerWinner: false);
             yield break;
         }
 
@@ -374,6 +495,45 @@ public class EndTurnManager : MonoBehaviour
             ResetTurnBlocker();
             timerManager.TriggerNextRound();
         }
+    }
+
+    public void TriggerGameOver(bool isPlayerWinner)
+    {
+        if (activeCombatCoroutine != null) StopCoroutine(activeCombatCoroutine);
+        StopAllCoroutines();
+
+        if (timerManager != null) timerManager.StopAllCoroutines();
+
+        if (raycastBlockerImage != null) raycastBlockerImage.gameObject.SetActive(true);
+
+        if (gameOverPanel != null) gameOverPanel.SetActive(true);
+
+        if (isPlayerWinner)
+        {
+            if (victoryText != null) victoryText.gameObject.SetActive(true);
+            if (lossText != null) lossText.gameObject.SetActive(false);
+            PlaySFX(victorySFX);
+        }
+        else
+        {
+            if (victoryText != null) victoryText.gameObject.SetActive(false);
+            if (lossText != null) lossText.gameObject.SetActive(true);
+            PlaySFX(defeatSFX);
+        }
+    }
+
+    public void OnRestartButtonClicked()
+    {
+        SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+    }
+
+    public void OnQuitButtonClicked()
+    {
+#if UNITY_EDITOR
+        EditorApplication.isPlaying = false;
+#else
+        Application.Quit();
+#endif
     }
 
     private void ResetTurnUI()
