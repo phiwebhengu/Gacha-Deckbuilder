@@ -22,6 +22,14 @@ public struct TurnResultData
     public int finalOpponentHP;
 }
 
+public enum RoundOutcome
+{
+    Unplayed,
+    Win,
+    Loss,
+    Draw
+}
+
 public class EndTurnManager : MonoBehaviour
 {
     [Header("Health & Points Settings")]
@@ -31,6 +39,25 @@ public class EndTurnManager : MonoBehaviour
     [Header("HP UI References")]
     [SerializeField] private TextMeshProUGUI playerHPText;
     [SerializeField] private TextMeshProUGUI opponentHPText;
+
+    [Header("Damage Flash Settings")]
+    [Tooltip("Assign a full-screen UI Image (Raycast Target unchecked) to flash red when player takes damage.")]
+    [SerializeField] private Image damageFlashImage;
+    [SerializeField] private Color flashColor = Color.red;
+    [Range(0f, 1f)]
+    [SerializeField] private float flashMaxAlpha = 0.45f;
+    [SerializeField] private float flashFadeDuration = 0.12f;
+
+    [Header("4-Round Progress UI Settings")]
+    [Tooltip("Assign the 4 Image UI elements representing Round 1 to Round 4 in order.")]
+    [SerializeField] private Image[] roundProgressImages = new Image[4];
+    [SerializeField] private Color unplayedColor = Color.gray;
+    [SerializeField] private Color winColor = Color.green;
+    [SerializeField] private Color lossColor = Color.red;
+    [SerializeField] private Color drawColor = new Color(1f, 0.5f, 0f); // Orange
+
+    [SerializeField] private Vector3 unplayedScale = Vector3.one;
+    [SerializeField] private Vector3 completedRoundScale = new Vector3(0.85f, 0.85f, 0.85f);
 
     [Header("Combat Count UI References")]
     [SerializeField] private TextMeshProUGUI playerAttackText;
@@ -88,6 +115,9 @@ public class EndTurnManager : MonoBehaviour
 
     private int currentPlayerHP;
     private int currentOpponentHP;
+    private int currentRoundIndex = 0; // 0 to 3 for the 4 rounds
+    private RoundOutcome[] roundOutcomes = new RoundOutcome[4];
+
     private Vector3 originalCenterScale = Vector3.one;
     private Vector3 originalPlayerHPScale = Vector3.one;
     private Vector3 originalOpponentHPScale = Vector3.one;
@@ -99,14 +129,19 @@ public class EndTurnManager : MonoBehaviour
 
     private Vector3 originalCamPos;
     private Coroutine activeCombatCoroutine;
+    private Coroutine activeFlashCoroutine;
 
     public int CurrentPlayerHP => currentPlayerHP;
     public int CurrentOpponentHP => currentOpponentHP;
+    public int CurrentRoundIndex => currentRoundIndex;
 
     private void Start()
     {
         currentPlayerHP = playerMaxHP;
         currentOpponentHP = opponentMaxHP;
+        currentRoundIndex = 0;
+
+        InitializeRoundTrackers();
 
         if (mainCamera == null) mainCamera = Camera.main;
         if (mainCamera != null) originalCamPos = mainCamera.transform.localPosition;
@@ -115,6 +150,14 @@ public class EndTurnManager : MonoBehaviour
         {
             audioSource = GetComponent<AudioSource>();
             if (audioSource == null) audioSource = gameObject.AddComponent<AudioSource>();
+        }
+
+        if (damageFlashImage != null)
+        {
+            Color c = flashColor;
+            c.a = 0f;
+            damageFlashImage.color = c;
+            damageFlashImage.raycastTarget = false;
         }
 
         CacheAndResetUI();
@@ -128,6 +171,19 @@ public class EndTurnManager : MonoBehaviour
 
         SetupGameOverButtons();
         UpdateEndTurnButtonVisibility();
+    }
+
+    private void InitializeRoundTrackers()
+    {
+        for (int i = 0; i < roundProgressImages.Length; i++)
+        {
+            roundOutcomes[i] = RoundOutcome.Unplayed;
+            if (roundProgressImages[i] != null)
+            {
+                roundProgressImages[i].color = unplayedColor;
+                roundProgressImages[i].rectTransform.localScale = unplayedScale;
+            }
+        }
     }
 
     private void CacheAndResetUI()
@@ -190,10 +246,7 @@ public class EndTurnManager : MonoBehaviour
         Vector3 baseScale = targetButton.transform.localScale;
         Vector3 hoverScale = baseScale * 1.08f;
 
-        EventTrigger.Entry entryHover = new EventTrigger.Entry
-        {
-            eventID = EventTriggerType.PointerEnter
-        };
+        EventTrigger.Entry entryHover = new EventTrigger.Entry { eventID = EventTriggerType.PointerEnter };
         entryHover.callback.AddListener((data) =>
         {
             targetButton.transform.localScale = hoverScale;
@@ -201,10 +254,7 @@ public class EndTurnManager : MonoBehaviour
         });
         trigger.triggers.Add(entryHover);
 
-        EventTrigger.Entry entryExit = new EventTrigger.Entry
-        {
-            eventID = EventTriggerType.PointerExit
-        };
+        EventTrigger.Entry entryExit = new EventTrigger.Entry { eventID = EventTriggerType.PointerExit };
         entryExit.callback.AddListener((data) =>
         {
             targetButton.transform.localScale = baseScale;
@@ -234,7 +284,7 @@ public class EndTurnManager : MonoBehaviour
 
         if (isMultiplayerMode)
         {
-            // TODO: Send client choices to Server/Host via Network RPC
+            // Network handling RPC placeholder
         }
         else
         {
@@ -339,7 +389,10 @@ public class EndTurnManager : MonoBehaviour
 
                 PlaySFX(hpDamageTickSFX);
                 if (playerHPText != null) StartCoroutine(Routine_PopText(playerHPText.transform, originalPlayerHPScale));
+
                 StartCoroutine(Routine_CameraShake());
+                StartCoroutine(Routine_FlashDamageOverlay());
+
                 yield return new WaitForSeconds(countStepInterval);
             }
         }
@@ -356,6 +409,7 @@ public class EndTurnManager : MonoBehaviour
                 PlaySFX(hpDamageTickSFX);
                 if (opponentHPText != null) StartCoroutine(Routine_PopText(opponentHPText.transform, originalOpponentHPScale));
                 StartCoroutine(Routine_CameraShake());
+
                 yield return new WaitForSeconds(countStepInterval);
             }
         }
@@ -364,8 +418,81 @@ public class EndTurnManager : MonoBehaviour
         currentOpponentHP = result.finalOpponentHP;
         UpdateHPUI();
 
+        // --- EVALUATE ROUND OUTCOME ---
+        EvaluateAndRecordRoundOutcome(result);
+
         yield return new WaitForSeconds(0.5f);
         yield return StartCoroutine(Routine_CheckNextRoundOrEndGame());
+    }
+
+    private IEnumerator Routine_FlashDamageOverlay()
+    {
+        if (damageFlashImage == null) yield break;
+
+        if (activeFlashCoroutine != null)
+        {
+            StopCoroutine(activeFlashCoroutine);
+        }
+
+        Color startColor = flashColor;
+        startColor.a = flashMaxAlpha;
+        damageFlashImage.color = startColor;
+
+        float elapsed = 0f;
+        while (elapsed < flashFadeDuration)
+        {
+            elapsed += Time.deltaTime;
+            float currentAlpha = Mathf.Lerp(flashMaxAlpha, 0f, elapsed / flashFadeDuration);
+            Color c = flashColor;
+            c.a = currentAlpha;
+            damageFlashImage.color = c;
+            yield return null;
+        }
+
+        Color finalColor = flashColor;
+        finalColor.a = 0f;
+        damageFlashImage.color = finalColor;
+    }
+
+    private void EvaluateAndRecordRoundOutcome(TurnResultData result)
+    {
+        if (currentRoundIndex < 0 || currentRoundIndex >= 4) return;
+
+        RoundOutcome outcome = RoundOutcome.Draw;
+
+        if (result.netDamageToOpponent > result.netDamageToPlayer)
+        {
+            outcome = RoundOutcome.Win;
+        }
+        else if (result.netDamageToPlayer > result.netDamageToOpponent)
+        {
+            outcome = RoundOutcome.Loss;
+        }
+
+        roundOutcomes[currentRoundIndex] = outcome;
+
+        if (roundProgressImages[currentRoundIndex] != null)
+        {
+            Image roundImg = roundProgressImages[currentRoundIndex];
+            roundImg.rectTransform.localScale = completedRoundScale;
+
+            switch (outcome)
+            {
+                case RoundOutcome.Win:
+                    roundImg.color = winColor;
+                    break;
+                case RoundOutcome.Loss:
+                    roundImg.color = lossColor;
+                    break;
+                case RoundOutcome.Draw:
+                    roundImg.color = drawColor;
+                    break;
+            }
+
+            StartCoroutine(Routine_PopText(roundImg.transform, completedRoundScale));
+        }
+
+        currentRoundIndex++;
     }
 
     private void ProcessPlayedSupportCards(List<BalatroCardController> cards, string ownerName)
@@ -469,6 +596,7 @@ public class EndTurnManager : MonoBehaviour
 
     private IEnumerator Routine_CheckNextRoundOrEndGame()
     {
+        // 1. EARLY HEALTH KNOCKOUT CHECK
         if (currentOpponentHP <= 0 && currentPlayerHP <= 0)
         {
             Debug.Log("[Match Over] BOTH PLAYERS KNOCKED OUT! DRAW GAME!");
@@ -488,6 +616,32 @@ public class EndTurnManager : MonoBehaviour
             yield break;
         }
 
+        // 2. CHECK 4-ROUND COMPLETION (BEST OF 4 RESULT)
+        if (currentRoundIndex >= 4)
+        {
+            int playerWins = 0;
+            int opponentWins = 0;
+
+            foreach (var outcome in roundOutcomes)
+            {
+                if (outcome == RoundOutcome.Win) playerWins++;
+                else if (outcome == RoundOutcome.Loss) opponentWins++;
+            }
+
+            Debug.Log($"[Match Over - 4 Rounds Complete] Player Wins: {playerWins} | Opponent Wins: {opponentWins}");
+
+            if (playerWins > opponentWins)
+            {
+                TriggerGameOver(isPlayerWinner: true);
+            }
+            else
+            {
+                TriggerGameOver(isPlayerWinner: false);
+            }
+            yield break;
+        }
+
+        // 3. CONTINUE TO NEXT ROUND
         yield return StartCoroutine(Routine_ClearAllSubmittedCards());
         ResetTurnUI();
 
@@ -575,35 +729,44 @@ public class EndTurnManager : MonoBehaviour
     private IEnumerator Routine_ProcessContainerCleanup(PlayerHandManager ownerHandManager, RectTransform selectedTransform)
     {
         CardUI[] cardsInContainer = selectedTransform.GetComponentsInChildren<CardUI>();
-        List<CardUI> immediateCardsToDestroy = new List<CardUI>();
+        List<CardUI> cardsToDestroy = new List<CardUI>();
 
         foreach (CardUI card in cardsInContainer)
         {
             if (card == null) continue;
 
             BalatroCardController controller = card.GetComponent<BalatroCardController>();
-            if (controller != null && controller.Category == CardCategory.Support)
+            if (controller != null)
             {
-                if (!controller.IsForever)
+                if (controller.Category != CardCategory.Support || !controller.IsForever)
                 {
-                    immediateCardsToDestroy.Add(card);
+                    cardsToDestroy.Add(card);
                 }
+            }
+            else
+            {
+                cardsToDestroy.Add(card);
             }
         }
 
-        if (immediateCardsToDestroy.Count > 0)
+        if (cardsToDestroy.Count > 0)
         {
-            yield return StartCoroutine(Routine_AnimateImmediateCardsDisappearance(immediateCardsToDestroy));
+            yield return StartCoroutine(Routine_AnimateCardsDisappearance(cardsToDestroy));
         }
 
         ownerHandManager.ReturnSubmittedCardsToHand(selectedTransform);
     }
 
-    private IEnumerator Routine_AnimateImmediateCardsDisappearance(List<CardUI> cardsToClear)
+    private IEnumerator Routine_AnimateCardsDisappearance(List<CardUI> cardsToClear)
     {
         float popUpDuration = 0.12f;
         float shrinkDuration = 0.18f;
-        Vector3 popScale = new Vector3(1.3f, 1.3f, 1f);
+
+        Dictionary<CardUI, Vector3> startScales = new Dictionary<CardUI, Vector3>();
+        foreach (CardUI card in cardsToClear)
+        {
+            if (card != null) startScales[card] = card.transform.localScale;
+        }
 
         float elapsed = 0f;
         while (elapsed < popUpDuration)
@@ -613,7 +776,10 @@ public class EndTurnManager : MonoBehaviour
 
             foreach (CardUI card in cardsToClear)
             {
-                if (card != null) card.transform.localScale = Vector3.Lerp(Vector3.one, popScale, t);
+                if (card != null && startScales.TryGetValue(card, out Vector3 baseScale))
+                {
+                    card.transform.localScale = Vector3.Lerp(baseScale, baseScale * 1.3f, t);
+                }
             }
             yield return null;
         }
@@ -626,7 +792,10 @@ public class EndTurnManager : MonoBehaviour
 
             foreach (CardUI card in cardsToClear)
             {
-                if (card != null) card.transform.localScale = Vector3.Lerp(popScale, Vector3.zero, t);
+                if (card != null && startScales.TryGetValue(card, out Vector3 baseScale))
+                {
+                    card.transform.localScale = Vector3.Lerp(baseScale * 1.3f, Vector3.zero, t);
+                }
             }
             yield return null;
         }

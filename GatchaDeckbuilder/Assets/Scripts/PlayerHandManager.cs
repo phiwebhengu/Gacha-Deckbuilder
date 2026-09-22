@@ -58,6 +58,12 @@ public class PlayerHandManager : MonoBehaviour
         }
     }
 
+    public int GetHandCount()
+    {
+        CleanupNullCards();
+        return cardsInHand.Count;
+    }
+
     public void DealCardsFromTokens(int count, DeckButton selectedDeck)
     {
         if (!isAI && timerManager != null)

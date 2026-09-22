@@ -2,6 +2,14 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
+public enum AIStrategyType
+{
+    AggressiveStart,   // Heavy spend early, lighter late
+    LateGamePower,     // Conservative early, heavy spend late
+    Balanced,          // Even spread (~5 per round)
+    FrontLoadedRush    // Max spend early, minimal late
+}
+
 public class AIRivalController : MonoBehaviour
 {
     [Header("Rival Systems")]
@@ -28,18 +36,49 @@ public class AIRivalController : MonoBehaviour
     [Range(0f, 1f)]
     [SerializeField] private float splitDeckChance = 0.65f;
 
+    [Header("Round & Strategy System")]
+    [SerializeField] private EndTurnManager endTurnManager;
+    [SerializeField] private AIStrategyType activeStrategy;
+
     private Coroutine aiDecisionCoroutine;
     private Coroutine currentDrawCoroutine;
+    private int[] tokenBudgetPlan = new int[4];
 
     public RectTransform RivalSelectedHandTransform => rivalSelectedHandTransform;
     public PlayerHandManager RivalHandManager => rivalHandManager;
 
     private void Awake()
     {
-        if (drawTimerManager == null)
+        if (drawTimerManager == null) drawTimerManager = FindObjectOfType<DrawTimerManager>();
+        if (endTurnManager == null) endTurnManager = FindObjectOfType<EndTurnManager>();
+
+        InitializeStrategy();
+    }
+
+    /// <summary>
+    /// Pick a random strategy profile at game start that totals exactly 20 tokens over 4 rounds.
+    /// </summary>
+    private void InitializeStrategy()
+    {
+        activeStrategy = (AIStrategyType)Random.Range(0, System.Enum.GetValues(typeof(AIStrategyType)).Length);
+
+        switch (activeStrategy)
         {
-            drawTimerManager = FindObjectOfType<DrawTimerManager>();
+            case AIStrategyType.AggressiveStart:
+                tokenBudgetPlan = new int[] { 7, 6, 4, 3 };
+                break;
+            case AIStrategyType.LateGamePower:
+                tokenBudgetPlan = new int[] { 3, 4, 6, 7 };
+                break;
+            case AIStrategyType.Balanced:
+                tokenBudgetPlan = new int[] { 5, 5, 5, 5 };
+                break;
+            case AIStrategyType.FrontLoadedRush:
+                tokenBudgetPlan = new int[] { 8, 7, 3, 2 };
+                break;
         }
+
+        Debug.Log($"[AI Strategy] Chosen Strategy: {activeStrategy} | Planned Budget per Round: [{string.Join(", ", tokenBudgetPlan)}]");
     }
 
     public void StartAIDrawPhase()
@@ -64,14 +103,17 @@ public class AIRivalController : MonoBehaviour
         }
 
         int availableTokens = rivalTokenManager.RemainingTokenCount;
-
         if (availableTokens <= 0)
         {
             SelectCardsForEndTurn();
             yield break;
         }
 
-        int totalTokensToSpend = Random.Range(1, availableTokens + 1);
+        int currentRound = (endTurnManager != null) ? endTurnManager.CurrentRoundIndex : 0;
+        int totalTokensToSpend = CalculateTokensToSpend(currentRound, availableTokens);
+
+        Debug.Log($"[AI Round {currentRound + 1}] Remaining Tokens: {availableTokens} | Decided to Spend: {totalTokensToSpend}");
+
         bool shouldSplit = (totalTokensToSpend > 1) && (Random.value < splitDeckChance) && (actionDeck != null && supportDeck != null);
 
         if (shouldSplit)
@@ -110,7 +152,7 @@ public class AIRivalController : MonoBehaviour
         else
         {
             DeckButton chosenDeck = GetRandomAvailableDeck();
-            if (chosenDeck != null)
+            if (chosenDeck != null && totalTokensToSpend > 0)
             {
                 currentDrawCoroutine = StartCoroutine(Routine_ExecuteDraw(totalTokensToSpend, chosenDeck));
                 yield return currentDrawCoroutine;
@@ -125,6 +167,22 @@ public class AIRivalController : MonoBehaviour
 
         yield return new WaitForSeconds(0.4f);
         SelectCardsForEndTurn();
+    }
+
+    private int CalculateTokensToSpend(int roundIndex, int availableTokens)
+    {
+        // Round 4 (index 3) or final turns: Spend all remaining tokens
+        if (roundIndex >= 3)
+        {
+            return availableTokens;
+        }
+
+        int planned = tokenBudgetPlan[Mathf.Clamp(roundIndex, 0, 3)];
+
+        // Clamp to available tokens and ensure at least 1 token is spent if available
+        int spendTarget = Mathf.Clamp(planned, 1, availableTokens);
+
+        return spendTarget;
     }
 
     private IEnumerator Routine_ExecuteDraw(int tokenCount, DeckButton deck)
@@ -144,7 +202,8 @@ public class AIRivalController : MonoBehaviour
     }
 
     /// <summary>
-    /// Selects cards in hand for submission. Ensures at least 1 card is selected.
+    /// Selects cards in hand for submission.
+    /// In Round 4, selects ALL cards to leave zero cards in hand.
     /// </summary>
     public void SelectCardsForEndTurn()
     {
@@ -153,7 +212,9 @@ public class AIRivalController : MonoBehaviour
         List<CardUI> cardsInHand = new List<CardUI>(rivalHandManager.GetComponentsInChildren<CardUI>(includeInactive: false));
         if (cardsInHand.Count == 0) return;
 
-        // Check how many cards are currently selected
+        int currentRound = (endTurnManager != null) ? endTurnManager.CurrentRoundIndex : 0;
+        bool isFinalRound = (currentRound >= 3);
+
         int alreadySelectedCount = 0;
         foreach (var card in cardsInHand)
         {
@@ -164,12 +225,24 @@ public class AIRivalController : MonoBehaviour
             }
         }
 
-        // If nothing was selected yet, select at least 1 random card (up to all cards)
-        if (alreadySelectedCount == 0)
+        if (isFinalRound)
         {
+            // ROUND 4: Select ALL unselected cards so every card is played
+            foreach (var card in cardsInHand)
+            {
+                BalatroCardController cardController = card.GetComponent<BalatroCardController>();
+                if (cardController != null && !cardController.IsSelected)
+                {
+                    cardController.ToggleSelection();
+                }
+            }
+            Debug.Log($"[AI Hand] Round 4 Final Play: Selected ALL {cardsInHand.Count} cards in hand.");
+        }
+        else if (alreadySelectedCount == 0)
+        {
+            // Normal rounds: Select a random number of cards (at least 1)
             int numToSelect = Random.Range(1, cardsInHand.Count + 1);
 
-            // Shuffle list for random selection
             for (int i = 0; i < cardsInHand.Count; i++)
             {
                 CardUI temp = cardsInHand[i];
@@ -189,9 +262,6 @@ public class AIRivalController : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Halts drawing activity immediately and guarantees card selection.
-    /// </summary>
     public void ForceEndTurnAndSelect()
     {
         StopAllRunningCoroutines();
