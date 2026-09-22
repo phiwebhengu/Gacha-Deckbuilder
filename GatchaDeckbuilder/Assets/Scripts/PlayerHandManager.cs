@@ -11,10 +11,6 @@ public class PlayerHandManager : MonoBehaviour
     [Tooltip("Invisible raycast target image activated during card reveal to block token/card clicks.")]
     [SerializeField] private GameObject clickBlockerOverlay;
 
-    [Header("Pull System Reference")]
-    [Tooltip("The real pull engine — reads real card data, handles pity and the 50/50 correctly.")]
-    [SerializeField] private PlayerPullController pullController;
-
     [Header("Reveal Animation Timings")]
     [SerializeField] private Transform centerPointTarget;
     [SerializeField] private float moveToCenterDuration = 0.45f;

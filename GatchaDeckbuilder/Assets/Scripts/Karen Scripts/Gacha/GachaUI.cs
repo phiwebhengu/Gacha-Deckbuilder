@@ -5,10 +5,21 @@ using System.Collections;
 
 public class GachaUI : MonoBehaviour
 {
-    [Header("Token Display")] public TMP_Text tokenText; public string tokenFormat = "Tokens: {0}";
-    [Header("Pull Buttons")] public Button pullActionButton; public Button pullSupportButton;
-    [Header("Opponent Visuals")] public GameObject cardBackPrefab; public Transform OpponentCardContainer;
-    [Header("Card Visuals")] public GameObject cardPrefab; public Transform CardContainer;
+    [Header("Token Display")]
+    public TMP_Text tokenText;
+    public string tokenFormat = "Tokens: {0}";
+
+    [Header("Pull Buttons")]
+    public Button pullActionButton;
+    public Button pullSupportButton;
+
+    [Header("Opponent Visuals")]
+    public GameObject cardBackPrefab;
+    public Transform OpponentCardContainer;
+
+    [Header("Card Visuals")]
+    public GameObject cardPrefab;
+    public Transform CardContainer;
 
     [Header("System References")]
     public DrawTimerManager drawTimerManager;
@@ -88,19 +99,24 @@ public class GachaUI : MonoBehaviour
         Debug.Log($"<color=cyan>Pulled {result.Deck}:</color> {result.CardName} ({result.Tier}){tag}");
 
         if (cardPrefab == null || CardContainer == null) return;
+
         bool isAction = result.Deck == DeckType.Action;
         Sprite sprite = GetCardSprite(result.CardId, isAction);
         var obj = Instantiate(cardPrefab, CardContainer);
 
+        // Get the unified CardVisual component
         var visual = obj.GetComponent<CardVisual>();
         if (visual != null)
         {
-            if (isAction) visual.Setup(result.ActionData, sprite);
-            else visual.Setup(result.SupportData, sprite);
-        }
+            // 1. Setup the visual data and sprite
+            if (isAction)
+                visual.Setup(result.ActionData, sprite);
+            else
+                visual.Setup(result.SupportData, sprite);
 
-        var juice = obj.GetComponent<PullRevealJuice>();
-        if (juice != null) juice.PlayReveal(result.Tier);
+            // 2. Trigger the reveal animation (uses the string overload we added to CardVisual)
+            visual.PlayReveal(result.Tier);
+        }
     }
 
     private void HandlePullFailed(string reason)
@@ -111,11 +127,18 @@ public class GachaUI : MonoBehaviour
         if (pullSupportButton != null) pullSupportButton.interactable = true;
     }
 
-    private Sprite GetCardSprite(int cardId, bool isActionCard) => Resources.Load<Sprite>($"CardSprites/{(isActionCard ? "Action" : "Support")}/{cardId}");
+    private Sprite GetCardSprite(int cardId, bool isActionCard)
+    {
+        string folder = isActionCard ? "CardSprites/Action/" : "CardSprites/Support/";
+        return Resources.Load<Sprite>($"{folder}{cardId}");
+    }
 
     private void HandleOpponentDrewCard(ulong opponentClientId)
     {
-        if (cardBackPrefab != null && OpponentCardContainer != null) Instantiate(cardBackPrefab, OpponentCardContainer);
+        if (cardBackPrefab != null && OpponentCardContainer != null)
+        {
+            Instantiate(cardBackPrefab, OpponentCardContainer);
+        }
     }
 
     public void OnClickPullAction()
