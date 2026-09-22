@@ -429,9 +429,10 @@ public class DrawTimerManager : MonoBehaviour
             tokenManager.gameObject.SetActive(false);
         }
 
+        // Force AI to halt draws and lock in a valid hand selection
         if (aiRival != null)
         {
-            aiRival.StopAIDrawPhase();
+            aiRival.ForceEndTurnAndSelect();
         }
 
         if (!playerHasDrawn)

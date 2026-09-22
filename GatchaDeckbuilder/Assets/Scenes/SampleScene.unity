@@ -10659,7 +10659,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 338, y: 31.5}
+  m_AnchoredPosition: {x: 338, y: -1}
   m_SizeDelta: {x: 96.40186, y: 51.374268}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &1531186861
@@ -13415,7 +13415,8 @@ MonoBehaviour:
   rivalHandManager: {fileID: 1994359325}
   rivalSelectedHandTransform: {fileID: 1953246744}
   actionDeck: {fileID: 1701042463}
-  supportDeck: {fileID: 443327276}
+  supportDeck: {fileID: 0}
+  drawTimerManager: {fileID: 0}
   minDecisionDelay: 0.8
   maxDecisionDelay: 2.5
   minDrawDelay: 1
@@ -13440,7 +13441,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &2020694923
 RectTransform:
   m_ObjectHideFlags: 0
