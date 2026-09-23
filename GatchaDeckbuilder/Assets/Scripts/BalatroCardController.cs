@@ -13,12 +13,14 @@ public class BalatroCardController : MonoBehaviour, IPointerClickHandler
 
     [Header("References")]
     [SerializeField] private Button cardButton;
+    [SerializeField] private Image cardImage; // Added to actually apply highlight colors
 
     [Header("Combat Highlight Colors")]
     [SerializeField] private Color attackHighlightColor = new Color(1f, 0.3f, 0.3f, 1f);
     [SerializeField] private Color defenseHighlightColor = new Color(0.3f, 0.6f, 1f, 1f);
     [SerializeField] private Color supportHighlightColor = new Color(0.3f, 0.9f, 0.4f, 1f);
     [SerializeField] private Color highlightColor = new Color(1f, 0.9f, 0.4f, 1f);
+    [SerializeField] private Color defaultColor = Color.white; // Added for reset
 
     public bool IsSelected { get; private set; } = false;
     private bool isInteractable = true;
@@ -32,8 +34,8 @@ public class BalatroCardController : MonoBehaviour, IPointerClickHandler
     {
         rectTransform = GetComponent<RectTransform>();
         if (cardButton == null) cardButton = GetComponent<Button>();
+        if (cardImage == null) cardImage = GetComponent<Image>();
 
-        // Fallback if not set via PlayerHandManager
         if (endTurnManager == null)
         {
             endTurnManager = FindFirstObjectByType<EndTurnManager>();
@@ -74,7 +76,6 @@ public class BalatroCardController : MonoBehaviour, IPointerClickHandler
         if (rectTransform != null)
         {
             Vector2 currentPos = rectTransform.anchoredPosition;
-            // Toggle Y position by 50f
             float targetY = IsSelected ? currentPos.y + 50f : currentPos.y - 50f;
             rectTransform.anchoredPosition = new Vector2(currentPos.x, targetY);
         }
@@ -82,10 +83,6 @@ public class BalatroCardController : MonoBehaviour, IPointerClickHandler
         if (endTurnManager != null)
         {
             endTurnManager.UpdateEndTurnButtonVisibility();
-        }
-        else
-        {
-            Debug.LogWarning($"[BalatroCardController] endTurnManager is null on card '{gameObject.name}'! Button visibility cannot be updated.");
         }
     }
 
@@ -101,7 +98,17 @@ public class BalatroCardController : MonoBehaviour, IPointerClickHandler
             _ => highlightColor
         };
 
-        // Note: You may want to apply this color to an Image component here, e.g.:
-        // if (cardImage != null) cardImage.color = targetHighlight;
+        if (cardImage != null)
+        {
+            cardImage.color = targetHighlight;
+        }
+    }
+
+    public void ResetHighlight()
+    {
+        if (cardImage != null)
+        {
+            cardImage.color = defaultColor;
+        }
     }
 }

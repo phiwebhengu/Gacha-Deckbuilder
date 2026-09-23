@@ -6,8 +6,8 @@ using UnityEngine;
 public class PlayerHandManager : MonoBehaviour
 {
     [Header("UI References")]
-    [SerializeField] private GameObject cardPrefab;
-    [SerializeField] private RectTransform handTransform; // Must have HorizontalLayoutGroup
+    [SerializeField] public GameObject cardPrefab;
+    [SerializeField] private RectTransform handTransform;
     [SerializeField] private Canvas targetCanvas;
 
     [Header("Animation Settings")]
@@ -16,9 +16,8 @@ public class PlayerHandManager : MonoBehaviour
     [Header("System References")]
     [SerializeField] private DrawTimerManager timerManager;
     [SerializeField] private GachaManager gachaManager;
-    [SerializeField] private EndTurnManager endTurnManager;
 
-    // Changed from List<CardUI> to List<BalatroCardController>
+    // We keep this list for internal tracking, but we will scan the transform for accuracy
     private List<BalatroCardController> cardsInHand = new List<BalatroCardController>();
 
     private void Awake()
@@ -63,11 +62,8 @@ public class PlayerHandManager : MonoBehaviour
             if (targetCanvas != null && !newCardObj.transform.IsChildOf(targetCanvas.transform))
                 newCardObj.transform.SetParent(handTransform, false);
 
-            // Removed CardUI reference, relying directly on BalatroCardController and CardVisual
             BalatroCardController controller = newCardObj.GetComponent<BalatroCardController>();
             CardVisual visual = newCardObj.GetComponent<CardVisual>();
-
-            Debug.Log($"[PlayerHandManager] Dealt card {i + 1}. Controller: {controller != null}, Visual: {visual != null}");
 
             if (controller == null || visual == null)
             {
@@ -76,6 +72,7 @@ public class PlayerHandManager : MonoBehaviour
                 yield break;
             }
 
+            EndTurnManager endTurnManager = FindFirstObjectByType<EndTurnManager>();
             if (endTurnManager != null)
             {
                 controller.SetEndTurnManager(endTurnManager);
@@ -90,12 +87,11 @@ public class PlayerHandManager : MonoBehaviour
 
             visual.PlayReveal(result.Tier);
 
-            // INSTANT SCALE (No animation)
             RectTransform cardRect = newCardObj.GetComponent<RectTransform>();
             cardRect.localScale = Vector3.one;
 
             cardsInHand.Add(controller);
-            Debug.Log($"[PlayerHandManager] Successfully added card to hand. Total cards in hand: {cardsInHand.Count}");
+            Debug.Log($"[PlayerHandManager] Added card {result.CardId} to hand. Total cards in list: {cardsInHand.Count}");
 
             yield return new WaitForSeconds(dealDelay);
         }
@@ -107,51 +103,43 @@ public class PlayerHandManager : MonoBehaviour
         return Resources.Load<Sprite>($"{folder}{cardId}");
     }
 
-    private void CleanupNullCards()
-    {
-        int initialCount = cardsInHand.Count;
-        // Safely remove only null references
-        cardsInHand.RemoveAll(controller => controller == null);
-
-        if (cardsInHand.Count < initialCount)
-        {
-            Debug.LogWarning($"[PlayerHandManager] Cleaned up {initialCount - cardsInHand.Count} null card references. Something is destroying cards prematurely.");
-        }
-    }
-
+    // UPDATED: Scan the actual UI transform instead of relying on the list
     public void SetAllCardsInteractable(bool state)
     {
-        CleanupNullCards();
-        foreach (BalatroCardController controller in cardsInHand)
+        if (handTransform == null) return;
+        BalatroCardController[] controllers = handTransform.GetComponentsInChildren<BalatroCardController>();
+        foreach (BalatroCardController controller in controllers)
         {
             if (controller != null) controller.SetInteractable(state);
         }
     }
 
-    // Return type changed from List<CardUI> to List<BalatroCardController>
+    // UPDATED: Scan the actual UI transform
     public List<BalatroCardController> GetSelectedCards()
     {
-        CleanupNullCards();
-        Debug.Log($"[PlayerHandManager] GetSelectedCards called. cardsInHand.Count = {cardsInHand.Count}");
-
         List<BalatroCardController> selected = new List<BalatroCardController>();
-        foreach (BalatroCardController controller in cardsInHand)
+        if (handTransform == null) return selected;
+
+        BalatroCardController[] controllers = handTransform.GetComponentsInChildren<BalatroCardController>();
+        foreach (BalatroCardController controller in controllers)
         {
             if (controller != null && controller.IsSelected)
             {
                 selected.Add(controller);
             }
         }
-
-        Debug.Log($"[PlayerHandManager] Found {selected.Count} selected cards.");
+        Debug.Log($"[PlayerHandManager] Found {selected.Count} selected cards by scanning transform.");
         return selected;
     }
 
+    // UPDATED: Scan the actual UI transform
     public List<int> GetSelectedCardIds()
     {
-        CleanupNullCards();
         List<int> ids = new List<int>();
-        foreach (BalatroCardController controller in cardsInHand)
+        if (handTransform == null) return ids;
+
+        BalatroCardController[] controllers = handTransform.GetComponentsInChildren<BalatroCardController>();
+        foreach (BalatroCardController controller in controllers)
         {
             if (controller != null && controller.IsSelected)
             {
@@ -172,7 +160,6 @@ public class PlayerHandManager : MonoBehaviour
             controller.transform.SetParent(selectedHandTarget, true);
             controller.enabled = false;
         }
-        Debug.Log($"[PlayerHandManager] Submitted cards. Remaining in hand: {cardsInHand.Count}");
     }
 
     public void ReturnSubmittedCardsToHand(RectTransform containerTransform)
@@ -198,7 +185,6 @@ public class PlayerHandManager : MonoBehaviour
                 cardsInHand.Add(controller);
             }
         }
-        Debug.Log($"[PlayerHandManager] Returned cards to hand. Total in hand: {cardsInHand.Count}");
     }
 
     public void ClearSubmittedCardsJuicy(RectTransform containerTransform, float delay = 0f) => StartCoroutine(Routine_ClearCardsJuicy(containerTransform, delay));
@@ -217,7 +203,5 @@ public class PlayerHandManager : MonoBehaviour
                 Destroy(controller.gameObject);
             }
         }
-        CleanupNullCards();
-        Debug.Log($"[PlayerHandManager] Cleared submitted cards. Remaining in hand: {cardsInHand.Count}");
     }
 }
