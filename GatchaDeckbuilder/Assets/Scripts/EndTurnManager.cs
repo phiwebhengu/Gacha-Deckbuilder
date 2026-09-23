@@ -80,6 +80,10 @@ public class EndTurnManager : NetworkBehaviour
     [SerializeField] private RectTransform selectedHandTransform;
     [SerializeField] private RectTransform opponentSelectedHandTransform;
 
+    [Header("Opponent Card Display")]
+    [Tooltip("Assign the Card Prefab here to ensure opponent cards can be instantiated reliably. Falls back to PlayerHandManager's prefab if left empty.")]
+    [SerializeField] private GameObject opponentCardPrefab;
+
     [Header("System References")]
     [SerializeField] private DrawTimerManager timerManager;
 
@@ -114,6 +118,7 @@ public class EndTurnManager : NetworkBehaviour
 
         CacheAndResetUI();
         UpdateEndTurnButtonVisibility();
+        ClearOpponentPanel(); // Ensure no lingering cards from previous scenes/sessions
     }
 
     private void CacheAndResetUI()
@@ -131,6 +136,18 @@ public class EndTurnManager : NetworkBehaviour
         if (opponentDefenseText != null) { originalOpponentDefenseScale = opponentDefenseText.transform.localScale; opponentDefenseText.text = "0"; }
 
         UpdateHPUI();
+    }
+
+    private void ClearOpponentPanel()
+    {
+        if (opponentSelectedHandTransform != null)
+        {
+            BalatroCardController[] oppCards = opponentSelectedHandTransform.GetComponentsInChildren<BalatroCardController>();
+            foreach (var card in oppCards)
+            {
+                if (card != null) Destroy(card.gameObject);
+            }
+        }
     }
 
     private PlayerHandManager GetLocalHandManager()
@@ -179,7 +196,6 @@ public class EndTurnManager : NetworkBehaviour
         PlayerHandManager localHandManager = GetLocalHandManager();
         if (localHandManager == null || selectedHandTransform == null) return;
 
-        // Get IDs *BEFORE* submitting/removing them
         int[] selectedIds = localHandManager.GetSelectedCardIds().ToArray();
         if (selectedIds.Length == 0)
         {
@@ -279,30 +295,45 @@ public class EndTurnManager : NetworkBehaviour
     private TurnResultData CalculateTurnResultFromIds(int[] myCardIds, int[] opponentCardIds)
     {
         var deckMgr = FindFirstObjectByType<DeckManager>();
-        if (deckMgr == null) return new TurnResultData();
+        if (deckMgr == null)
+        {
+            Debug.LogError("[EndTurnManager] DeckManager not found on Server! Damage calculation will fail.");
+            return new TurnResultData();
+        }
 
         int myAttack = 0, myDefense = 0;
         int oppAttack = 0, oppDefense = 0;
 
-        foreach (int id in myCardIds)
+        // Helper function to prevent code duplication
+        void ProcessCards(int[] ids, ref int attack, ref int defense)
         {
-            var card = deckMgr.loadedActionCards?.Find(c => c.Id == id);
-            if (card != null)
+            foreach (int id in ids)
             {
-                if (card.Role == "Attack") myAttack += card.Value;
-                else if (card.Role == "Defense") myDefense += card.Value;
+                // 1. Check Action Cards
+                var actionCard = deckMgr.loadedActionCards?.Find(c => c.Id == id);
+                if (actionCard != null)
+                {
+                    if (actionCard.Role == "Attack") attack += actionCard.Value;
+                    else if (actionCard.Role == "Defense") defense += actionCard.Value;
+                    continue; // Card found, move to next ID
+                }
+
+                // 2. Check Support Cards (Prevents silent failure)
+                var supportCard = deckMgr.loadedSupportCards?.Find(c => c.Id == id);
+                if (supportCard != null)
+                {
+                    // TODO: Add your Support card combat logic here if they provide stats
+                    // For now, it at least recognizes the card exists instead of ignoring it.
+                }
+                else
+                {
+                    Debug.LogWarning($"[EndTurnManager] Card ID {id} not found in Action OR Support lists!");
+                }
             }
         }
 
-        foreach (int id in opponentCardIds)
-        {
-            var card = deckMgr.loadedActionCards?.Find(c => c.Id == id);
-            if (card != null)
-            {
-                if (card.Role == "Attack") oppAttack += card.Value;
-                else if (card.Role == "Defense") oppDefense += card.Value;
-            }
-        }
+        ProcessCards(myCardIds, ref myAttack, ref myDefense);
+        ProcessCards(opponentCardIds, ref oppAttack, ref oppDefense);
 
         int damageToOpponent = Mathf.Max(0, myAttack - oppDefense);
         int damageToMe = Mathf.Max(0, oppAttack - myDefense);
@@ -407,17 +438,27 @@ public class EndTurnManager : NetworkBehaviour
             return opponentCards;
 
         var deckMgr = FindFirstObjectByType<DeckManager>();
-        if (deckMgr == null) return opponentCards;
+        if (deckMgr == null)
+        {
+            Debug.LogError("[InstantiateOpponentCards] DeckManager not found!");
+            return opponentCards;
+        }
 
         foreach (int cardId in opponentCardIds)
         {
-            // You need a reference to the card prefab. You can get it from any PlayerHandManager
             PlayerHandManager anyHandManager = FindFirstObjectByType<PlayerHandManager>();
-            if (anyHandManager == null || anyHandManager.cardPrefab == null) continue;
+            if (anyHandManager == null || anyHandManager.cardPrefab == null)
+            {
+                Debug.LogError("[InstantiateOpponentCards] No hand manager / cardPrefab found.");
+                continue;
+            }
 
             GameObject newCardObj = Instantiate(anyHandManager.cardPrefab, opponentSelectedHandTransform);
             BalatroCardController controller = newCardObj.GetComponent<BalatroCardController>();
-            CardVisual visual = newCardObj.GetComponent<CardVisual>();
+            CardVisual visual = newCardObj.GetComponentInChildren<CardVisual>(); // was GetComponent
+
+            if (controller == null) Debug.LogError($"[InstantiateOpponentCards] cardId {cardId}: no BalatroCardController on prefab.");
+            if (visual == null) Debug.LogError($"[InstantiateOpponentCards] cardId {cardId}: no CardVisual found (root or children).");
 
             if (controller != null && visual != null)
             {
@@ -428,6 +469,7 @@ public class EndTurnManager : NetworkBehaviour
                 if (actionCard != null)
                 {
                     Sprite sprite = GetCardSprite(cardId, true);
+                    if (sprite == null) Debug.LogError($"[InstantiateOpponentCards] cardId {cardId}: sprite NOT FOUND at CardSprites/Action/{cardId}");
                     visual.Setup(actionCard, sprite);
                     controller.SetCategory(actionCard.Role == "Attack" ? CardCategory.Attack : CardCategory.Defense);
                 }
@@ -437,8 +479,13 @@ public class EndTurnManager : NetworkBehaviour
                     if (supportCard != null)
                     {
                         Sprite sprite = GetCardSprite(cardId, false);
+                        if (sprite == null) Debug.LogError($"[InstantiateOpponentCards] cardId {cardId}: sprite NOT FOUND at CardSprites/Support/{cardId}");
                         visual.Setup(supportCard, sprite);
                         controller.SetCategory(CardCategory.Support);
+                    }
+                    else
+                    {
+                        Debug.LogError($"[InstantiateOpponentCards] cardId {cardId}: not found in loadedActionCards OR loadedSupportCards (count A:{deckMgr.loadedActionCards?.Count}, S:{deckMgr.loadedSupportCards?.Count}). Card left unconfigured.");
                     }
                 }
                 opponentCards.Add(controller);
@@ -450,7 +497,14 @@ public class EndTurnManager : NetworkBehaviour
     private Sprite GetCardSprite(int cardId, bool isActionCard)
     {
         string folder = isActionCard ? "CardSprites/Action/" : "CardSprites/Support/";
-        return Resources.Load<Sprite>($"{folder}{cardId}");
+        string path = $"{folder}{cardId}";
+
+        Sprite sprite = Resources.Load<Sprite>(path);
+        if (sprite == null)
+        {
+            Debug.LogWarning($"[EndTurnManager] Failed to load sprite at Resources path: '{path}'. Check your folder structure and naming (e.g., maybe it needs a prefix like 'Card_{cardId}').");
+        }
+        return sprite;
     }
 
     private List<BalatroCardController> GetControllersFromTransform(RectTransform container)

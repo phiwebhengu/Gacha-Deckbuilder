@@ -19,6 +19,25 @@ public class PlayerHandManager : MonoBehaviour
 
     // We keep this list for internal tracking, but we will scan the transform for accuracy
     private List<BalatroCardController> cardsInHand = new List<BalatroCardController>();
+    // Add this at the class level
+    private Queue<PullResult> pendingPulls = new Queue<PullResult>();
+
+    private void OnEnable()
+    {
+        if (gachaManager != null)
+            gachaManager.OnMyPullResolved += HandlePullResolved;
+    }
+
+    private void OnDisable()
+    {
+        if (gachaManager != null)
+            gachaManager.OnMyPullResolved -= HandlePullResolved;
+    }
+
+    private void HandlePullResolved(PullResult result)
+    {
+        pendingPulls.Enqueue(result);
+    }
 
     private void Awake()
     {
@@ -33,11 +52,7 @@ public class PlayerHandManager : MonoBehaviour
 
     private IEnumerator Routine_DealCards(int count, DeckType deckToPull)
     {
-        if (gachaManager == null)
-        {
-            Debug.LogError("[PlayerHandManager] gachaManager is null!");
-            yield break;
-        }
+        if (gachaManager == null) { Debug.LogError("[PlayerHandManager] gachaManager is null!"); yield break; }
 
         for (int i = 0; i < count; i++)
         {
@@ -45,12 +60,24 @@ public class PlayerHandManager : MonoBehaviour
             else gachaManager.RequestPullAction();
 
             PullResult result = null;
-            Action<PullResult> onPullResolved = (res) => { result = res; };
-            gachaManager.OnMyPullResolved += onPullResolved;
-
             float timeout = 2f, elapsed = 0f;
-            while (result == null && elapsed < timeout) { yield return null; elapsed += Time.deltaTime; }
-            gachaManager.OnMyPullResolved -= onPullResolved;
+
+            // Wait until the queue has an item, or we hit the timeout
+            while (pendingPulls.Count == 0 && elapsed < timeout)
+            {
+                yield return null;
+                elapsed += Time.deltaTime;
+            }
+
+            if (pendingPulls.Count > 0)
+            {
+                result = pendingPulls.Dequeue(); // Safely get the oldest pull
+            }
+            else
+            {
+                Debug.LogError($"[PlayerHandManager] Pull {i + 1} timed out after {timeout}s!");
+                continue; // Use 'continue' to try the next card, rather than 'yield break' which stops the whole deal
+            }
 
             if (result == null)
             {
@@ -83,6 +110,15 @@ public class PlayerHandManager : MonoBehaviour
             else visual.Setup(result.SupportData, sprite);
 
             controller.SetCardId(result.CardId);
+            if (result.Deck == DeckType.Action && result.ActionData != null)
+            {
+                controller.SetCategory(result.ActionData.Role == "Attack" ? CardCategory.Attack : CardCategory.Defense);
+            }
+            else if (result.Deck == DeckType.Support && result.SupportData != null)
+            {
+                controller.SetCategory(CardCategory.Support);
+                controller.SetCardMetadata(result.SupportData.EffectType == "Forever");
+            }
             if (result.Deck == DeckType.Support) controller.SetCardMetadata(result.SupportData.EffectType == "Forever");
 
             visual.PlayReveal(result.Tier);
