@@ -1,180 +1,98 @@
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
-using UnityEngine.InputSystem;
-using TMPro;
 
-public enum CardCategory
-{
-    Attack,
-    Defense,
-    Support
-}
+public enum CardCategory { Attack, Defense, Support }
 
-public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler, IPointerClickHandler
+public class BalatroCardController : MonoBehaviour, IPointerClickHandler
 {
-    [Header("Card Category (Set by HandManager or GachaUI)")]
+    [Header("Card Category")]
     [SerializeField] private CardCategory category = CardCategory.Attack;
     public CardCategory Category => category;
-
-    // Allow external scripts to set the category after instantiation
     public void SetCategory(CardCategory newCategory) => category = newCategory;
 
-    [Header("Hover Visual Settings")]
-    [SerializeField] private Vector3 hoverScale = new Vector3(1.15f, 1.15f, 1f);
-    [SerializeField] private float hoverLiftAmount = 30f;
-    [SerializeField] private Color highlightColor = new Color(1f, 0.9f, 0.4f, 1f);
-    [SerializeField] private Image cardFrameOrOutline;
-
-    [Header("Selection Visual Settings")]
-    [SerializeField] private float selectedLiftAmount = 60f;
-    [SerializeField] private Vector3 selectedScale = new Vector3(1.15f, 1.15f, 1f);
-
-    [Header("Balatro Tilt Settings")]
-    [SerializeField] private float maxTiltAngle = 12f;
-
-    [Header("Animation Tuning")]
-    [SerializeField] private float lerpSpeed = 12f;
-
-    [Header("Scale Settings")]
-    [SerializeField] private Vector3 restingScale = new Vector3(0.7f, 0.7f, 1f);
-    public Vector3 RestingScale => restingScale;
+    [Header("References")]
+    [SerializeField] private Button cardButton;
 
     [Header("Combat Highlight Colors")]
     [SerializeField] private Color attackHighlightColor = new Color(1f, 0.3f, 0.3f, 1f);
     [SerializeField] private Color defenseHighlightColor = new Color(0.3f, 0.6f, 1f, 1f);
     [SerializeField] private Color supportHighlightColor = new Color(0.3f, 0.9f, 0.4f, 1f);
+    [SerializeField] private Color highlightColor = new Color(1f, 0.9f, 0.4f, 1f);
 
-    private bool isHovered = false;
     public bool IsSelected { get; private set; } = false;
-
-    private Vector3 baseLocalPosition;
-    private Quaternion baseLocalRotation;
-    private Vector3 targetLocalPosition;
-    private Quaternion targetLocalRotation;
-    private Vector3 targetScale = Vector3.one;
-
-    private Color originalColor = Color.white;
+    private bool isInteractable = true;
     private RectTransform rectTransform;
-    private Canvas parentCanvas;
+    private EndTurnManager endTurnManager;
 
     public int CardId { get; private set; }
-
-    public void SetCardId(int id)
-    {
-        CardId = id;
-    }
     public bool IsForever { get; private set; }
-
-    public void SetCardMetadata(bool isForever)
-    {
-        IsForever = isForever;
-    }
 
     private void Awake()
     {
         rectTransform = GetComponent<RectTransform>();
-        parentCanvas = GetComponentInParent<Canvas>();
+        if (cardButton == null) cardButton = GetComponent<Button>();
 
-        if (cardFrameOrOutline == null)
-            cardFrameOrOutline = GetComponent<Image>();
-
-        if (cardFrameOrOutline != null)
-            originalColor = cardFrameOrOutline.color;
-    }
-
-    public void SaveBaseTransform()
-    {
-        baseLocalPosition = rectTransform.localPosition;
-        baseLocalRotation = rectTransform.localRotation;
-        UpdateTargetVisuals();
-    }
-
-    private void Update()
-    {
-        if (isHovered && !IsSelected)
-            CalculateCursorTilt();
-
-        rectTransform.localPosition = Vector3.Lerp(rectTransform.localPosition, targetLocalPosition, Time.deltaTime * lerpSpeed);
-        rectTransform.localRotation = Quaternion.Slerp(rectTransform.localRotation, targetLocalRotation, Time.deltaTime * lerpSpeed);
-        rectTransform.localScale = Vector3.Lerp(rectTransform.localScale, targetScale, Time.deltaTime * lerpSpeed);
-    }
-
-    private void CalculateCursorTilt()
-    {
-        Vector2 mousePos = Vector2.zero;
-        if (Mouse.current != null) mousePos = Mouse.current.position.ReadValue();
-        else if (Pointer.current != null) mousePos = Pointer.current.position.ReadValue();
-        else return;
-
-        Camera uiCamera = (parentCanvas != null && parentCanvas.renderMode != RenderMode.ScreenSpaceOverlay) ? parentCanvas.worldCamera : null;
-
-        if (RectTransformUtility.ScreenPointToLocalPointInRectangle(rectTransform, mousePos, uiCamera, out Vector2 localMousePos))
+        // Fallback if not set via PlayerHandManager
+        if (endTurnManager == null)
         {
-            float normalizedX = Mathf.Clamp(localMousePos.x / rectTransform.rect.width, -0.5f, 0.5f);
-            float normalizedY = Mathf.Clamp(localMousePos.y / rectTransform.rect.height, -0.5f, 0.5f);
-
-            float tiltX = -normalizedY * maxTiltAngle;
-            float tiltY = normalizedX * maxTiltAngle;
-
-            targetLocalRotation = baseLocalRotation * Quaternion.Euler(tiltX, tiltY, 0f);
+            endTurnManager = FindFirstObjectByType<EndTurnManager>();
         }
     }
 
-    public void OnPointerEnter(PointerEventData eventData)
+    public void SetEndTurnManager(EndTurnManager manager)
     {
-        isHovered = true;
-        UpdateTargetVisuals();
-        if (!IsSelected) transform.SetAsLastSibling();
+        endTurnManager = manager;
     }
 
-    public void OnPointerExit(PointerEventData eventData)
+    public void SetCardId(int id) => CardId = id;
+    public void SetCardMetadata(bool isForever) => IsForever = isForever;
+
+    public void SetInteractable(bool state)
     {
-        isHovered = false;
-        UpdateTargetVisuals();
+        isInteractable = state;
+        if (cardButton != null) cardButton.interactable = state;
     }
 
-    public void OnPointerClick(PointerEventData eventData) => ToggleSelection();
-    public void OnCardClicked() => ToggleSelection();
+    public void OnPointerClick(PointerEventData eventData)
+    {
+        if (!isInteractable)
+        {
+            Debug.Log($"[BalatroCardController] Click ignored on '{gameObject.name}' because isInteractable is false.");
+            return;
+        }
+        ToggleSelection();
+    }
 
     public void ToggleSelection()
     {
+        if (!isInteractable) return;
+
         IsSelected = !IsSelected;
-        UpdateTargetVisuals();
+        Debug.Log($"[BalatroCardController] IsSelected is now {IsSelected} on card '{gameObject.name}'");
 
-        var endTurnMgr = FindFirstObjectByType<EndTurnManager>();
-        endTurnMgr?.UpdateEndTurnButtonVisibility();
-    }
-
-    private void UpdateTargetVisuals()
-    {
-        if (IsSelected)
+        if (rectTransform != null)
         {
-            targetLocalPosition = baseLocalPosition + (transform.up * selectedLiftAmount);
-            targetLocalRotation = baseLocalRotation;
-            targetScale = selectedScale;
-            if (cardFrameOrOutline != null) cardFrameOrOutline.color = highlightColor;
+            Vector2 currentPos = rectTransform.anchoredPosition;
+            // Toggle Y position by 50f
+            float targetY = IsSelected ? currentPos.y + 50f : currentPos.y - 50f;
+            rectTransform.anchoredPosition = new Vector2(currentPos.x, targetY);
         }
-        else if (isHovered)
+
+        if (endTurnManager != null)
         {
-            targetLocalPosition = baseLocalPosition + (transform.up * hoverLiftAmount);
-            targetScale = hoverScale;
-            if (cardFrameOrOutline != null) cardFrameOrOutline.color = highlightColor;
+            endTurnManager.UpdateEndTurnButtonVisibility();
         }
         else
         {
-            targetLocalPosition = baseLocalPosition;
-            targetLocalRotation = baseLocalRotation;
-            targetScale = restingScale;
-            if (cardFrameOrOutline != null) cardFrameOrOutline.color = originalColor;
+            Debug.LogWarning($"[BalatroCardController] endTurnManager is null on card '{gameObject.name}'! Button visibility cannot be updated.");
         }
     }
 
-    public void HighlightCardForCategory(CardCategory targetCategory, float scaleMultiplier = 1.25f)
+    public void HighlightCardForCategory(CardCategory targetCategory)
     {
         if (category != targetCategory) return;
 
-        targetScale = restingScale * scaleMultiplier;
         Color targetHighlight = category switch
         {
             CardCategory.Attack => attackHighlightColor,
@@ -183,14 +101,7 @@ public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPoint
             _ => highlightColor
         };
 
-        if (cardFrameOrOutline != null)
-            cardFrameOrOutline.color = targetHighlight;
-    }
-
-    public void ResetCombatHighlight()
-    {
-        targetScale = restingScale;
-        if (cardFrameOrOutline != null)
-            cardFrameOrOutline.color = originalColor;
+        // Note: You may want to apply this color to an Image component here, e.g.:
+        // if (cardImage != null) cardImage.color = targetHighlight;
     }
 }

@@ -7,7 +7,7 @@ using UnityEngine.InputSystem;
 using TMPro;
 using Unity.Netcode;
 
-public struct TurnResultData
+public struct TurnResultData : INetworkSerializable
 {
     public int playerAttack;
     public int playerDefense;
@@ -17,6 +17,18 @@ public struct TurnResultData
     public int netDamageToOpponent;
     public int finalPlayerHP;
     public int finalOpponentHP;
+
+    public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
+    {
+        serializer.SerializeValue(ref playerAttack);
+        serializer.SerializeValue(ref playerDefense);
+        serializer.SerializeValue(ref opponentAttack);
+        serializer.SerializeValue(ref opponentDefense);
+        serializer.SerializeValue(ref netDamageToPlayer);
+        serializer.SerializeValue(ref netDamageToOpponent);
+        serializer.SerializeValue(ref finalPlayerHP);
+        serializer.SerializeValue(ref finalOpponentHP);
+    }
 }
 
 public class EndTurnManager : NetworkBehaviour
@@ -54,7 +66,6 @@ public class EndTurnManager : NetworkBehaviour
     [Header("UI References")]
     [SerializeField] private Button endTurnButton;
     [SerializeField] private RectTransform selectedHandTransform;
-    [SerializeField] private Image raycastBlockerImage;
 
     [Header("System References")]
     [SerializeField] private PlayerHandManager handManager;
@@ -76,7 +87,6 @@ public class EndTurnManager : NetworkBehaviour
 
     public override void OnNetworkSpawn()
     {
-        // Deterministic client assignment: the client with the smallest ID is Player 1
         var allClients = new List<ulong>(NetworkManager.Singleton.ConnectedClientsIds);
         allClients.Sort();
         isPlayer1 = (NetworkManager.LocalClientId == allClients[0]);
@@ -91,10 +101,6 @@ public class EndTurnManager : NetworkBehaviour
         if (mainCamera != null) originalCamPos = mainCamera.transform.localPosition;
 
         CacheAndResetUI();
-
-        if (endTurnButton != null) endTurnButton.onClick.AddListener(OnEndTurnClicked);
-        if (raycastBlockerImage != null) raycastBlockerImage.gameObject.SetActive(false);
-
         UpdateEndTurnButtonVisibility();
     }
 
@@ -117,24 +123,38 @@ public class EndTurnManager : NetworkBehaviour
 
     public void UpdateEndTurnButtonVisibility()
     {
-        if (handManager == null || endTurnButton == null) return;
-        bool hasSelectedCards = handManager.GetSelectedCards().Count > 0;
-        endTurnButton.gameObject.SetActive(hasSelectedCards);
+        if (handManager == null)
+        {
+            Debug.LogWarning("[EndTurnManager] handManager is NOT assigned in the Inspector!");
+            return;
+        }
+        if (endTurnButton == null)
+        {
+            Debug.LogWarning("[EndTurnManager] endTurnButton is NOT assigned in the Inspector!");
+            return;
+        }
+
+        int selectedCount = handManager.GetSelectedCards().Count;
+        Debug.Log($"[EndTurnManager] Checking visibility... Selected cards count: {selectedCount}");
+
+        endTurnButton.gameObject.SetActive(selectedCount > 0);
     }
 
-    private void OnEndTurnClicked()
+    public void OnEndTurnClicked()
     {
         if (handManager == null || selectedHandTransform == null) return;
-        List<CardUI> playerSelectedCards = handManager.GetSelectedCards();
+
+        // Now returns List<BalatroCardController>
+        List<BalatroCardController> playerSelectedCards = handManager.GetSelectedCards();
         if (playerSelectedCards.Count == 0) return;
 
-        if (raycastBlockerImage != null) raycastBlockerImage.gameObject.SetActive(true);
+        // Disable card interactions via the hand manager
+        handManager.SetAllCardsInteractable(false);
+
         handManager.SubmitSelectedCardsToHand(selectedHandTransform);
         if (endTurnButton != null) endTurnButton.gameObject.SetActive(false);
 
         int[] selectedIds = handManager.GetSelectedCardIds().ToArray();
-
-        // Always send to server, server will wait for the other player
         SubmitTurnServerRpc(selectedIds);
     }
 
@@ -144,7 +164,6 @@ public class EndTurnManager : NetworkBehaviour
         ulong clientId = rpcParams.Receive.SenderClientId;
         pendingTurns[clientId] = selectedCardIds;
 
-        // Strict 1v1: Wait for exactly 2 players to submit
         if (pendingTurns.Count >= 2)
         {
             ResolveAndBroadcastCombat();
@@ -162,7 +181,6 @@ public class EndTurnManager : NetworkBehaviour
 
         bool aIsPlayer1 = IsPlayer1Id(idA);
 
-        // Calculate result from Player A's perspective
         var resultA = CalculateTurnResultFromIds(cardsA, cardsB);
         int currentHpA = aIsPlayer1 ? Player1_HP.Value : Player2_HP.Value;
         int currentHpB = aIsPlayer1 ? Player2_HP.Value : Player1_HP.Value;
@@ -170,7 +188,6 @@ public class EndTurnManager : NetworkBehaviour
         resultA.finalPlayerHP = Mathf.Max(0, currentHpA - resultA.netDamageToPlayer);
         resultA.finalOpponentHP = Mathf.Max(0, currentHpB - resultA.netDamageToOpponent);
 
-        // Update Server NetworkVariables (Source of Truth)
         if (aIsPlayer1)
         {
             Player1_HP.Value = resultA.finalPlayerHP;
@@ -182,10 +199,8 @@ public class EndTurnManager : NetworkBehaviour
             Player1_HP.Value = resultA.finalOpponentHP;
         }
 
-        // Send tailored result to Player A
         SendResultToClient(idA, resultA);
 
-        // Calculate and send tailored result to Player B
         var resultB = CalculateTurnResultFromIds(cardsB, cardsA);
         resultB.finalPlayerHP = resultA.finalOpponentHP;
         resultB.finalOpponentHP = resultA.finalPlayerHP;
@@ -237,7 +252,6 @@ public class EndTurnManager : NetworkBehaviour
                 var support = deckMgr.loadedSupportCards?.Find(c => c.Id == id);
                 if (support != null)
                 {
-                    // TODO: Expand this to apply Support effects (e.g., myAttack += 5)
                     Debug.Log($"[Server] Processing Support Card: {support.Name}");
                 }
             }
@@ -264,8 +278,8 @@ public class EndTurnManager : NetworkBehaviour
             opponentDefense = oppDefense,
             netDamageToPlayer = damageToMe,
             netDamageToOpponent = damageToOpponent,
-            finalPlayerHP = 0, // Set by server before sending
-            finalOpponentHP = 0 // Set by server before sending
+            finalPlayerHP = 0,
+            finalOpponentHP = 0
         };
     }
 
@@ -274,8 +288,6 @@ public class EndTurnManager : NetworkBehaviour
         yield return new WaitForSeconds(cardMovementWaitDelay);
 
         List<BalatroCardController> playerCards = GetControllersFromTransform(selectedHandTransform);
-        // Opponent cards are not visually submitted to this client's screen in the same way, 
-        // so we only highlight the local player's cards for the juice.
 
         HighlightCardsByCategory(playerCards, new List<BalatroCardController>(), CardCategory.Attack);
         yield return StartCoroutine(Routine_CountUpPair(
@@ -306,7 +318,6 @@ public class EndTurnManager : NetworkBehaviour
         }
         yield return new WaitForSeconds(phaseTransitionPause);
 
-        // Animate HP drops locally, then sync to server truth
         if (result.netDamageToPlayer > 0)
         {
             for (int i = 1; i <= result.netDamageToPlayer; i++)
@@ -331,7 +342,6 @@ public class EndTurnManager : NetworkBehaviour
             }
         }
 
-        // Sync local visual HP to the authoritative server HP
         currentPlayerHP = result.finalPlayerHP;
         currentOpponentHP = result.finalOpponentHP;
         UpdateHPUI();
@@ -348,18 +358,17 @@ public class EndTurnManager : NetworkBehaviour
 
     private void ResetCardHighlights(List<BalatroCardController> playerList, List<BalatroCardController> opponentList)
     {
-        foreach (var card in playerList) card.ResetCombatHighlight();
-        foreach (var card in opponentList) card.ResetCombatHighlight();
+        // Implementation depends on how you want to reset highlights on BalatroCardController
     }
 
     private List<BalatroCardController> GetControllersFromTransform(RectTransform container)
     {
         List<BalatroCardController> list = new List<BalatroCardController>();
         if (container == null) return list;
-        CardUI[] cards = container.GetComponentsInChildren<CardUI>();
-        foreach (CardUI card in cards)
+
+        BalatroCardController[] controllers = container.GetComponentsInChildren<BalatroCardController>();
+        foreach (BalatroCardController ctrl in controllers)
         {
-            BalatroCardController ctrl = card.GetComponent<BalatroCardController>();
             if (ctrl != null) list.Add(ctrl);
         }
         return list;
@@ -410,9 +419,8 @@ public class EndTurnManager : NetworkBehaviour
 
         if (timerManager != null)
         {
-            ResetTurnBlocker();
-            // Uncomment this when you are ready to loop rounds:
-            // timerManager.RequestStartRound(timerManager.CurrentRound + 1);
+            // Re-enable card interactions for the next round
+            handManager.SetAllCardsInteractable(true);
         }
     }
 
@@ -435,16 +443,15 @@ public class EndTurnManager : NetworkBehaviour
 
     private IEnumerator Routine_ProcessContainerCleanup(PlayerHandManager ownerHandManager, RectTransform selectedTransform)
     {
-        CardUI[] cardsInContainer = selectedTransform.GetComponentsInChildren<CardUI>();
-        List<CardUI> immediateCardsToDestroy = new List<CardUI>();
+        BalatroCardController[] cardsInContainer = selectedTransform.GetComponentsInChildren<BalatroCardController>();
+        List<BalatroCardController> immediateCardsToDestroy = new List<BalatroCardController>();
 
-        foreach (CardUI card in cardsInContainer)
+        foreach (BalatroCardController controller in cardsInContainer)
         {
-            if (card == null) continue;
-            BalatroCardController controller = card.GetComponent<BalatroCardController>();
-            if (controller != null && controller.Category == CardCategory.Support && !controller.IsForever)
+            if (controller == null) continue;
+            if (controller.Category == CardCategory.Support && !controller.IsForever)
             {
-                immediateCardsToDestroy.Add(card);
+                immediateCardsToDestroy.Add(controller);
             }
         }
 
@@ -456,7 +463,7 @@ public class EndTurnManager : NetworkBehaviour
         ownerHandManager.ReturnSubmittedCardsToHand(selectedTransform);
     }
 
-    private IEnumerator Routine_AnimateImmediateCardsDisappearance(List<CardUI> cardsToClear)
+    private IEnumerator Routine_AnimateImmediateCardsDisappearance(List<BalatroCardController> cardsToClear)
     {
         float popUpDuration = 0.12f;
         float shrinkDuration = 0.18f;
@@ -467,7 +474,10 @@ public class EndTurnManager : NetworkBehaviour
         {
             elapsed += Time.deltaTime;
             float t = elapsed / popUpDuration;
-            foreach (CardUI card in cardsToClear) if (card != null) card.transform.localScale = Vector3.Lerp(Vector3.one, popScale, t);
+            foreach (BalatroCardController controller in cardsToClear)
+            {
+                if (controller != null) controller.transform.localScale = Vector3.Lerp(Vector3.one, popScale, t);
+            }
             yield return null;
         }
 
@@ -476,11 +486,17 @@ public class EndTurnManager : NetworkBehaviour
         {
             elapsed += Time.deltaTime;
             float t = elapsed / shrinkDuration;
-            foreach (CardUI card in cardsToClear) if (card != null) card.transform.localScale = Vector3.Lerp(popScale, Vector3.zero, t);
+            foreach (BalatroCardController controller in cardsToClear)
+            {
+                if (controller != null) controller.transform.localScale = Vector3.Lerp(popScale, Vector3.zero, t);
+            }
             yield return null;
         }
 
-        foreach (CardUI card in cardsToClear) if (card != null) Destroy(card.gameObject);
+        foreach (BalatroCardController controller in cardsToClear)
+        {
+            if (controller != null) Destroy(controller.gameObject);
+        }
     }
 
     private IEnumerator Routine_PopText(Transform textTransform, Vector3 baseScale)
@@ -521,10 +537,5 @@ public class EndTurnManager : NetworkBehaviour
     {
         if (playerHPText != null) playerHPText.text = $"{currentPlayerHP}";
         if (opponentHPText != null) opponentHPText.text = $"{currentOpponentHP}";
-    }
-
-    private void ResetTurnBlocker()
-    {
-        if (raycastBlockerImage != null) raycastBlockerImage.gameObject.SetActive(false);
     }
 }
