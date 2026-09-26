@@ -191,9 +191,23 @@ public class DrawTimerManager : NetworkBehaviour
     {
         if (isTimerRunning)
         {
+            // 1. Set locally immediately so the local instance doesn't trigger the penalty
             playerHasDrawn = true;
-            Debug.Log("[DrawTimer] Player drew cards!");
+            Debug.Log("[DrawTimer] Local instance registered: Player drew cards!");
+
+            // 2. CRITICAL FIX: If this is a client, inform the server so it also knows
+            if (!IsServer && IsSpawned)
+            {
+                NotifyCardsDrawnServerRpc();
+            }
         }
+    }
+
+    [ServerRpc(RequireOwnership = false)]
+    private void NotifyCardsDrawnServerRpc()
+    {
+        playerHasDrawn = true;
+        Debug.Log("[DrawTimer] Server received draw notification from client!");
     }
 
     private void EndDrawPhase()

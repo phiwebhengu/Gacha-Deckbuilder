@@ -38,6 +38,17 @@ public class PlayerHandManager : MonoBehaviour
     private void Awake()
     {
         if (targetCanvas == null) targetCanvas = GetComponentInParent<Canvas>() ?? FindFirstObjectByType<Canvas>();
+        if (timerManager == null)
+        {
+            timerManager = FindFirstObjectByType<DrawTimerManager>();
+            if (timerManager == null) Debug.LogError("[PlayerHandManager] Could not find DrawTimerManager in the scene!");
+        }
+
+        if (gachaManager == null)
+        {
+            gachaManager = FindFirstObjectByType<GachaManager>();
+            if (gachaManager == null) Debug.LogError("[PlayerHandManager] Could not find GachaManager in the scene!");
+        }
     }
 
     public void DealCardsFromTokens(int count, DeckType deckToPull)

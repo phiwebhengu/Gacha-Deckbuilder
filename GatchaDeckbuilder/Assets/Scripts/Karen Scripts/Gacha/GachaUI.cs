@@ -109,6 +109,15 @@ public class GachaUI : MonoBehaviour
         if (pullActionButton != null) pullActionButton.interactable = false;
 
         // Delegate to PlayerHandManager so it can track the card internally
+        if (drawTimerManager != null)
+        {
+            drawTimerManager.NotifyCardsDrawn();
+        }
+        else
+        {
+            Debug.LogWarning("[GachaUI] drawTimerManager is null!");
+        }
+
         if (playerHandManager != null)
         {
             playerHandManager.DealCardsFromTokens(1, DeckType.Action);
@@ -123,7 +132,15 @@ public class GachaUI : MonoBehaviour
     {
         if (pullSupportButton != null) pullSupportButton.interactable = false;
 
-        // Delegate to PlayerHandManager so it can track the card internally
+        if (drawTimerManager != null)
+        {
+            drawTimerManager.NotifyCardsDrawn();
+        }
+        else
+        {
+            Debug.LogWarning("[GachaUI] drawTimerManager is null!");
+        }
+
         if (playerHandManager != null)
         {
             playerHandManager.DealCardsFromTokens(1, DeckType.Support);
