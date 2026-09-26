@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -6,6 +6,9 @@ using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 using Unity.Netcode;
+
+// ✅ NEW: Enum for tracking round states
+public enum RoundOutcome { Unplayed, Win, Loss, Draw }
 
 public struct TurnResultData : INetworkSerializable
 {
@@ -87,10 +90,31 @@ public class EndTurnManager : NetworkBehaviour
     [Header("System References")]
     [SerializeField] private DrawTimerManager timerManager;
 
+    // ✅ NEW: Round Tracking & Game Over UI References
+    [Header("Round Tracking UI")]
+    [SerializeField] private Image[] roundProgressImages = new Image[4];
+    [SerializeField] private Color unplayedColor = Color.gray;
+    [SerializeField] private Color winColor = Color.green;
+    [SerializeField] private Color lossColor = Color.red;
+    [SerializeField] private Color drawColor = Color.yellow;
+    [SerializeField] private Vector3 unplayedScale = Vector3.one;
+    [SerializeField] private Vector3 completedRoundScale = new Vector3(1.2f, 1.2f, 1f);
+
+    [Header("Game Over UI")]
+    [SerializeField] private GameObject gameOverPanel;
+    [SerializeField] private TextMeshProUGUI victoryText;
+    [SerializeField] private TextMeshProUGUI lossText;
+    [SerializeField] private Image raycastBlockerImage;
+
     private int currentPlayerHP;
     private int currentOpponentHP;
     private Dictionary<ulong, int[]> pendingTurns = new Dictionary<ulong, int[]>();
     private bool isPlayer1 = true;
+
+    // ✅ NEW: Match state tracking
+    private bool isMatchOver = false;
+    private RoundOutcome[] roundOutcomes = new RoundOutcome[4];
+    private int currentRoundIndex = 0;
 
     private Vector3 originalCenterScale = Vector3.one;
     private Vector3 originalPlayerHPScale = Vector3.one;
@@ -101,6 +125,9 @@ public class EndTurnManager : NetworkBehaviour
     private Vector3 originalOpponentDefenseScale = Vector3.one;
     private Vector3 originalCamPos;
 
+    private PlayerHandManager _cachedLocalHandManager;
+    private bool _hasCachedHandManager = false;
+
     public override void OnNetworkSpawn()
     {
         var allClients = new List<ulong>(NetworkManager.Singleton.ConnectedClientsIds);
@@ -109,6 +136,28 @@ public class EndTurnManager : NetworkBehaviour
 
         currentPlayerHP = isPlayer1 ? Player1_HP.Value : Player2_HP.Value;
         currentOpponentHP = isPlayer1 ? Player2_HP.Value : Player1_HP.Value;
+
+        if (IsServer)
+        {
+            NetworkManager.Singleton.OnClientDisconnectCallback += HandleClientDisconnect;
+        }
+    }
+
+    public override void OnNetworkDespawn()
+    {
+        if (IsServer && NetworkManager.Singleton != null)
+        {
+            NetworkManager.Singleton.OnClientDisconnectCallback -= HandleClientDisconnect;
+        }
+    }
+
+    private void HandleClientDisconnect(ulong clientId)
+    {
+        if (pendingTurns.ContainsKey(clientId))
+        {
+            pendingTurns.Remove(clientId);
+            Debug.Log($"[Server] Client {clientId} disconnected during turn. Clearing pending state.");
+        }
     }
 
     private void Start()
@@ -117,8 +166,25 @@ public class EndTurnManager : NetworkBehaviour
         if (mainCamera != null) originalCamPos = mainCamera.transform.localPosition;
 
         CacheAndResetUI();
+        InitializeRoundTrackers(); // ✅ NEW: Initialize round tracking
         UpdateEndTurnButtonVisibility();
-        ClearOpponentPanel(); // Ensure no lingering cards from previous scenes/sessions
+        ClearOpponentPanel();
+    }
+
+    // ✅ NEW: Initialize round trackers
+    private void InitializeRoundTrackers()
+    {
+        for (int i = 0; i < 4; i++)
+        {
+            roundOutcomes[i] = RoundOutcome.Unplayed;
+            if (i < roundProgressImages.Length && roundProgressImages[i] != null)
+            {
+                roundProgressImages[i].color = unplayedColor;
+                roundProgressImages[i].rectTransform.localScale = unplayedScale;
+            }
+        }
+        currentRoundIndex = 0;
+        isMatchOver = false;
     }
 
     private void CacheAndResetUI()
@@ -152,6 +218,9 @@ public class EndTurnManager : NetworkBehaviour
 
     private PlayerHandManager GetLocalHandManager()
     {
+        if (_hasCachedHandManager && _cachedLocalHandManager != null)
+            return _cachedLocalHandManager;
+
         int myPlayerSlot = isPlayer1 ? 1 : 2;
         PlayerSlot[] allSlots = FindObjectsByType<PlayerSlot>(FindObjectsSortMode.None);
 
@@ -159,35 +228,26 @@ public class EndTurnManager : NetworkBehaviour
         {
             if (slotObj.slot == myPlayerSlot)
             {
-                PlayerHandManager manager = slotObj.GetComponentInChildren<PlayerHandManager>();
-                if (manager != null)
+                _cachedLocalHandManager = slotObj.GetComponentInChildren<PlayerHandManager>();
+                if (_cachedLocalHandManager != null)
                 {
-                    Debug.Log($"[EndTurnManager] Found local hand manager on Slot {myPlayerSlot}");
-                    return manager;
+                    _hasCachedHandManager = true;
+                    return _cachedLocalHandManager;
                 }
             }
         }
         Debug.LogWarning("[EndTurnManager] Could not find matching slot, using first available PlayerHandManager.");
-        return FindFirstObjectByType<PlayerHandManager>();
+        _cachedLocalHandManager = FindFirstObjectByType<PlayerHandManager>();
+        _hasCachedHandManager = true;
+        return _cachedLocalHandManager;
     }
 
     public void UpdateEndTurnButtonVisibility()
     {
         PlayerHandManager localHandManager = GetLocalHandManager();
-        if (localHandManager == null)
-        {
-            Debug.LogWarning("[EndTurnManager] Local hand manager not found!");
-            return;
-        }
-        if (endTurnButton == null)
-        {
-            Debug.LogWarning("[EndTurnManager] endTurnButton is NOT assigned in the Inspector!");
-            return;
-        }
+        if (localHandManager == null || endTurnButton == null) return;
 
         int selectedCount = localHandManager.GetSelectedCards().Count;
-        Debug.Log($"[EndTurnManager] Checking visibility... Selected cards count: {selectedCount}");
-
         endTurnButton.gameObject.SetActive(selectedCount > 0);
     }
 
@@ -203,8 +263,6 @@ public class EndTurnManager : NetworkBehaviour
             return;
         }
 
-        Debug.Log($"[EndTurnManager] Submitting turn with {selectedIds.Length} cards: {string.Join(", ", selectedIds)}");
-
         localHandManager.SetAllCardsInteractable(false);
         localHandManager.SubmitSelectedCardsToHand(selectedHandTransform);
 
@@ -216,8 +274,15 @@ public class EndTurnManager : NetworkBehaviour
     [ServerRpc(RequireOwnership = false)]
     private void SubmitTurnServerRpc(int[] selectedCardIds, ServerRpcParams rpcParams = default)
     {
+        // ✅ NEW: Prevent turns if the match has already concluded
+        if (isMatchOver)
+        {
+            Debug.LogWarning($"[Server] Ignoring turn submission from Client {rpcParams.Receive.SenderClientId} because match is over.");
+            return;
+        }
+
         ulong clientId = rpcParams.Receive.SenderClientId;
-        pendingTurns[clientId] = selectedCardIds;
+        pendingTurns[clientId] = selectedCardIds ?? Array.Empty<int>();
         Debug.Log($"[Server] Received turn from Client {clientId} with {selectedCardIds.Length} cards.");
 
         if (pendingTurns.Count >= 2)
@@ -304,28 +369,20 @@ public class EndTurnManager : NetworkBehaviour
         int myAttack = 0, myDefense = 0;
         int oppAttack = 0, oppDefense = 0;
 
-        // Helper function to prevent code duplication
         void ProcessCards(int[] ids, ref int attack, ref int defense)
         {
             foreach (int id in ids)
             {
-                // 1. Check Action Cards
                 var actionCard = deckMgr.loadedActionCards?.Find(c => c.Id == id);
                 if (actionCard != null)
                 {
                     if (actionCard.Role == "Attack") attack += actionCard.Value;
                     else if (actionCard.Role == "Defense") defense += actionCard.Value;
-                    continue; // Card found, move to next ID
+                    continue;
                 }
 
-                // 2. Check Support Cards (Prevents silent failure)
                 var supportCard = deckMgr.loadedSupportCards?.Find(c => c.Id == id);
-                if (supportCard != null)
-                {
-                    // TODO: Add your Support card combat logic here if they provide stats
-                    // For now, it at least recognizes the card exists instead of ignoring it.
-                }
-                else
+                if (supportCard == null)
                 {
                     Debug.LogWarning($"[EndTurnManager] Card ID {id} not found in Action OR Support lists!");
                 }
@@ -415,8 +472,53 @@ public class EndTurnManager : NetworkBehaviour
         currentOpponentHP = result.finalOpponentHP;
         UpdateHPUI();
 
+        // ✅ NEW: Evaluate and record the round outcome for UI tracking
+        EvaluateAndRecordRoundOutcome(result);
+
         yield return new WaitForSeconds(0.5f);
         yield return StartCoroutine(Routine_CheckNextRoundOrEndGame());
+    }
+
+    // ✅ NEW: Evaluate round outcome deterministically on the client
+    private void EvaluateAndRecordRoundOutcome(TurnResultData result)
+    {
+        if (currentRoundIndex < 0 || currentRoundIndex >= 4) return;
+
+        RoundOutcome outcome = RoundOutcome.Draw;
+
+        if (result.netDamageToOpponent > result.netDamageToPlayer)
+        {
+            outcome = RoundOutcome.Win;
+        }
+        else if (result.netDamageToPlayer > result.netDamageToOpponent)
+        {
+            outcome = RoundOutcome.Loss;
+        }
+
+        roundOutcomes[currentRoundIndex] = outcome;
+
+        if (currentRoundIndex < roundProgressImages.Length && roundProgressImages[currentRoundIndex] != null)
+        {
+            Image roundImg = roundProgressImages[currentRoundIndex];
+            roundImg.rectTransform.localScale = completedRoundScale;
+
+            switch (outcome)
+            {
+                case RoundOutcome.Win:
+                    roundImg.color = winColor;
+                    break;
+                case RoundOutcome.Loss:
+                    roundImg.color = lossColor;
+                    break;
+                case RoundOutcome.Draw:
+                    roundImg.color = drawColor;
+                    break;
+            }
+
+            StartCoroutine(Routine_PopText(roundImg.transform, completedRoundScale));
+        }
+
+        currentRoundIndex++;
     }
 
     private void HighlightCardsByCategory(List<BalatroCardController> playerList, List<BalatroCardController> opponentList, CardCategory category)
@@ -444,21 +546,19 @@ public class EndTurnManager : NetworkBehaviour
             return opponentCards;
         }
 
+        // ✅ OPTIMIZATION: Cached outside the loop
+        PlayerHandManager anyHandManager = FindFirstObjectByType<PlayerHandManager>();
+        if (anyHandManager == null || anyHandManager.cardPrefab == null)
+        {
+            Debug.LogError("[InstantiateOpponentCards] No hand manager / cardPrefab found.");
+            return opponentCards;
+        }
+
         foreach (int cardId in opponentCardIds)
         {
-            PlayerHandManager anyHandManager = FindFirstObjectByType<PlayerHandManager>();
-            if (anyHandManager == null || anyHandManager.cardPrefab == null)
-            {
-                Debug.LogError("[InstantiateOpponentCards] No hand manager / cardPrefab found.");
-                continue;
-            }
-
             GameObject newCardObj = Instantiate(anyHandManager.cardPrefab, opponentSelectedHandTransform);
             BalatroCardController controller = newCardObj.GetComponent<BalatroCardController>();
-            CardVisual visual = newCardObj.GetComponentInChildren<CardVisual>(); // was GetComponent
-
-            if (controller == null) Debug.LogError($"[InstantiateOpponentCards] cardId {cardId}: no BalatroCardController on prefab.");
-            if (visual == null) Debug.LogError($"[InstantiateOpponentCards] cardId {cardId}: no CardVisual found (root or children).");
+            CardVisual visual = newCardObj.GetComponentInChildren<CardVisual>();
 
             if (controller != null && visual != null)
             {
@@ -469,7 +569,6 @@ public class EndTurnManager : NetworkBehaviour
                 if (actionCard != null)
                 {
                     Sprite sprite = GetCardSprite(cardId, true);
-                    if (sprite == null) Debug.LogError($"[InstantiateOpponentCards] cardId {cardId}: sprite NOT FOUND at CardSprites/Action/{cardId}");
                     visual.Setup(actionCard, sprite);
                     controller.SetCategory(actionCard.Role == "Attack" ? CardCategory.Attack : CardCategory.Defense);
                 }
@@ -479,13 +578,8 @@ public class EndTurnManager : NetworkBehaviour
                     if (supportCard != null)
                     {
                         Sprite sprite = GetCardSprite(cardId, false);
-                        if (sprite == null) Debug.LogError($"[InstantiateOpponentCards] cardId {cardId}: sprite NOT FOUND at CardSprites/Support/{cardId}");
                         visual.Setup(supportCard, sprite);
                         controller.SetCategory(CardCategory.Support);
-                    }
-                    else
-                    {
-                        Debug.LogError($"[InstantiateOpponentCards] cardId {cardId}: not found in loadedActionCards OR loadedSupportCards (count A:{deckMgr.loadedActionCards?.Count}, S:{deckMgr.loadedSupportCards?.Count}). Card left unconfigured.");
                     }
                 }
                 opponentCards.Add(controller);
@@ -498,13 +592,7 @@ public class EndTurnManager : NetworkBehaviour
     {
         string folder = isActionCard ? "CardSprites/Action/" : "CardSprites/Support/";
         string path = $"{folder}{cardId}";
-
-        Sprite sprite = Resources.Load<Sprite>(path);
-        if (sprite == null)
-        {
-            Debug.LogWarning($"[EndTurnManager] Failed to load sprite at Resources path: '{path}'. Check your folder structure and naming (e.g., maybe it needs a prefix like 'Card_{cardId}').");
-        }
-        return sprite;
+        return Resources.Load<Sprite>(path);
     }
 
     private List<BalatroCardController> GetControllersFromTransform(RectTransform container)
@@ -512,8 +600,7 @@ public class EndTurnManager : NetworkBehaviour
         List<BalatroCardController> list = new List<BalatroCardController>();
         if (container == null) return list;
 
-        BalatroCardController[] controllers = container.GetComponentsInChildren<BalatroCardController>();
-        foreach (BalatroCardController ctrl in controllers)
+        foreach (BalatroCardController ctrl in container.GetComponentsInChildren<BalatroCardController>())
         {
             if (ctrl != null) list.Add(ctrl);
         }
@@ -539,27 +626,51 @@ public class EndTurnManager : NetworkBehaviour
         }
     }
 
+    // ✅ NEW: Updated to handle multiplayer KO and 4-round completion
     private IEnumerator Routine_CheckNextRoundOrEndGame()
     {
+        // 1. EARLY HEALTH KNOCKOUT CHECK
         if (currentOpponentHP <= 0 && currentPlayerHP <= 0)
         {
             Debug.Log("[Match Over] BOTH PLAYERS KNOCKED OUT! DRAW GAME!");
-            yield return StartCoroutine(Routine_ClearAllSubmittedCards());
+            TriggerLocalGameOver(false, true);
             yield break;
         }
         if (currentOpponentHP <= 0)
         {
             Debug.Log("[Match Over] PLAYER WINS BY KNOCKOUT!");
-            yield return StartCoroutine(Routine_ClearAllSubmittedCards());
+            TriggerLocalGameOver(true, false);
             yield break;
         }
         if (currentPlayerHP <= 0)
         {
             Debug.Log("[Match Over] OPPONENT WINS BY KNOCKOUT!");
-            yield return StartCoroutine(Routine_ClearAllSubmittedCards());
+            TriggerLocalGameOver(false, false);
             yield break;
         }
 
+        // 2. CHECK 4-ROUND COMPLETION (BEST OF 4 RESULT)
+        if (currentRoundIndex >= 4)
+        {
+            int playerWins = 0;
+            int opponentWins = 0;
+
+            foreach (var outcome in roundOutcomes)
+            {
+                if (outcome == RoundOutcome.Win) playerWins++;
+                else if (outcome == RoundOutcome.Loss) opponentWins++;
+            }
+
+            Debug.Log($"[Match Over - 4 Rounds Complete] Player Wins: {playerWins} | Opponent Wins: {opponentWins}");
+
+            bool isPlayerWinner = playerWins > opponentWins;
+            bool isDraw = playerWins == opponentWins;
+
+            TriggerLocalGameOver(isPlayerWinner, isDraw);
+            yield break;
+        }
+
+        // 3. CONTINUE TO NEXT ROUND
         yield return StartCoroutine(Routine_ClearAllSubmittedCards());
         ResetTurnUI();
 
@@ -570,7 +681,44 @@ public class EndTurnManager : NetworkBehaviour
             {
                 localHandManager.SetAllCardsInteractable(true);
             }
+            // ✅ NEW: Trigger next round via DrawTimerManager
+            timerManager.RequestStartRound(currentRoundIndex + 1);
         }
+    }
+
+    // ✅ NEW: Local game over trigger that informs the server to stop accepting turns
+    private void TriggerLocalGameOver(bool isPlayerWinner, bool isDraw)
+    {
+        isMatchOver = true;
+        NotifyServerGameOverServerRpc(); // Inform server to lock the match
+
+        StopAllCoroutines();
+
+        if (raycastBlockerImage != null) raycastBlockerImage.gameObject.SetActive(true);
+        if (gameOverPanel != null) gameOverPanel.SetActive(true);
+
+        if (isDraw)
+        {
+            if (victoryText != null) { victoryText.text = "DRAW"; victoryText.gameObject.SetActive(true); }
+            if (lossText != null) lossText.gameObject.SetActive(false);
+        }
+        else if (isPlayerWinner)
+        {
+            if (victoryText != null) victoryText.gameObject.SetActive(true);
+            if (lossText != null) lossText.gameObject.SetActive(false);
+        }
+        else
+        {
+            if (victoryText != null) victoryText.gameObject.SetActive(false);
+            if (lossText != null) lossText.gameObject.SetActive(true);
+        }
+    }
+
+    [ServerRpc(RequireOwnership = false)]
+    private void NotifyServerGameOverServerRpc(ServerRpcParams rpcParams = default)
+    {
+        isMatchOver = true;
+        Debug.Log($"[Server] Match over flagged by client {rpcParams.Receive.SenderClientId}. Locking further turns.");
     }
 
     private void ResetTurnUI()
@@ -584,12 +732,20 @@ public class EndTurnManager : NetworkBehaviour
 
     private IEnumerator Routine_ClearAllSubmittedCards()
     {
+        // 1. LOCAL PLAYER: Return cards to hand so they are reusable. NO DESTRUCTION.
         PlayerHandManager localHandManager = GetLocalHandManager();
         if (localHandManager != null && selectedHandTransform != null)
         {
-            yield return StartCoroutine(Routine_ProcessContainerCleanup(localHandManager, selectedHandTransform));
+            // This should handle moving the cards back to the hand UI
+            localHandManager.ReturnSubmittedCardsToHand(selectedHandTransform);
+
+            // Optional: Wait a brief moment for the "return to hand" animation to finish 
+            // before starting the next round's timer. Adjust 0.3f to match your animation speed.
+            yield return new WaitForSeconds(0.3f);
         }
 
+        // 2. OPPONENT: Destroy the temporary visual clones. 
+        // (These are re-instantiated from IDs each round, so we clean them up to prevent memory leaks)
         if (opponentSelectedHandTransform != null)
         {
             BalatroCardController[] oppCards = opponentSelectedHandTransform.GetComponentsInChildren<BalatroCardController>();
@@ -598,31 +754,36 @@ public class EndTurnManager : NetworkBehaviour
                 if (card != null) Destroy(card.gameObject);
             }
         }
+
+        yield return null;
     }
 
+    // ✅ NEW: Adapted to use BalatroCardController
     private IEnumerator Routine_ProcessContainerCleanup(PlayerHandManager ownerHandManager, RectTransform selectedTransform)
     {
         BalatroCardController[] cardsInContainer = selectedTransform.GetComponentsInChildren<BalatroCardController>();
-        List<BalatroCardController> immediateCardsToDestroy = new List<BalatroCardController>();
+        List<BalatroCardController> cardsToDestroy = new List<BalatroCardController>();
 
-        foreach (BalatroCardController controller in cardsInContainer)
+        foreach (BalatroCardController card in cardsInContainer)
         {
-            if (controller == null) continue;
-            if (controller.Category == CardCategory.Support && !controller.IsForever)
+            if (card == null) continue;
+
+            if (card.Category != CardCategory.Support || !card.IsForever)
             {
-                immediateCardsToDestroy.Add(controller);
+                cardsToDestroy.Add(card);
             }
         }
 
-        if (immediateCardsToDestroy.Count > 0)
+        if (cardsToDestroy.Count > 0)
         {
-            yield return StartCoroutine(Routine_AnimateImmediateCardsDisappearance(immediateCardsToDestroy));
+            yield return StartCoroutine(Routine_AnimateCardsDisappearance(cardsToDestroy));
         }
 
         ownerHandManager.ReturnSubmittedCardsToHand(selectedTransform);
     }
 
-    private IEnumerator Routine_AnimateImmediateCardsDisappearance(List<BalatroCardController> cardsToClear)
+    // ✅ RENAMED & UNIFIED: Handles animated disappearance for any list of cards
+    private IEnumerator Routine_AnimateCardsDisappearance(List<BalatroCardController> cardsToClear)
     {
         float popUpDuration = 0.12f;
         float shrinkDuration = 0.18f;
