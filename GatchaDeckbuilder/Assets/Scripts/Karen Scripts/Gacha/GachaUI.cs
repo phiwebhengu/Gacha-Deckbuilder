@@ -17,12 +17,11 @@ public class GachaUI : MonoBehaviour
     public GameObject cardBackPrefab;
     public Transform OpponentCardContainer;
 
-    [Header("Card Visuals")]
-    public GameObject cardPrefab;
-    public Transform CardContainer;
-
     [Header("System References")]
     public DrawTimerManager drawTimerManager;
+
+    // ADD THIS: Reference to the hand manager so we can delegate card spawning to it
+    public PlayerHandManager playerHandManager;
 
     private GachaManager mgr;
     private int currentTokens = 0;
@@ -36,7 +35,7 @@ public class GachaUI : MonoBehaviour
         if (mgr != null)
         {
             mgr.OnMyTokensChanged -= UpdateTokens;
-            mgr.OnMyPullResolved -= HandlePullResolved;
+            // REMOVED: mgr.OnMyPullResolved -= HandlePullResolved;
             mgr.OnPullFailed -= HandlePullFailed;
             mgr.OnOpponentDrewCard -= HandleOpponentDrewCard;
         }
@@ -55,11 +54,10 @@ public class GachaUI : MonoBehaviour
         }
 
         mgr.OnMyTokensChanged += UpdateTokens;
-        mgr.OnMyPullResolved += HandlePullResolved;
+        // REMOVED: mgr.OnMyPullResolved += HandlePullResolved; (PlayerHandManager handles this now)
         mgr.OnPullFailed += HandlePullFailed;
         mgr.OnOpponentDrewCard += HandleOpponentDrewCard;
 
-        // --- CRITICAL FIX: Proactively fetch tokens in case we missed the initial RPC ---
         currentTokens = mgr.GetLocalPlayerTokens();
         if (tokenText != null) tokenText.text = string.Format(tokenFormat, currentTokens);
 
@@ -69,7 +67,6 @@ public class GachaUI : MonoBehaviour
             isDrawPhaseActive = drawTimerManager.IsDrawPhaseActive;
         }
 
-        // --- CRITICAL FIX: Force an initial button state evaluation ---
         UpdateButtonInteractability(isDrawPhaseActive);
     }
 
@@ -83,7 +80,6 @@ public class GachaUI : MonoBehaviour
     private void UpdateButtonInteractability(bool phaseActive)
     {
         isDrawPhaseActive = phaseActive;
-
         bool timerAllowsPull = (drawTimerManager == null) || isDrawPhaseActive;
         bool canPull = currentTokens > 0 && timerAllowsPull;
 
@@ -91,46 +87,13 @@ public class GachaUI : MonoBehaviour
         if (pullSupportButton != null) pullSupportButton.interactable = canPull;
     }
 
-    private void HandlePullResolved(PullResult result)
-    {
-        string tag = "";
-        if (result.PityTriggered) tag += " [PITY]";
-        if (result.Was5050Roll) tag += result.Won5050 ? " [50/50 WON]" : " [50/50 LOST]";
-        Debug.Log($"<color=cyan>Pulled {result.Deck}:</color> {result.CardName} ({result.Tier}){tag}");
-
-        if (cardPrefab == null || CardContainer == null) return;
-
-        bool isAction = result.Deck == DeckType.Action;
-        Sprite sprite = GetCardSprite(result.CardId, isAction);
-        var obj = Instantiate(cardPrefab, CardContainer);
-
-        // Get the unified CardVisual component
-        var visual = obj.GetComponent<CardVisual>();
-        if (visual != null)
-        {
-            // 1. Setup the visual data and sprite
-            if (isAction)
-                visual.Setup(result.ActionData, sprite);
-            else
-                visual.Setup(result.SupportData, sprite);
-
-            // 2. Trigger the reveal animation (uses the string overload we added to CardVisual)
-            visual.PlayReveal(result.Tier);
-        }
-    }
+    // REMOVED: HandlePullResolved entirely. PlayerHandManager is now the single source of truth for spawning.
 
     private void HandlePullFailed(string reason)
     {
         Debug.LogWarning($"Pull failed: {reason}");
-        // Re-enable buttons if the pull fails so the player can try again
         if (pullActionButton != null) pullActionButton.interactable = true;
         if (pullSupportButton != null) pullSupportButton.interactable = true;
-    }
-
-    private Sprite GetCardSprite(int cardId, bool isActionCard)
-    {
-        string folder = isActionCard ? "CardSprites/Action/" : "CardSprites/Support/";
-        return Resources.Load<Sprite>($"{folder}{cardId}");
     }
 
     private void HandleOpponentDrewCard(ulong opponentClientId)
@@ -144,12 +107,30 @@ public class GachaUI : MonoBehaviour
     public void OnClickPullAction()
     {
         if (pullActionButton != null) pullActionButton.interactable = false;
-        if (mgr != null) mgr.RequestPullAction();
+
+        // Delegate to PlayerHandManager so it can track the card internally
+        if (playerHandManager != null)
+        {
+            playerHandManager.DealCardsFromTokens(1, DeckType.Action);
+        }
+        else if (mgr != null)
+        {
+            mgr.RequestPullAction(); // Fallback if PlayerHandManager is missing
+        }
     }
 
     public void OnClickPullSupport()
     {
         if (pullSupportButton != null) pullSupportButton.interactable = false;
-        if (mgr != null) mgr.RequestPullSupport();
+
+        // Delegate to PlayerHandManager so it can track the card internally
+        if (playerHandManager != null)
+        {
+            playerHandManager.DealCardsFromTokens(1, DeckType.Support);
+        }
+        else if (mgr != null)
+        {
+            mgr.RequestPullSupport(); // Fallback if PlayerHandManager is missing
+        }
     }
 }

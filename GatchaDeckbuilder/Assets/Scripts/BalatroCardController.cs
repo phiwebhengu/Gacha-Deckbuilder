@@ -13,16 +13,18 @@ public class BalatroCardController : MonoBehaviour, IPointerClickHandler
 
     [Header("References")]
     [SerializeField] private Button cardButton;
-    [SerializeField] private Image cardImage; // Added to actually apply highlight colors
+    [SerializeField] private Image cardImage;
 
     [Header("Combat Highlight Colors")]
     [SerializeField] private Color attackHighlightColor = new Color(1f, 0.3f, 0.3f, 1f);
     [SerializeField] private Color defenseHighlightColor = new Color(0.3f, 0.6f, 1f, 1f);
     [SerializeField] private Color supportHighlightColor = new Color(0.3f, 0.9f, 0.4f, 1f);
     [SerializeField] private Color highlightColor = new Color(1f, 0.9f, 0.4f, 1f);
-    [SerializeField] private Color defaultColor = Color.white; // Added for reset
+    [SerializeField] private Color defaultColor = Color.white;
 
     public bool IsSelected { get; private set; } = false;
+    public bool IsInteractable => isInteractable; // Added for debugging
+
     private bool isInteractable = true;
     private RectTransform rectTransform;
     private EndTurnManager endTurnManager;
@@ -42,11 +44,7 @@ public class BalatroCardController : MonoBehaviour, IPointerClickHandler
         }
     }
 
-    public void SetEndTurnManager(EndTurnManager manager)
-    {
-        endTurnManager = manager;
-    }
-
+    public void SetEndTurnManager(EndTurnManager manager) => endTurnManager = manager;
     public void SetCardId(int id) => CardId = id;
     public void SetCardMetadata(bool isForever) => IsForever = isForever;
 
@@ -71,7 +69,8 @@ public class BalatroCardController : MonoBehaviour, IPointerClickHandler
         if (!isInteractable) return;
 
         IsSelected = !IsSelected;
-        Debug.Log($"[BalatroCardController] IsSelected is now {IsSelected} on card '{gameObject.name}'");
+        // DIAGNOSTIC LOG: Shows exactly which instance was toggled
+        Debug.Log($"[BalatroCardController] Toggled IsSelected to {IsSelected} on '{gameObject.name}' (Instance ID: {GetEntityId()})");
 
         if (rectTransform != null)
         {
@@ -98,17 +97,11 @@ public class BalatroCardController : MonoBehaviour, IPointerClickHandler
             _ => highlightColor
         };
 
-        if (cardImage != null)
-        {
-            cardImage.color = targetHighlight;
-        }
+        if (cardImage != null) cardImage.color = targetHighlight;
     }
 
     public void ResetHighlight()
     {
-        if (cardImage != null)
-        {
-            cardImage.color = defaultColor;
-        }
+        if (cardImage != null) cardImage.color = defaultColor;
     }
 }

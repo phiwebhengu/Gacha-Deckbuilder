@@ -508,9 +508,8 @@ MonoBehaviour:
   pullSupportButton: {fileID: 1059806172}
   cardBackPrefab: {fileID: 2682837092641137224, guid: 376ca7ad8e442ba41b967c79d759df7d, type: 3}
   OpponentCardContainer: {fileID: 1667410413}
-  cardPrefab: {fileID: 2682837092641137224, guid: e0404b1aa65ff5a44a38dc1d1b668b37, type: 3}
-  CardContainer: {fileID: 105399622}
   drawTimerManager: {fileID: 1243131124}
+  playerHandManager: {fileID: 105399625}
 --- !u!1 &515870228
 GameObject:
   m_ObjectHideFlags: 0
