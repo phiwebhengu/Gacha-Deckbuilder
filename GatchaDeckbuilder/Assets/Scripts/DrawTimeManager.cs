@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using TMPro;
 using Unity.Netcode;
@@ -232,7 +232,25 @@ public class DrawTimerManager : NetworkBehaviour
     private void ExecuteAutoDrawPenalty()
     {
         bool isAction = UnityEngine.Random.value > 0.5f;
-        ExecuteGachaPull(isAction);
+        DeckType deckToPull = isAction ? DeckType.Action : DeckType.Support;
+
+        // ✅ FIX: Tell the PlayerHandManager to deal 1 card. 
+        // This ensures the gacha request is made AND the card is actually instantiated.
+        PlayerHandManager handManager = FindFirstObjectByType<PlayerHandManager>();
+
+        if (handManager != null)
+        {
+            Debug.Log($"[DrawTimer] Time expired! Executing random auto-draw penalty: 1 {deckToPull} card.");
+            handManager.DealCardsFromTokens(1, deckToPull);
+        }
+        else
+        {
+            Debug.LogError("[DrawTimer] PlayerHandManager not found! Cannot execute auto-draw penalty.");
+
+            // Fallback: still notify the server that we "drew" something 
+            // so the match doesn't soft-lock waiting for a draw.
+            NotifyCardsDrawn();
+        }
     }
 
     private void UpdateTimerUI(float fillRatio, float timeRemaining)
@@ -240,23 +258,6 @@ public class DrawTimerManager : NetworkBehaviour
         if (timerText != null)
         {
             timerText.text = Mathf.CeilToInt(Mathf.Max(0f, timeRemaining)).ToString();
-        }
-    }
-
-    public void ExecuteGachaPull(bool isActionDeck)
-    {
-        if (gachaManager == null) gachaManager = FindFirstObjectByType<GachaManager>();
-
-        if (gachaManager != null)
-        {
-            if (isActionDeck) gachaManager.RequestPullAction();
-            else gachaManager.RequestPullSupport();
-
-            NotifyCardsDrawn();
-        }
-        else
-        {
-            Debug.LogError("[DrawTimer] GachaManager not found! Cannot execute pull.");
         }
     }
 }

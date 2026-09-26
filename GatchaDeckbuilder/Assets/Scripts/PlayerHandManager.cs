@@ -25,12 +25,16 @@ public class PlayerHandManager : MonoBehaviour
     {
         if (gachaManager != null)
             gachaManager.OnMyPullResolved += HandlePullResolved;
+        if (timerManager != null)
+            timerManager.OnDrawPhaseChanged += HandleDrawPhaseChanged;
     }
 
     private void OnDisable()
     {
         if (gachaManager != null)
             gachaManager.OnMyPullResolved -= HandlePullResolved;
+        if (timerManager != null)
+            timerManager.OnDrawPhaseChanged -= HandleDrawPhaseChanged;
     }
 
     private void HandlePullResolved(PullResult result) => pendingPulls.Enqueue(result);
@@ -120,7 +124,10 @@ public class PlayerHandManager : MonoBehaviour
 
             visual.PlayReveal(result.Tier);
             newCardObj.GetComponent<RectTransform>().localScale = Vector3.one;
-
+            if (timerManager != null)
+            {
+                controller.SetInteractable(!timerManager.IsDrawPhaseActive);
+            }
             cardsInHand.Add(controller);
             // DIAGNOSTIC LOG: Confirms the card was added to the list with its Instance ID
             Debug.Log($"[PlayerHandManager] Added card '{controller.gameObject.name}' (Instance ID: {controller.GetEntityId()}) to internal hand list. Total: {cardsInHand.Count}");
@@ -234,5 +241,15 @@ public class PlayerHandManager : MonoBehaviour
                 Destroy(controller.gameObject);
             }
         }
+    }
+    private void HandleDrawPhaseChanged(bool isDrawPhaseActive)
+    {
+        // If the draw phase is active, cards should NOT be interactable.
+        // When the draw phase ends, they become interactable again.
+        bool shouldBeInteractable = !isDrawPhaseActive;
+
+        SetAllCardsInteractable(shouldBeInteractable);
+
+        Debug.Log($"[PlayerHandManager] Draw phase active: {isDrawPhaseActive}. Cards interactable: {shouldBeInteractable}");
     }
 }
