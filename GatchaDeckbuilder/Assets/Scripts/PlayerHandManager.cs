@@ -26,7 +26,10 @@ public class PlayerHandManager : MonoBehaviour
         if (gachaManager != null)
             gachaManager.OnMyPullResolved += HandlePullResolved;
         if (timerManager != null)
+        {
             timerManager.OnDrawPhaseChanged += HandleDrawPhaseChanged;
+            HandleDrawPhaseChanged(timerManager.IsDrawPhaseActive);
+        }
     }
 
     private void OnDisable()

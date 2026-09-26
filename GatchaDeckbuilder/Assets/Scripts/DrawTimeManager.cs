@@ -83,7 +83,10 @@ public class DrawTimerManager : NetworkBehaviour
         currentRound = roundNumber;
         playerHasDrawn = false;
         isTimerRunning = false; // Keep false until the countdown actually finishes
-
+        if (preGamePanel != null)
+        {
+            preGamePanel.SetActive(true);
+        }
         StartCoroutine(Routine_StartRoundSequence());
     }
 
