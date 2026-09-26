@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
 
@@ -69,19 +69,38 @@ public class BalatroCardController : MonoBehaviour, IPointerClickHandler
         if (!isInteractable) return;
 
         IsSelected = !IsSelected;
-        // DIAGNOSTIC LOG: Shows exactly which instance was toggled
-        Debug.Log($"[BalatroCardController] Toggled IsSelected to {IsSelected} on '{gameObject.name}' (Instance ID: {GetEntityId()})");
+        Debug.Log($"[BalatroCardController] Toggled IsSelected to {IsSelected} on '{gameObject.name}'");
 
+        UpdateSelectionVisuals();
+
+        if (endTurnManager != null)
+        {
+            endTurnManager.UpdateEndTurnButtonVisibility();
+        }
+    }
+
+    // ✅ NEW: Bypasses the isInteractable check for programmatic cleanup
+    public void ForceDeselect()
+    {
+        if (!IsSelected) return;
+
+        IsSelected = false;
+        UpdateSelectionVisuals();
+
+        if (endTurnManager != null)
+        {
+            endTurnManager.UpdateEndTurnButtonVisibility();
+        }
+    }
+
+    // ✅ NEW: Helper to keep the visual logic DRY (Don't Repeat Yourself)
+    private void UpdateSelectionVisuals()
+    {
         if (rectTransform != null)
         {
             Vector2 currentPos = rectTransform.anchoredPosition;
             float targetY = IsSelected ? currentPos.y + 50f : currentPos.y - 50f;
             rectTransform.anchoredPosition = new Vector2(currentPos.x, targetY);
-        }
-
-        if (endTurnManager != null)
-        {
-            endTurnManager.UpdateEndTurnButtonVisibility();
         }
     }
 

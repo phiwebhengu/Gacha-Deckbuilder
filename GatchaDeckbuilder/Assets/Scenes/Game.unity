@@ -2947,8 +2947,16 @@ MonoBehaviour:
   textFormat: 'Support Pity: {0}/{1}'
   showMaxThreshold: 1
   useColorCoding: 1
-  nearPityColor: {r: 1, g: 0.6881286, b: 0.015686274, a: 1}
-  normalColor: {r: 0, g: 0, b: 0, a: 1}
+  nearPityColor:
+    r: 1
+    g: 0.6881286
+    b: 0.015686274
+    a: 1
+  normalColor:
+    r: 0
+    g: 0
+    b: 0
+    a: 1
 --- !u!114 &1093739946
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -3476,8 +3484,16 @@ MonoBehaviour:
   textFormat: 'Action Pity: {0}/{1}'
   showMaxThreshold: 1
   useColorCoding: 1
-  nearPityColor: {r: 1, g: 0.6881286, b: 0.015686274, a: 1}
-  normalColor: {r: 0, g: 0, b: 0, a: 1}
+  nearPityColor:
+    r: 1
+    g: 0.6881286
+    b: 0.015686274
+    a: 1
+  normalColor:
+    r: 0
+    g: 0
+    b: 0
+    a: 1
 --- !u!1 &1419203491
 GameObject:
   m_ObjectHideFlags: 0
@@ -4105,6 +4121,21 @@ MonoBehaviour:
   opponentSelectedHandTransform: {fileID: 1558225250}
   opponentCardPrefab: {fileID: 2682837092641137224, guid: e0404b1aa65ff5a44a38dc1d1b668b37, type: 3}
   timerManager: {fileID: 1243131124}
+  roundProgressImages:
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  unplayedColor: {r: 0.5, g: 0.5, b: 0.5, a: 1}
+  winColor: {r: 0, g: 1, b: 0, a: 1}
+  lossColor: {r: 1, g: 0, b: 0, a: 1}
+  drawColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
+  unplayedScale: {x: 1, y: 1, z: 1}
+  completedRoundScale: {x: 1.2, y: 1.2, z: 1}
+  gameOverPanel: {fileID: 0}
+  victoryText: {fileID: 0}
+  lossText: {fileID: 0}
+  raycastBlockerImage: {fileID: 0}
 --- !u!1 &1662710352
 GameObject:
   m_ObjectHideFlags: 0

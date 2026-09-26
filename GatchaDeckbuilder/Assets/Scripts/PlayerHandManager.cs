@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -192,6 +192,7 @@ public class PlayerHandManager : MonoBehaviour
 
     public void ReturnSubmittedCardsToHand(RectTransform containerTransform)
     {
+        // Create a copy of the list to iterate over safely while modifying the original
         List<BalatroCardController> cardsToReturn = new List<BalatroCardController>(submittedCards);
 
         foreach (BalatroCardController controller in cardsToReturn)
@@ -199,14 +200,21 @@ public class PlayerHandManager : MonoBehaviour
             if (controller == null) continue;
 
             submittedCards.Remove(controller);
-            cardsInHand.Add(controller);
+
+            // ✅ SAFETY: Prevent duplicate entries in the hand list
+            if (!cardsInHand.Contains(controller))
+            {
+                cardsInHand.Add(controller);
+            }
 
             controller.transform.SetParent(handTransform, true);
             controller.enabled = true;
 
+            // ✅ FIX: Use ForceDeselect to guarantee the selection state is cleared, 
+            // regardless of the current isInteractable state.
             if (controller.IsSelected)
             {
-                controller.ToggleSelection(); // Deselect it upon return
+                controller.ForceDeselect();
             }
         }
     }
