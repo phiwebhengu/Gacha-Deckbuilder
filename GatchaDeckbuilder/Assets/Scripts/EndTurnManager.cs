@@ -804,21 +804,27 @@ public class EndTurnManager : NetworkBehaviour
 
     System.Collections.IEnumerator ReturnToLobbyRoutine()
     {
-        // Note: Ensure UIManager is a globally accessible singleton in your project
-        if (UIManager.Instance != null)
+        // 1. Stop any lingering coroutines to prevent errors during scene transition
+        StopAllCoroutines();
+
+        // 2. Cleanly shutdown the Network session. 
+        // This ensures the server stops, clients disconnect, and NetworkObjects are cleared 
+        // so you can host/join again cleanly from the lobby.
+        if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening)
         {
-            UIManager.Instance.NotifyReturnedToLobby();
+            NetworkManager.Singleton.Shutdown();
         }
 
-        string sceneToUnload = "GameScene"; // Default fallback
-        sceneToUnload = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name;
+        // 3. Load the Lobby Scene directly.
+        // ⚠️ IMPORTANT: Replace "LobbyScene" with the EXACT name of your Lobby/Main Menu scene 
+        // as it appears in your Unity Build Settings.
+        string lobbySceneName = "Lobby";
 
-        yield return UnityEngine.SceneManagement.SceneManager.UnloadSceneAsync(sceneToUnload);
+        // LoadScene (Single mode) will automatically unload the current Game scene 
+        // and load the Lobby scene fresh, bringing your UIManager back into existence.
+        UnityEngine.SceneManagement.SceneManager.LoadScene(lobbySceneName);
 
-        if (UIManager.Instance != null)
-        {
-            UIManager.Instance.NotifyReturnedToLobby();
-        }
+        yield return null;
     }
 
     public void RequestPause()
@@ -935,5 +941,25 @@ public class EndTurnManager : NetworkBehaviour
 
         // Optional: If you have a rewind button or other UI elements, handle them here
         // if (rewindButton != null) rewindButton.interactable = finalState;
+    }
+    public void QuitGame()
+    {
+        Debug.Log("Quitting game...");
+
+        // 1. Ensure time is unpaused so scene transitions/animations don't freeze
+        Time.timeScale = 1f;
+
+        // 2. Cleanly disconnect from the network to prevent server hangs or errors
+        if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsConnectedClient)
+        {
+            NetworkManager.Singleton.Shutdown();
+        }
+
+        // 3. Quit the application (or stop play mode if in the Unity Editor)
+#if UNITY_EDITOR
+        UnityEditor.EditorApplication.isPlaying = false;
+#else
+        Application.Quit();
+#endif
     }
 }
