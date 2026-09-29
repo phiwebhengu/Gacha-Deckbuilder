@@ -52,6 +52,11 @@ public class EndTurnManager : NetworkBehaviour
     public NetworkVariable<int> Player1_HP = new NetworkVariable<int>(20, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
     public NetworkVariable<int> Player2_HP = new NetworkVariable<int>(20, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
 
+    // ✅ NEW: Network state for Pause, Forfeit, and Game Over
+    public NetworkVariable<bool> IsGamePaused = new NetworkVariable<bool>(false, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
+    public NetworkVariable<ulong> PauseRequesterClientId = new NetworkVariable<ulong>(0, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
+    public NetworkVariable<bool> GameEnded = new NetworkVariable<bool>(false, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
+
     [Header("HP UI References")]
     [SerializeField] private TextMeshProUGUI playerHPText;
     [SerializeField] private TextMeshProUGUI opponentHPText;
@@ -89,7 +94,16 @@ public class EndTurnManager : NetworkBehaviour
 
     [Header("Game Over UI")]
     [SerializeField] private GameObject gameOverPanel;
-    [SerializeField] private TextMeshProUGUI resultText; // Displays "VICTORY!", "DEFEAT", or "DRAW"
+    [SerializeField] private TextMeshProUGUI resultText;
+    [SerializeField] private Button returnToLobbyButton;
+
+    [Header("Pause & Forfeit UI")]
+    [SerializeField] private GameObject pausePanel;
+    [SerializeField] private Button forfeitButton;
+    [SerializeField] private Button pauseButton;
+
+    [Header("Scene Settings")]
+    [SerializeField] private string gameType = "CardGame"; // Used for scene unloading logic
 
     private int currentPlayerHP;
     private int currentOpponentHP;
@@ -98,6 +112,9 @@ public class EndTurnManager : NetworkBehaviour
 
     private bool isMatchOver = false;
     private int currentRound = 1;
+    private bool timerRunning = true;
+    private float lastPauseRequestTime = 0f;
+    private const float PAUSE_COOLDOWN = 5f;
 
     private Vector3 originalCenterScale = Vector3.one;
     private Vector3 originalPlayerHPScale = Vector3.one;
@@ -124,6 +141,9 @@ public class EndTurnManager : NetworkBehaviour
         {
             NetworkManager.Singleton.OnClientDisconnectCallback += HandleClientDisconnect;
         }
+
+        // ✅ NEW: Listen for game over state changes from the server
+        GameEnded.OnValueChanged += OnGameEndedChanged;
     }
 
     public override void OnNetworkDespawn()
@@ -131,6 +151,24 @@ public class EndTurnManager : NetworkBehaviour
         if (IsServer && NetworkManager.Singleton != null)
         {
             NetworkManager.Singleton.OnClientDisconnectCallback -= HandleClientDisconnect;
+        }
+        GameEnded.OnValueChanged -= OnGameEndedChanged;
+    }
+
+    private void OnGameEndedChanged(bool oldVal, bool newVal)
+    {
+        if (newVal && !isMatchOver)
+        {
+            isMatchOver = true;
+            StopAllCoroutines();
+
+            if (gameOverPanel != null) gameOverPanel.SetActive(true);
+            if (returnToLobbyButton != null) returnToLobbyButton.gameObject.SetActive(true);
+
+            if (resultText != null && string.IsNullOrEmpty(resultText.text))
+            {
+                resultText.text = "GAME OVER";
+            }
         }
     }
 
@@ -242,7 +280,7 @@ public class EndTurnManager : NetworkBehaviour
     [ServerRpc(RequireOwnership = false)]
     private void SubmitTurnServerRpc(int[] selectedCardIds, ServerRpcParams rpcParams = default)
     {
-        if (isMatchOver)
+        if (isMatchOver || GameEnded.Value)
         {
             Debug.LogWarning($"[Server] Ignoring turn submission from Client {rpcParams.Receive.SenderClientId} because match is over.");
             return;
@@ -586,20 +624,17 @@ public class EndTurnManager : NetworkBehaviour
         }
     }
 
+    // ✅ UPDATED: Triggers game over and syncs network state
     private void TriggerLocalGameOver(bool isPlayerWinner, bool isDraw)
     {
         isMatchOver = true;
-        NotifyServerGameOverServerRpc(); // Inform server to lock the match
+        GameEnded.Value = true; // ✅ Sync network state
+        NotifyServerGameOverServerRpc();
 
         StopAllCoroutines();
 
-        // Show the game over panel
-        if (gameOverPanel != null)
-        {
-            gameOverPanel.SetActive(true);
-        }
+        if (gameOverPanel != null) gameOverPanel.SetActive(true);
 
-        // Display the final result text
         if (resultText != null)
         {
             resultText.gameObject.SetActive(true);
@@ -616,12 +651,15 @@ public class EndTurnManager : NetworkBehaviour
                 resultText.text = "DEFEAT";
             }
         }
+
+        if (returnToLobbyButton != null) returnToLobbyButton.gameObject.SetActive(true);
     }
 
     [ServerRpc(RequireOwnership = false)]
     private void NotifyServerGameOverServerRpc(ServerRpcParams rpcParams = default)
     {
         isMatchOver = true;
+        GameEnded.Value = true;
         Debug.Log($"[Server] Match over flagged by client {rpcParams.Receive.SenderClientId}. Locking further turns.");
     }
 
@@ -636,7 +674,6 @@ public class EndTurnManager : NetworkBehaviour
 
     private IEnumerator Routine_ClearAllSubmittedCards()
     {
-        // 1. LOCAL PLAYER: Return cards to hand so they are reusable. NO DESTRUCTION.
         PlayerHandManager localHandManager = GetLocalHandManager();
         if (localHandManager != null && selectedHandTransform != null)
         {
@@ -644,7 +681,6 @@ public class EndTurnManager : NetworkBehaviour
             yield return new WaitForSeconds(0.3f);
         }
 
-        // 2. OPPONENT: Destroy the temporary visual clones. 
         if (opponentSelectedHandTransform != null)
         {
             BalatroCardController[] oppCards = opponentSelectedHandTransform.GetComponentsInChildren<BalatroCardController>();
@@ -655,65 +691,6 @@ public class EndTurnManager : NetworkBehaviour
         }
 
         yield return null;
-    }
-
-    private IEnumerator Routine_ProcessContainerCleanup(PlayerHandManager ownerHandManager, RectTransform selectedTransform)
-    {
-        BalatroCardController[] cardsInContainer = selectedTransform.GetComponentsInChildren<BalatroCardController>();
-        List<BalatroCardController> cardsToDestroy = new List<BalatroCardController>();
-
-        foreach (BalatroCardController card in cardsInContainer)
-        {
-            if (card == null) continue;
-
-            if (card.Category != CardCategory.Support || !card.IsForever)
-            {
-                cardsToDestroy.Add(card);
-            }
-        }
-
-        if (cardsToDestroy.Count > 0)
-        {
-            yield return StartCoroutine(Routine_AnimateCardsDisappearance(cardsToDestroy));
-        }
-
-        ownerHandManager.ReturnSubmittedCardsToHand(selectedTransform);
-    }
-
-    private IEnumerator Routine_AnimateCardsDisappearance(List<BalatroCardController> cardsToClear)
-    {
-        float popUpDuration = 0.12f;
-        float shrinkDuration = 0.18f;
-        Vector3 popScale = new Vector3(1.3f, 1.3f, 1f);
-
-        float elapsed = 0f;
-        while (elapsed < popUpDuration)
-        {
-            elapsed += Time.deltaTime;
-            float t = elapsed / popUpDuration;
-            foreach (BalatroCardController controller in cardsToClear)
-            {
-                if (controller != null) controller.transform.localScale = Vector3.Lerp(Vector3.one, popScale, t);
-            }
-            yield return null;
-        }
-
-        elapsed = 0f;
-        while (elapsed < shrinkDuration)
-        {
-            elapsed += Time.deltaTime;
-            float t = elapsed / shrinkDuration;
-            foreach (BalatroCardController controller in cardsToClear)
-            {
-                if (controller != null) controller.transform.localScale = Vector3.Lerp(popScale, Vector3.zero, t);
-            }
-            yield return null;
-        }
-
-        foreach (BalatroCardController controller in cardsToClear)
-        {
-            if (controller != null) Destroy(controller.gameObject);
-        }
     }
 
     private IEnumerator Routine_PopText(Transform textTransform, Vector3 baseScale)
@@ -754,5 +731,209 @@ public class EndTurnManager : NetworkBehaviour
     {
         if (playerHPText != null) playerHPText.text = $"{currentPlayerHP}";
         if (opponentHPText != null) opponentHPText.text = $"{currentOpponentHP}";
+    }
+
+    // ========================================================================
+    // ✅ FORFEIT, PAUSE, AND RETURN TO LOBBY INTEGRATION
+    // ========================================================================
+
+    public void OnForfeit()
+    {
+        if (!IsSpawned || GameEnded.Value)
+            return;
+
+        // If game is paused, resume it first
+        if (IsGamePaused.Value && IsServer)
+        {
+            IsGamePaused.Value = false;
+            PauseRequesterClientId.Value = 0;
+            Time.timeScale = 1f;
+        }
+
+        SubmitForfeitServerRpc();
+    }
+
+    public void PlayerForfeit()
+    {
+        OnForfeit(); // Alias for consistency
+    }
+
+    [ServerRpc(RequireOwnership = false)]
+    void SubmitForfeitServerRpc(ServerRpcParams rpcParams = default)
+    {
+        if (GameEnded.Value)
+            return;
+
+        ulong senderClientId = rpcParams.Receive.SenderClientId;
+        var allClients = new List<ulong>(NetworkManager.Singleton.ConnectedClientsIds);
+        allClients.Sort();
+
+        int forfeitingPlayer = (senderClientId == allClients[0]) ? 1 : 2;
+        int winner = (forfeitingPlayer == 1) ? 2 : 1;
+
+        Debug.Log($"Player {forfeitingPlayer} forfeited. Player {winner} wins.");
+
+        GameEnded.Value = true;
+        isMatchOver = true;
+
+        GameOverDueToForfeitClientRpc(winner, senderClientId);
+    }
+
+    [ClientRpc]
+    void GameOverDueToForfeitClientRpc(int winner, ulong forfeiterId)
+    {
+        isMatchOver = true;
+        StopAllCoroutines();
+
+        bool isLocalPlayerWinner = (NetworkManager.LocalClientId != forfeiterId);
+
+        if (gameOverPanel != null) gameOverPanel.SetActive(true);
+        if (resultText != null)
+        {
+            resultText.gameObject.SetActive(true);
+            resultText.text = isLocalPlayerWinner ? "VICTORY! (Opponent Forfeited)" : "DEFEAT (You Forfeited)";
+        }
+
+        if (returnToLobbyButton != null) returnToLobbyButton.gameObject.SetActive(true);
+    }
+
+    public void OnGoToLobby()
+    {
+        StartCoroutine(ReturnToLobbyRoutine());
+    }
+
+    System.Collections.IEnumerator ReturnToLobbyRoutine()
+    {
+        // Note: Ensure UIManager is a globally accessible singleton in your project
+        if (UIManager.Instance != null)
+        {
+            UIManager.Instance.NotifyReturnedToLobby();
+        }
+
+        string sceneToUnload = "GameScene"; // Default fallback
+        sceneToUnload = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name;
+
+        yield return UnityEngine.SceneManagement.SceneManager.UnloadSceneAsync(sceneToUnload);
+
+        if (UIManager.Instance != null)
+        {
+            UIManager.Instance.NotifyReturnedToLobby();
+        }
+    }
+
+    public void RequestPause()
+    {
+        if (!IsSpawned || GameEnded.Value)
+            return;
+
+        if (Time.time - lastPauseRequestTime < PAUSE_COOLDOWN)
+        {
+            Debug.Log("Pause on cooldown");
+            return;
+        }
+
+        lastPauseRequestTime = Time.time;
+        RequestPauseServerRpc();
+    }
+
+    public void RequestResume()
+    {
+        if (!IsSpawned || GameEnded.Value)
+            return;
+
+        ulong localClientId = NetworkManager.Singleton.LocalClientId;
+
+        if (IsServer || PauseRequesterClientId.Value == localClientId)
+        {
+            RequestResumeServerRpc();
+        }
+        else
+        {
+            Debug.Log("Only the player who paused can resume the game");
+        }
+    }
+
+    [ServerRpc(RequireOwnership = false)]
+    void RequestPauseServerRpc(ServerRpcParams rpcParams = default)
+    {
+        if (IsGamePaused.Value || GameEnded.Value)
+        {
+            Debug.Log("Game is already paused or ended");
+            return;
+        }
+
+        ulong requesterId = rpcParams.Receive.SenderClientId;
+        Debug.Log($"Player {requesterId} requested pause");
+
+        IsGamePaused.Value = true;
+        PauseRequesterClientId.Value = requesterId;
+        PauseStateChangedClientRpc(true, requesterId);
+    }
+
+    [ServerRpc(RequireOwnership = false)]
+    void RequestResumeServerRpc(ServerRpcParams rpcParams = default)
+    {
+        if (!IsGamePaused.Value)
+        {
+            Debug.Log("Game is not paused");
+            return;
+        }
+
+        ulong requesterId = rpcParams.Receive.SenderClientId;
+        ulong pauseRequesterId = PauseRequesterClientId.Value;
+
+        if (IsServer || requesterId == pauseRequesterId)
+        {
+            Debug.Log($"Resuming game. Requested by: {requesterId}");
+            IsGamePaused.Value = false;
+            PauseRequesterClientId.Value = 0;
+            PauseStateChangedClientRpc(false, 0);
+        }
+        else
+        {
+            Debug.Log($"Player {requesterId} cannot resume - only player {pauseRequesterId} can");
+        }
+    }
+
+    [ClientRpc]
+    void PauseStateChangedClientRpc(bool isPaused, ulong requesterId)
+    {
+        if (isPaused)
+        {
+            timerRunning = false;
+            if (pausePanel != null)
+                pausePanel.SetActive(true);
+
+            SetGameBoardInteractable(false);
+            Time.timeScale = 0f;
+        }
+        else
+        {
+            timerRunning = true;
+            if (pausePanel != null)
+                pausePanel.SetActive(false);
+
+            SetGameBoardInteractable(true);
+            Time.timeScale = 1f;
+        }
+    }
+
+    void SetGameBoardInteractable(bool enabled)
+    {
+        bool finalState = enabled && !IsGamePaused.Value;
+
+        if (endTurnButton != null)
+        {
+            endTurnButton.interactable = finalState;
+        }
+
+        PlayerHandManager localHandManager = GetLocalHandManager();
+        if (localHandManager != null)
+        {
+            localHandManager.SetAllCardsInteractable(finalState);
+        }
+
+        // Optional: If you have a rewind button or other UI elements, handle them here
+        // if (rewindButton != null) rewindButton.interactable = finalState;
     }
 }

@@ -15,4 +15,4 @@ MonoBehaviour:
   commonWeight: 60
   rareWeight: 30
   legendaryWeight: 10
-  pityThreshold: 4
+  pityThreshold: 5

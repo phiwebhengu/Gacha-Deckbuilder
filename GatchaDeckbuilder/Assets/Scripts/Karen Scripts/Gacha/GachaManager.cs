@@ -191,4 +191,18 @@ public class GachaManager : NetworkBehaviour
     {
         Send = new ClientRpcSendParams { TargetClientIds = new[] { clientId } }
     };
+
+    public (int pulls, int threshold) GetLocalPlayerPity(bool isActionDeck)
+    {
+        if (NetworkManager == null || !NetworkManager.IsListening)
+            return (0, pullConfig != null ? pullConfig.pityThreshold : 90);
+
+        if (playerStates.TryGetValue(NetworkManager.LocalClientId, out var state))
+        {
+            int pulls = isActionDeck ? state.ActionPity.PullsSinceLegendary : state.SupportPity.PullsSinceLegendary;
+            return (pulls, pullConfig.pityThreshold);
+        }
+
+        return (0, pullConfig != null ? pullConfig.pityThreshold : 90);
+    }
 }

@@ -729,6 +729,11 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::GachaUI
   tokenText: {fileID: 807381251}
   tokenFormat: 'Tokens: {0}'
+  actionPityText: {fileID: 1363648337}
+  supportPityText: {fileID: 1093739946}
+  pityFormat: 'Pity: {0} / {1}'
+  normalPityColor: {r: 0, g: 0, b: 0, a: 1}
+  highPityColor: {r: 1, g: 0.6470588, b: 0, a: 1}
   pullActionButton: {fileID: 850129759}
   pullSupportButton: {fileID: 1059806172}
   cardBackPrefab: {fileID: 2682837092641137224, guid: 376ca7ad8e442ba41b967c79d759df7d, type: 3}
@@ -3252,7 +3257,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: 'Support Pity: 0'
+  m_text: 'Pity: 0 / 0'
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: d704b2e9442f02e47915bf8ad0ad8277, type: 2}
   m_sharedMaterial: {fileID: -7062871132170041075, guid: d704b2e9442f02e47915bf8ad0ad8277, type: 2}
@@ -3661,7 +3666,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: 'Action Pity: 0'
+  m_text: 'Pity: 0 / 0'
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: d704b2e9442f02e47915bf8ad0ad8277, type: 2}
   m_sharedMaterial: {fileID: -7062871132170041075, guid: d704b2e9442f02e47915bf8ad0ad8277, type: 2}
