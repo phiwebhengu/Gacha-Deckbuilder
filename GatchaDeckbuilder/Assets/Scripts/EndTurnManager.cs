@@ -7,9 +7,6 @@ using UnityEngine.UI;
 using TMPro;
 using Unity.Netcode;
 
-// ✅ NEW: Enum for tracking round states
-public enum RoundOutcome { Unplayed, Win, Loss, Draw }
-
 public struct TurnResultData : INetworkSerializable
 {
     public int[] playerCardIds;
@@ -90,31 +87,17 @@ public class EndTurnManager : NetworkBehaviour
     [Header("System References")]
     [SerializeField] private DrawTimerManager timerManager;
 
-    // ✅ NEW: Round Tracking & Game Over UI References
-    [Header("Round Tracking UI")]
-    [SerializeField] private Image[] roundProgressImages = new Image[4];
-    [SerializeField] private Color unplayedColor = Color.gray;
-    [SerializeField] private Color winColor = Color.green;
-    [SerializeField] private Color lossColor = Color.red;
-    [SerializeField] private Color drawColor = Color.yellow;
-    [SerializeField] private Vector3 unplayedScale = Vector3.one;
-    [SerializeField] private Vector3 completedRoundScale = new Vector3(1.2f, 1.2f, 1f);
-
     [Header("Game Over UI")]
     [SerializeField] private GameObject gameOverPanel;
-    [SerializeField] private TextMeshProUGUI victoryText;
-    [SerializeField] private TextMeshProUGUI lossText;
-    [SerializeField] private Image raycastBlockerImage;
+    [SerializeField] private TextMeshProUGUI resultText; // Displays "VICTORY!", "DEFEAT", or "DRAW"
 
     private int currentPlayerHP;
     private int currentOpponentHP;
     private Dictionary<ulong, int[]> pendingTurns = new Dictionary<ulong, int[]>();
     private bool isPlayer1 = true;
 
-    // ✅ NEW: Match state tracking
     private bool isMatchOver = false;
-    private RoundOutcome[] roundOutcomes = new RoundOutcome[4];
-    private int currentRoundIndex = 0;
+    private int currentRound = 1;
 
     private Vector3 originalCenterScale = Vector3.one;
     private Vector3 originalPlayerHPScale = Vector3.one;
@@ -166,25 +149,10 @@ public class EndTurnManager : NetworkBehaviour
         if (mainCamera != null) originalCamPos = mainCamera.transform.localPosition;
 
         CacheAndResetUI();
-        InitializeRoundTrackers(); // ✅ NEW: Initialize round tracking
         UpdateEndTurnButtonVisibility();
         ClearOpponentPanel();
-    }
 
-    // ✅ NEW: Initialize round trackers
-    private void InitializeRoundTrackers()
-    {
-        for (int i = 0; i < 4; i++)
-        {
-            roundOutcomes[i] = RoundOutcome.Unplayed;
-            if (i < roundProgressImages.Length && roundProgressImages[i] != null)
-            {
-                roundProgressImages[i].color = unplayedColor;
-                roundProgressImages[i].rectTransform.localScale = unplayedScale;
-            }
-        }
-        currentRoundIndex = 0;
-        isMatchOver = false;
+        currentRound = 1;
     }
 
     private void CacheAndResetUI()
@@ -274,7 +242,6 @@ public class EndTurnManager : NetworkBehaviour
     [ServerRpc(RequireOwnership = false)]
     private void SubmitTurnServerRpc(int[] selectedCardIds, ServerRpcParams rpcParams = default)
     {
-        // ✅ NEW: Prevent turns if the match has already concluded
         if (isMatchOver)
         {
             Debug.LogWarning($"[Server] Ignoring turn submission from Client {rpcParams.Receive.SenderClientId} because match is over.");
@@ -472,53 +439,8 @@ public class EndTurnManager : NetworkBehaviour
         currentOpponentHP = result.finalOpponentHP;
         UpdateHPUI();
 
-        // ✅ NEW: Evaluate and record the round outcome for UI tracking
-        EvaluateAndRecordRoundOutcome(result);
-
         yield return new WaitForSeconds(0.5f);
         yield return StartCoroutine(Routine_CheckNextRoundOrEndGame());
-    }
-
-    // ✅ NEW: Evaluate round outcome deterministically on the client
-    private void EvaluateAndRecordRoundOutcome(TurnResultData result)
-    {
-        if (currentRoundIndex < 0 || currentRoundIndex >= 4) return;
-
-        RoundOutcome outcome = RoundOutcome.Draw;
-
-        if (result.netDamageToOpponent > result.netDamageToPlayer)
-        {
-            outcome = RoundOutcome.Win;
-        }
-        else if (result.netDamageToPlayer > result.netDamageToOpponent)
-        {
-            outcome = RoundOutcome.Loss;
-        }
-
-        roundOutcomes[currentRoundIndex] = outcome;
-
-        if (currentRoundIndex < roundProgressImages.Length && roundProgressImages[currentRoundIndex] != null)
-        {
-            Image roundImg = roundProgressImages[currentRoundIndex];
-            roundImg.rectTransform.localScale = completedRoundScale;
-
-            switch (outcome)
-            {
-                case RoundOutcome.Win:
-                    roundImg.color = winColor;
-                    break;
-                case RoundOutcome.Loss:
-                    roundImg.color = lossColor;
-                    break;
-                case RoundOutcome.Draw:
-                    roundImg.color = drawColor;
-                    break;
-            }
-
-            StartCoroutine(Routine_PopText(roundImg.transform, completedRoundScale));
-        }
-
-        currentRoundIndex++;
     }
 
     private void HighlightCardsByCategory(List<BalatroCardController> playerList, List<BalatroCardController> opponentList, CardCategory category)
@@ -546,7 +468,6 @@ public class EndTurnManager : NetworkBehaviour
             return opponentCards;
         }
 
-        // ✅ OPTIMIZATION: Cached outside the loop
         PlayerHandManager anyHandManager = FindFirstObjectByType<PlayerHandManager>();
         if (anyHandManager == null || anyHandManager.cardPrefab == null)
         {
@@ -626,10 +547,9 @@ public class EndTurnManager : NetworkBehaviour
         }
     }
 
-    // ✅ NEW: Updated to handle multiplayer KO and 4-round completion
     private IEnumerator Routine_CheckNextRoundOrEndGame()
     {
-        // 1. EARLY HEALTH KNOCKOUT CHECK
+        // 1. HEALTH KNOCKOUT CHECK
         if (currentOpponentHP <= 0 && currentPlayerHP <= 0)
         {
             Debug.Log("[Match Over] BOTH PLAYERS KNOCKED OUT! DRAW GAME!");
@@ -649,28 +569,7 @@ public class EndTurnManager : NetworkBehaviour
             yield break;
         }
 
-        // 2. CHECK 4-ROUND COMPLETION (BEST OF 4 RESULT)
-        if (currentRoundIndex >= 4)
-        {
-            int playerWins = 0;
-            int opponentWins = 0;
-
-            foreach (var outcome in roundOutcomes)
-            {
-                if (outcome == RoundOutcome.Win) playerWins++;
-                else if (outcome == RoundOutcome.Loss) opponentWins++;
-            }
-
-            Debug.Log($"[Match Over - 4 Rounds Complete] Player Wins: {playerWins} | Opponent Wins: {opponentWins}");
-
-            bool isPlayerWinner = playerWins > opponentWins;
-            bool isDraw = playerWins == opponentWins;
-
-            TriggerLocalGameOver(isPlayerWinner, isDraw);
-            yield break;
-        }
-
-        // 3. CONTINUE TO NEXT ROUND
+        // 2. CONTINUE TO NEXT ROUND
         yield return StartCoroutine(Routine_ClearAllSubmittedCards());
         ResetTurnUI();
 
@@ -681,12 +580,12 @@ public class EndTurnManager : NetworkBehaviour
             {
                 localHandManager.SetAllCardsInteractable(true);
             }
-            // ✅ NEW: Trigger next round via DrawTimerManager
-            timerManager.RequestStartRound(currentRoundIndex + 1);
+
+            currentRound++;
+            timerManager.RequestStartRound(currentRound);
         }
     }
 
-    // ✅ NEW: Local game over trigger that informs the server to stop accepting turns
     private void TriggerLocalGameOver(bool isPlayerWinner, bool isDraw)
     {
         isMatchOver = true;
@@ -694,23 +593,28 @@ public class EndTurnManager : NetworkBehaviour
 
         StopAllCoroutines();
 
-        if (raycastBlockerImage != null) raycastBlockerImage.gameObject.SetActive(true);
-        if (gameOverPanel != null) gameOverPanel.SetActive(true);
+        // Show the game over panel
+        if (gameOverPanel != null)
+        {
+            gameOverPanel.SetActive(true);
+        }
 
-        if (isDraw)
+        // Display the final result text
+        if (resultText != null)
         {
-            if (victoryText != null) { victoryText.text = "DRAW"; victoryText.gameObject.SetActive(true); }
-            if (lossText != null) lossText.gameObject.SetActive(false);
-        }
-        else if (isPlayerWinner)
-        {
-            if (victoryText != null) victoryText.gameObject.SetActive(true);
-            if (lossText != null) lossText.gameObject.SetActive(false);
-        }
-        else
-        {
-            if (victoryText != null) victoryText.gameObject.SetActive(false);
-            if (lossText != null) lossText.gameObject.SetActive(true);
+            resultText.gameObject.SetActive(true);
+            if (isDraw)
+            {
+                resultText.text = "DRAW";
+            }
+            else if (isPlayerWinner)
+            {
+                resultText.text = "VICTORY!";
+            }
+            else
+            {
+                resultText.text = "DEFEAT";
+            }
         }
     }
 
@@ -736,16 +640,11 @@ public class EndTurnManager : NetworkBehaviour
         PlayerHandManager localHandManager = GetLocalHandManager();
         if (localHandManager != null && selectedHandTransform != null)
         {
-            // This should handle moving the cards back to the hand UI
             localHandManager.ReturnSubmittedCardsToHand(selectedHandTransform);
-
-            // Optional: Wait a brief moment for the "return to hand" animation to finish 
-            // before starting the next round's timer. Adjust 0.3f to match your animation speed.
             yield return new WaitForSeconds(0.3f);
         }
 
         // 2. OPPONENT: Destroy the temporary visual clones. 
-        // (These are re-instantiated from IDs each round, so we clean them up to prevent memory leaks)
         if (opponentSelectedHandTransform != null)
         {
             BalatroCardController[] oppCards = opponentSelectedHandTransform.GetComponentsInChildren<BalatroCardController>();
@@ -758,7 +657,6 @@ public class EndTurnManager : NetworkBehaviour
         yield return null;
     }
 
-    // ✅ NEW: Adapted to use BalatroCardController
     private IEnumerator Routine_ProcessContainerCleanup(PlayerHandManager ownerHandManager, RectTransform selectedTransform)
     {
         BalatroCardController[] cardsInContainer = selectedTransform.GetComponentsInChildren<BalatroCardController>();
@@ -782,7 +680,6 @@ public class EndTurnManager : NetworkBehaviour
         ownerHandManager.ReturnSubmittedCardsToHand(selectedTransform);
     }
 
-    // ✅ RENAMED & UNIFIED: Handles animated disappearance for any list of cards
     private IEnumerator Routine_AnimateCardsDisappearance(List<BalatroCardController> cardsToClear)
     {
         float popUpDuration = 0.12f;
