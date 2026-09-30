@@ -12,3 +12,8 @@ public class PullResult
     public bool Was5050Roll;
     public bool Won5050;
 }
+public enum DeckType
+{
+    Action,
+    Support
+}

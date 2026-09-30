@@ -1,3 +1,4 @@
+ï»¿using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -5,353 +6,253 @@ using UnityEngine;
 public class PlayerHandManager : MonoBehaviour
 {
     [Header("UI References")]
-    [SerializeField] private GameObject cardPrefab;
+    [SerializeField] public GameObject cardPrefab;
     [SerializeField] private RectTransform handTransform;
     [SerializeField] private Canvas targetCanvas;
-    [Tooltip("Invisible raycast target image activated during card reveal to block token/card clicks.")]
-    [SerializeField] private GameObject clickBlockerOverlay;
-
-    [Header("Pull System Reference")]
-    [Tooltip("The real pull engine — reads real card data, handles pity and the 50/50 correctly.")]
-    [SerializeField] private PlayerPullController pullController;
-
-    [Header("Reveal Animation Timings")]
-    [SerializeField] private Transform centerPointTarget;
-    [SerializeField] private float moveToCenterDuration = 0.45f;
-    [SerializeField] private float shrinkDuration = 0.12f;
-    [SerializeField] private float overshootDuration = 0.12f;
-    [SerializeField] private float returnToNormalDuration = 0.15f;
-    [SerializeField] private float postRevealPause = 0.35f;
-
-    [Header("Fan Layout Settings")]
-    [SerializeField] private float maxFanAngle = 30f;
-    [SerializeField] private float cardSpacing = 80f;
-    [SerializeField] private float arcHeightDip = 15f;
 
     [Header("Animation Settings")]
-    [SerializeField] private float cardMoveDuration = 0.4f;
     [SerializeField] private float dealDelay = 0.15f;
-
-    [Header("Identity Config")]
-    [SerializeField] private bool isAI = false;
 
     [Header("System References")]
     [SerializeField] private DrawTimerManager timerManager;
-    [SerializeField] private PityManager pityManager;
+    [SerializeField] private GachaManager gachaManager;
 
-    private List<CardUI> cardsInHand = new List<CardUI>();
+    private List<BalatroCardController> cardsInHand = new List<BalatroCardController>();
+    private List<BalatroCardController> submittedCards = new List<BalatroCardController>();
+    private Queue<PullResult> pendingPulls = new Queue<PullResult>();
+
+    private void OnEnable()
+    {
+        if (gachaManager != null)
+            gachaManager.OnMyPullResolved += HandlePullResolved;
+        if (timerManager != null)
+        {
+            timerManager.OnDrawPhaseChanged += HandleDrawPhaseChanged;
+            HandleDrawPhaseChanged(timerManager.IsDrawPhaseActive);
+        }
+    }
+
+    private void OnDisable()
+    {
+        if (gachaManager != null)
+            gachaManager.OnMyPullResolved -= HandlePullResolved;
+        if (timerManager != null)
+            timerManager.OnDrawPhaseChanged -= HandleDrawPhaseChanged;
+    }
+
+    private void HandlePullResolved(PullResult result) => pendingPulls.Enqueue(result);
 
     private void Awake()
     {
-        if (targetCanvas == null)
+        if (targetCanvas == null) targetCanvas = GetComponentInParent<Canvas>() ?? FindFirstObjectByType<Canvas>();
+        if (timerManager == null)
         {
-            targetCanvas = GetComponentInParent<Canvas>();
-            if (targetCanvas == null)
-            {
-                targetCanvas = FindFirstObjectByType<Canvas>();
-            }
+            timerManager = FindFirstObjectByType<DrawTimerManager>();
+            if (timerManager == null) Debug.LogError("[PlayerHandManager] Could not find DrawTimerManager in the scene!");
         }
 
-        if (clickBlockerOverlay != null)
+        if (gachaManager == null)
         {
-            clickBlockerOverlay.SetActive(false);
+            gachaManager = FindFirstObjectByType<GachaManager>();
+            if (gachaManager == null) Debug.LogError("[PlayerHandManager] Could not find GachaManager in the scene!");
         }
     }
 
-    public void DealCardsFromTokens(int count, DeckButton selectedDeck)
+    public void DealCardsFromTokens(int count, DeckType deckToPull)
     {
-        if (!isAI && timerManager != null)
-        {
-            timerManager.NotifyCardsDrawn();
-        }
-
-        StartCoroutine(Routine_DealCards(count, selectedDeck));
+        timerManager?.NotifyCardsDrawn();
+        StartCoroutine(Routine_DealCards(count, deckToPull));
     }
 
-    private IEnumerator Routine_DealCards(int count, DeckButton selectedDeck)
+    private IEnumerator Routine_DealCards(int count, DeckType deckToPull)
     {
-        if (selectedDeck == null)
-        {
-            Debug.LogError("[Hand Manager] Selected Deck is null!");
-            yield break;
-        }
-
-        if (pullController == null)
-        {
-            Debug.LogError("[Hand Manager] No PlayerPullController assigned — cannot perform a real pull.");
-            yield break;
-        }
-
-        if (!isAI && clickBlockerOverlay != null)
-        {
-            clickBlockerOverlay.SetActive(true);
-        }
-
-        Vector3 screenCenterWorldPos = (centerPointTarget != null)
-            ? centerPointTarget.position
-            : targetCanvas.transform.position;
+        if (gachaManager == null) { Debug.LogError("[PlayerHandManager] gachaManager is null!"); yield break; }
 
         for (int i = 0; i < count; i++)
         {
-            GameObject newCardObj = Instantiate(cardPrefab, handTransform, false);
+            if (deckToPull == DeckType.Support) gachaManager.RequestPullSupport();
+            else gachaManager.RequestPullAction();
 
-            if (targetCanvas != null && !newCardObj.transform.IsChildOf(targetCanvas.transform))
+            PullResult result = null;
+            float timeout = 2f, elapsed = 0f;
+
+            while (pendingPulls.Count == 0 && elapsed < timeout)
             {
-                newCardObj.transform.SetParent(handTransform, false);
+                yield return null;
+                elapsed += Time.deltaTime;
             }
 
-            RectTransform cardRect = newCardObj.GetComponent<RectTransform>();
-            CardUI cardScript = newCardObj.GetComponent<CardUI>();
-            BalatroCardController controller = newCardObj.GetComponent<BalatroCardController>();
-
-            if (cardRect == null || cardScript == null || controller == null)
+            if (pendingPulls.Count > 0) result = pendingPulls.Dequeue();
+            else
             {
-                Debug.LogError("[Hand Manager] Card Prefab is missing components!");
+                Debug.LogError($"[PlayerHandManager] Pull {i + 1} timed out after {timeout}s!");
+                continue;
+            }
+
+            if (result == null)
+            {
+                Debug.LogError("[PlayerHandManager] Pull result is null after timeout!");
                 yield break;
             }
 
-            // The real pull — real card, real rarity, real pity, real 50/50.
-            PullResult result = selectedDeck.IsSupportDeck
-                ? pullController.PullSupport()
-                : pullController.PullAction();
+            GameObject newCardObj = Instantiate(cardPrefab, handTransform);
+            if (targetCanvas != null && !newCardObj.transform.IsChildOf(targetCanvas.transform))
+                newCardObj.transform.SetParent(handTransform, false);
 
-            CardCategory cardCategory;
-            int value = 0;
-            string effect = "";
-            bool isForever = false;
+            BalatroCardController controller = newCardObj.GetComponent<BalatroCardController>();
+            CardVisual visual = newCardObj.GetComponent<CardVisual>();
 
-            if (result.Deck == DeckType.Action)
+            if (controller == null || visual == null)
             {
-                cardCategory = result.ActionData.Role == "Attack" ? CardCategory.Attack : CardCategory.Defense;
-                value = result.ActionData.Value;
-            }
-            else
-            {
-                cardCategory = CardCategory.Support;
-                effect = result.SupportData.Effect;
-                isForever = result.SupportData.EffectType == "Forever";
+                Debug.LogError("[PlayerHandManager] Missing required components on card prefab! Destroying card and halting deal.");
+                Destroy(newCardObj);
+                yield break;
             }
 
-            controller.ApplyPulledCardData(result.CardName, cardCategory, result.Tier, value, effect, isForever);
+            EndTurnManager endTurnManager = FindFirstObjectByType<EndTurnManager>();
+            if (endTurnManager != null) controller.SetEndTurnManager(endTurnManager);
 
-            if (pityManager != null)
+            Sprite sprite = GetCardSprite(result.CardId, result.Deck == DeckType.Action);
+            if (result.Deck == DeckType.Action) visual.Setup(result.ActionData, sprite);
+            else visual.Setup(result.SupportData, sprite);
+
+            controller.SetCardId(result.CardId);
+            if (result.Deck == DeckType.Action && result.ActionData != null)
+                controller.SetCategory(result.ActionData.Role == "Attack" ? CardCategory.Attack : CardCategory.Defense);
+            else if (result.Deck == DeckType.Support && result.SupportData != null)
             {
-                pityManager.RegisterPull(result.Tier);
+                controller.SetCategory(CardCategory.Support);
+                controller.SetCardMetadata(result.SupportData.EffectType == "Forever");
             }
 
-            cardRect.localScale = Vector3.one;
-            cardRect.position = selectedDeck.DeckTransform.position;
-
-            Vector3 localPos = cardRect.localPosition;
-            localPos.z = 0f;
-            cardRect.localPosition = localPos;
-
-            newCardObj.transform.SetAsLastSibling();
-
-            if (isAI)
+            visual.PlayReveal(result.Tier);
+            newCardObj.GetComponent<RectTransform>().localScale = Vector3.one;
+            if (timerManager != null)
             {
-                cardsInHand.Add(cardScript);
-                UpdateHandFanLayout();
+                controller.SetInteractable(!timerManager.IsDrawPhaseActive);
             }
-            else
-            {
-                controller.PrepareForUnrevealedSpawn();
-
-                yield return StartCoroutine(controller.Routine_AnimateCenterReveal(
-                    screenCenterWorldPos,
-                    moveToCenterDuration,
-                    shrinkDuration,
-                    overshootDuration,
-                    returnToNormalDuration
-                ));
-
-                yield return new WaitForSeconds(postRevealPause);
-
-                cardsInHand.Add(cardScript);
-                UpdateHandFanLayout();
-            }
+            cardsInHand.Add(controller);
+            // DIAGNOSTIC LOG: Confirms the card was added to the list with its Instance ID
+            Debug.Log($"[PlayerHandManager] Added card '{controller.gameObject.name}' (Instance ID: {controller.GetEntityId()}) to internal hand list. Total: {cardsInHand.Count}");
 
             yield return new WaitForSeconds(dealDelay);
         }
+    }
 
-        if (!isAI && clickBlockerOverlay != null)
+    private Sprite GetCardSprite(int cardId, bool isActionCard)
+    {
+        string folder = isActionCard ? "CardSprites/Action/" : "CardSprites/Support/";
+        return Resources.Load<Sprite>($"{folder}{cardId}");
+    }
+
+    public void SetAllCardsInteractable(bool state)
+    {
+        foreach (BalatroCardController controller in cardsInHand)
         {
-            clickBlockerOverlay.SetActive(false);
+            if (controller != null) controller.SetInteractable(state);
         }
     }
 
-    private void CleanupNullCards()
+    public List<BalatroCardController> GetSelectedCards()
     {
-        cardsInHand.RemoveAll(card => card == null || card.gameObject == null);
-    }
+        List<BalatroCardController> selected = new List<BalatroCardController>();
 
-    public void UpdateHandFanLayout()
-    {
-        CleanupNullCards();
-
-        int totalCards = cardsInHand.Count;
-        if (totalCards == 0) return;
-
-        for (int i = 0; i < totalCards; i++)
+        // DIAGNOSTIC LOG: Dumps the entire state of the internal list
+        Debug.Log($"[PlayerHandManager] GetSelectedCards: Checking {cardsInHand.Count} cards in internal list.");
+        foreach (BalatroCardController controller in cardsInHand)
         {
-            if (cardsInHand[i] == null) continue;
-
-            float normalizedIndex = (totalCards > 1) ? ((float)i / (totalCards - 1)) - 0.5f : 0f;
-
-            float zRotation = -normalizedIndex * maxFanAngle;
-            Quaternion targetRotation = Quaternion.Euler(0f, 0f, zRotation);
-
-            float xPos = normalizedIndex * (cardSpacing * Mathf.Min(totalCards, 8));
-            float yPos = -Mathf.Abs(normalizedIndex) * arcHeightDip;
-
-            Vector3 targetPosition = new Vector3(xPos, yPos, 0f);
-
-            BalatroCardController controller = cardsInHand[i].GetComponent<BalatroCardController>();
-            Vector3 targetScale = (controller != null) ? controller.RestingScale : Vector3.one;
-
-            StartCoroutine(cardsInHand[i].AnimateToHand(targetPosition, targetRotation, targetScale, cardMoveDuration));
-
-            cardsInHand[i].transform.SetAsLastSibling();
-        }
-    }
-
-    public List<CardUI> GetSelectedCards()
-    {
-        CleanupNullCards();
-
-        List<CardUI> selected = new List<CardUI>();
-        foreach (CardUI card in cardsInHand)
-        {
-            if (card == null) continue;
-
-            BalatroCardController controller = card.GetComponent<BalatroCardController>();
+            Debug.Log($"[PlayerHandManager] - Checking: '{controller.gameObject.name}' (Instance ID: {controller.GetEntityId()}), IsSelected: {controller.IsSelected}, IsInteractable: {controller.IsInteractable}");
             if (controller != null && controller.IsSelected)
             {
-                selected.Add(card);
+                selected.Add(controller);
             }
         }
+
+        Debug.Log($"[PlayerHandManager] Found {selected.Count} selected cards from internal list.");
         return selected;
+    }
+
+    public List<int> GetSelectedCardIds()
+    {
+        List<int> ids = new List<int>();
+        foreach (BalatroCardController controller in cardsInHand)
+        {
+            if (controller != null && controller.IsSelected)
+            {
+                ids.Add(controller.CardId);
+            }
+        }
+        return ids;
     }
 
     public void SubmitSelectedCardsToHand(RectTransform selectedHandTarget)
     {
-        List<CardUI> selectedCards = GetSelectedCards();
-
-        for (int i = 0; i < selectedCards.Count; i++)
+        List<BalatroCardController> selectedCards = GetSelectedCards();
+        foreach (BalatroCardController controller in selectedCards)
         {
-            CardUI card = selectedCards[i];
-            if (card == null) continue;
+            if (controller == null) continue;
 
-            cardsInHand.Remove(card);
-            card.transform.SetParent(selectedHandTarget, true);
+            cardsInHand.Remove(controller);
+            submittedCards.Add(controller);
 
-            BalatroCardController controller = card.GetComponent<BalatroCardController>();
-            if (controller != null)
-            {
-                controller.enabled = false;
-            }
-
-            float spacing = 90f;
-            float xPos = (i - (selectedCards.Count - 1) / 2f) * spacing;
-            Vector3 targetPos = new Vector3(xPos, 0f, 0f);
-
-            StartCoroutine(card.AnimateToHand(targetPos, Quaternion.identity, (controller != null) ? controller.RestingScale : Vector3.one, cardMoveDuration));
+            controller.transform.SetParent(selectedHandTarget, true);
+            controller.enabled = false;
         }
-
-        UpdateHandFanLayout();
     }
 
     public void ReturnSubmittedCardsToHand(RectTransform containerTransform)
     {
-        if (containerTransform == null) return;
+        // Create a copy of the list to iterate over safely while modifying the original
+        List<BalatroCardController> cardsToReturn = new List<BalatroCardController>(submittedCards);
 
-        List<CardUI> submittedCards = new List<CardUI>(containerTransform.GetComponentsInChildren<CardUI>());
-        if (submittedCards.Count == 0) return;
-
-        foreach (CardUI card in submittedCards)
+        foreach (BalatroCardController controller in cardsToReturn)
         {
-            if (card == null || card.gameObject == null) continue;
+            if (controller == null) continue;
 
-            card.transform.SetParent(handTransform, true);
+            submittedCards.Remove(controller);
 
-            BalatroCardController controller = card.GetComponent<BalatroCardController>();
-            if (controller != null)
+            // âœ… SAFETY: Prevent duplicate entries in the hand list
+            if (!cardsInHand.Contains(controller))
             {
-                controller.enabled = true;
-                if (controller.IsSelected)
-                {
-                    controller.ToggleSelection();
-                }
+                cardsInHand.Add(controller);
             }
 
-            if (!cardsInHand.Contains(card))
+            controller.transform.SetParent(handTransform, true);
+            controller.enabled = true;
+
+            // âœ… FIX: Use ForceDeselect to guarantee the selection state is cleared, 
+            // regardless of the current isInteractable state.
+            if (controller.IsSelected)
             {
-                cardsInHand.Add(card);
+                controller.ForceDeselect();
             }
         }
-
-        UpdateHandFanLayout();
     }
 
-    public void ClearSubmittedCardsJuicy(RectTransform containerTransform, float delay = 0f)
-    {
-        StartCoroutine(Routine_ClearCardsJuicy(containerTransform, delay));
-    }
+    public void ClearSubmittedCardsJuicy(RectTransform containerTransform, float delay = 0f) => StartCoroutine(Routine_ClearCardsJuicy(delay));
 
-    private IEnumerator Routine_ClearCardsJuicy(RectTransform containerTransform, float delay)
+    private IEnumerator Routine_ClearCardsJuicy(float delay)
     {
-        if (containerTransform == null) yield break;
-
         if (delay > 0f) yield return new WaitForSeconds(delay);
 
-        List<CardUI> cardsToClear = new List<CardUI>(containerTransform.GetComponentsInChildren<CardUI>());
-        if (cardsToClear.Count == 0) yield break;
-
-        float popUpDuration = 0.12f;
-        float shrinkDuration = 0.18f;
-        Vector3 popScale = new Vector3(1.3f, 1.3f, 1f);
-
-        float elapsed = 0f;
-        while (elapsed < popUpDuration)
+        List<BalatroCardController> cardsToClear = new List<BalatroCardController>(submittedCards);
+        foreach (BalatroCardController controller in cardsToClear)
         {
-            elapsed += Time.deltaTime;
-            float t = elapsed / popUpDuration;
-
-            foreach (CardUI card in cardsToClear)
+            if (controller != null)
             {
-                if (card != null && card.gameObject != null)
-                {
-                    card.transform.localScale = Vector3.Lerp(Vector3.one, popScale, t);
-                }
-            }
-            yield return null;
-        }
-
-        elapsed = 0f;
-        while (elapsed < shrinkDuration)
-        {
-            elapsed += Time.deltaTime;
-            float t = elapsed / shrinkDuration;
-
-            foreach (CardUI card in cardsToClear)
-            {
-                if (card != null && card.gameObject != null)
-                {
-                    card.transform.localScale = Vector3.Lerp(popScale, Vector3.zero, t);
-                }
-            }
-            yield return null;
-        }
-
-        foreach (CardUI card in cardsToClear)
-        {
-            if (card != null)
-            {
-                cardsInHand.Remove(card);
-                Destroy(card.gameObject);
+                submittedCards.Remove(controller);
+                Destroy(controller.gameObject);
             }
         }
+    }
+    private void HandleDrawPhaseChanged(bool isDrawPhaseActive)
+    {
+        // If the draw phase is active, cards should NOT be interactable.
+        // When the draw phase ends, they become interactable again.
+        bool shouldBeInteractable = !isDrawPhaseActive;
 
-        CleanupNullCards();
+        SetAllCardsInteractable(shouldBeInteractable);
+
+        Debug.Log($"[PlayerHandManager] Draw phase active: {isDrawPhaseActive}. Cards interactable: {shouldBeInteractable}");
     }
 }

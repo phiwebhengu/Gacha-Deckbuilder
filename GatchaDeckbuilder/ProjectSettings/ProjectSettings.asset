@@ -691,11 +691,11 @@ PlayerSettings:
   activeInputHandler: 1
   windowsGamepadBackendHint: 0
   enableDirectStorage: 0
-  cloudProjectId: 325d54be-7e0c-4667-a322-f8b4a4f7206a
+  cloudProjectId: 4df9c42f-291e-4671-8c4a-55d5e9816d30
   framebufferDepthMemorylessMode: 0
   qualitySettingsNames: []
   projectName: GatchaDeckbuilder
-  organizationId: static_06
+  organizationId: yukiiiiibaka
   cloudEnabled: 0
   legacyClampBlendShapeWeights: 0
   hmiLoadingImage: {fileID: 0}

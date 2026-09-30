@@ -1,543 +1,126 @@
-using System.Collections;
-using UnityEngine;
+ï»¿using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
-using UnityEngine.InputSystem;
-using TMPro;
 
-public enum CardCategory
-{
-    Attack,
-    Defense,
-    Support
-}
+public enum CardCategory { Attack, Defense, Support }
 
-public class BalatroCardController : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler, IPointerClickHandler
+public class BalatroCardController : MonoBehaviour, IPointerClickHandler
 {
-    [Header("Card Category & Rarity")]
+    [Header("Card Category")]
     [SerializeField] private CardCategory category = CardCategory.Attack;
-    [SerializeField] private Rarity rarity = Rarity.Common;
+    public CardCategory Category => category;
+    public void SetCategory(CardCategory newCategory) => category = newCategory;
 
-    [Header("Card Value Settings")]
-    [Tooltip("The numerical value of this card (Attack/Defense only; 0 for Support).")]
-    [SerializeField] private int cardValue;
-
-    // Plain data set directly from a real pull result — no rolling happens in this class anymore.
-    private string supportName = "";
-    private string supportEffect = "";
-    private bool isForeverEffect = false;
-
-    public string SupportName => supportName;
-    public string SupportEffect => supportEffect;
-    public bool IsForever => isForeverEffect;
-
-    [Header("UI References")]
-    [Tooltip("The UI Image on your button that reflects the tier's color.")]
-    [SerializeField] private Image tierImage;
-
-    [Tooltip("TextMeshPro component displaying the card's numerical value (for Attack/Defense).")]
-    [SerializeField] private TextMeshProUGUI valueText;
-
-    [Tooltip("TextMeshPro component displaying card category (ATTACK, DEFENSE, or SUPPORT).")]
-    [SerializeField] private TextMeshProUGUI categoryText;
-
-    [Tooltip("TextMeshPro component displaying card title/name (especially useful for Support cards).")]
-    [SerializeField] private TextMeshProUGUI nameText;
-
-    [Tooltip("TextMeshPro component displaying the support effect text description.")]
-    [SerializeField] private TextMeshProUGUI descriptionText;
-
-    [Header("Rarity Flash Overlays")]
-    [SerializeField] private Image commonFlashOverlay;
-    [SerializeField] private Image rareFlashOverlay;
-    [SerializeField] private Image legendaryFlashOverlay;
-    [Range(0f, 1f)]
-    [SerializeField] private float maxFlashAlpha = 0.6f;
-    [SerializeField] private float flashDuration = 0.2f;
-
-    [Header("Rarity Tier Colors")]
-    [SerializeField] private Color commonColor = new Color(0.6f, 0.6f, 0.6f, 1f);
-    [SerializeField] private Color rareColor = new Color(0.2f, 0.6f, 1f, 1f);
-    [SerializeField] private Color legendaryColor = new Color(1f, 0.8f, 0f, 1f);
-
-    [Header("Hover Visual Settings")]
-    [SerializeField] private Vector3 hoverScale = new Vector3(1.15f, 1.15f, 1f);
-    [SerializeField] private float hoverLiftAmount = 30f;
-    [SerializeField] private Color highlightColor = new Color(1f, 0.9f, 0.4f, 1f);
-    [SerializeField] private Image cardFrameOrOutline;
-
-    [Header("Selection Visual Settings")]
-    [SerializeField] private float selectedLiftAmount = 60f;
-    [SerializeField] private Vector3 selectedScale = new Vector3(1.15f, 1.15f, 1f);
-
-    [Header("Balatro Tilt Settings")]
-    [SerializeField] private float maxTiltAngle = 12f;
-
-    [Header("Animation Tuning")]
-    [SerializeField] private float lerpSpeed = 12f;
-
-    [Header("Scale Settings")]
-    [Tooltip("Base scale of the card while resting in hand (unselected)")]
-    [SerializeField] private Vector3 restingScale = new Vector3(0.7f, 0.7f, 1f);
-
-    [Header("Reveal Juiciness Settings")]
-    [SerializeField] private Vector3 closeUpScale = new Vector3(2.0f, 2.0f, 1f);
-    [SerializeField] private Vector3 shrinkScale = new Vector3(1.6f, 1.6f, 1f);
-    [SerializeField] private Vector3 overshootScale = new Vector3(2.3f, 2.3f, 1f);
-
-    [Header("Screen Shake Settings")]
-    [SerializeField] private float commonShakeIntensity = 3f;
-    [SerializeField] private float rareShakeIntensity = 8f;
-    [SerializeField] private float legendaryShakeIntensity = 18f;
-    [SerializeField] private float shakeDuration = 0.25f;
+    [Header("References")]
+    [SerializeField] private Button cardButton;
+    [SerializeField] private Image cardImage;
 
     [Header("Combat Highlight Colors")]
     [SerializeField] private Color attackHighlightColor = new Color(1f, 0.3f, 0.3f, 1f);
     [SerializeField] private Color defenseHighlightColor = new Color(0.3f, 0.6f, 1f, 1f);
     [SerializeField] private Color supportHighlightColor = new Color(0.3f, 0.9f, 0.4f, 1f);
+    [SerializeField] private Color highlightColor = new Color(1f, 0.9f, 0.4f, 1f);
+    [SerializeField] private Color defaultColor = Color.white;
 
-    private bool isHovered = false;
-    private bool isSelected = false;
-    private bool isRevealing = false;
+    public bool IsSelected { get; private set; } = false;
+    public bool IsInteractable => isInteractable; // Added for debugging
 
-    private Vector3 baseLocalPosition;
-    private Quaternion baseLocalRotation;
-    private Vector3 targetLocalPosition;
-    private Quaternion targetLocalRotation;
-    private Vector3 targetScale = Vector3.one;
-
-    private Color originalColor = Color.white;
+    private bool isInteractable = true;
     private RectTransform rectTransform;
-    private Canvas parentCanvas;
+    private EndTurnManager endTurnManager;
 
-    public CardCategory Category => category;
-    public Rarity Rarity => rarity;
-    public int CardValue => cardValue;
-    public bool IsSelected => isSelected;
-    public Vector3 RestingScale => restingScale;
+    public int CardId { get; private set; }
+    public bool IsForever { get; private set; }
 
     private void Awake()
     {
         rectTransform = GetComponent<RectTransform>();
-        parentCanvas = GetComponentInParent<Canvas>();
+        if (cardButton == null) cardButton = GetComponent<Button>();
+        if (cardImage == null) cardImage = GetComponent<Image>();
 
-        if (cardFrameOrOutline == null)
+        if (endTurnManager == null)
         {
-            cardFrameOrOutline = GetComponent<Image>();
-        }
-
-        if (cardFrameOrOutline != null)
-        {
-            originalColor = cardFrameOrOutline.color;
-        }
-
-        ResetFlashOverlays();
-    }
-
-    private void ResetFlashOverlays()
-    {
-        SetOverlayAlpha(commonFlashOverlay, 0f);
-        SetOverlayAlpha(rareFlashOverlay, 0f);
-        SetOverlayAlpha(legendaryFlashOverlay, 0f);
-    }
-
-    private void SetOverlayAlpha(Image overlay, float alpha)
-    {
-        if (overlay != null)
-        {
-            Color color = overlay.color;
-            color.a = alpha;
-            overlay.color = color;
+            endTurnManager = FindFirstObjectByType<EndTurnManager>();
         }
     }
 
-    /// <summary>
-    /// The only way a card's data gets set now. Category, rarity, value, and (for Support)
-    /// the name/effect/Forever flag all come from a real GachaEngine pull result — nothing here
-    /// is rolled or randomly selected.
-    /// </summary>
-    public void ApplyPulledCardData(string cardName, CardCategory cardCategory, Rarity cardRarity, int value, string effectText = "", bool isForever = false)
+    public void SetEndTurnManager(EndTurnManager manager) => endTurnManager = manager;
+    public void SetCardId(int id) => CardId = id;
+    public void SetCardMetadata(bool isForever) => IsForever = isForever;
+
+    public void SetInteractable(bool state)
     {
-        category = cardCategory;
-        rarity = cardRarity;
-        cardValue = value;
-
-        supportName = cardName;
-        supportEffect = effectText;
-        isForeverEffect = isForever;
-
-        ApplyRarityColor();
-        UpdateValueTextUI();
-        UpdateCategoryTextUI();
-        UpdateSupportTextUI();
-    }
-
-    public void PrepareForUnrevealedSpawn()
-    {
-        isRevealing = true;
-        if (valueText != null) valueText.gameObject.SetActive(false);
-        if (categoryText != null) categoryText.gameObject.SetActive(false);
-        if (nameText != null) nameText.gameObject.SetActive(false);
-        if (descriptionText != null) descriptionText.gameObject.SetActive(false);
-        if (tierImage != null) tierImage.gameObject.SetActive(false);
-    }
-
-    public IEnumerator Routine_AnimateCenterReveal(
-        Vector3 centerWorldPos,
-        float moveDuration,
-        float shrinkDuration,
-        float overshootDuration,
-        float returnDuration)
-    {
-        isRevealing = true;
-        transform.rotation = Quaternion.identity;
-
-        Vector3 startPos = transform.position;
-        Vector3 startScale = transform.localScale;
-        float elapsed = 0f;
-
-        while (elapsed < moveDuration)
-        {
-            elapsed += Time.deltaTime;
-            float t = elapsed / moveDuration;
-            transform.position = Vector3.Lerp(startPos, centerWorldPos, t);
-            transform.localScale = Vector3.Lerp(startScale, closeUpScale, t);
-            yield return null;
-        }
-        transform.position = centerWorldPos;
-
-        elapsed = 0f;
-        while (elapsed < shrinkDuration)
-        {
-            elapsed += Time.deltaTime;
-            float t = elapsed / shrinkDuration;
-            transform.localScale = Vector3.Lerp(closeUpScale, shrinkScale, t);
-            yield return null;
-        }
-
-        if (categoryText != null) categoryText.gameObject.SetActive(true);
-        if (tierImage != null) tierImage.gameObject.SetActive(true);
-
-        if (category == CardCategory.Support)
-        {
-            if (nameText != null) nameText.gameObject.SetActive(true);
-            if (descriptionText != null) descriptionText.gameObject.SetActive(true);
-            if (valueText != null) valueText.gameObject.SetActive(false);
-        }
-        else
-        {
-            if (valueText != null) valueText.gameObject.SetActive(true);
-            if (nameText != null) nameText.gameObject.SetActive(false);
-            if (descriptionText != null) descriptionText.gameObject.SetActive(false);
-        }
-
-        TriggerRarityScreenShake();
-        TriggerRarityFlash();
-
-        elapsed = 0f;
-        while (elapsed < overshootDuration)
-        {
-            elapsed += Time.deltaTime;
-            float t = elapsed / overshootDuration;
-            transform.localScale = Vector3.Lerp(shrinkScale, overshootScale, t);
-            yield return null;
-        }
-
-        elapsed = 0f;
-        while (elapsed < returnDuration)
-        {
-            elapsed += Time.deltaTime;
-            float t = elapsed / returnDuration;
-            transform.localScale = Vector3.Lerp(overshootScale, Vector3.one, t);
-            yield return null;
-        }
-        transform.localScale = Vector3.one;
-
-        isRevealing = false;
-    }
-
-    private void TriggerRarityFlash()
-    {
-        Image targetOverlay = null;
-
-        switch (rarity)
-        {
-            case Rarity.Common: targetOverlay = commonFlashOverlay; break;
-            case Rarity.Rare: targetOverlay = rareFlashOverlay; break;
-            case Rarity.Legendary: targetOverlay = legendaryFlashOverlay; break;
-        }
-
-        if (targetOverlay != null)
-        {
-            StartCoroutine(Routine_FlashOverlay(targetOverlay));
-        }
-    }
-
-    private IEnumerator Routine_FlashOverlay(Image overlay)
-    {
-        float halfDuration = flashDuration * 0.5f;
-        float elapsed = 0f;
-
-        while (elapsed < halfDuration)
-        {
-            elapsed += Time.deltaTime;
-            float alpha = Mathf.Lerp(0f, maxFlashAlpha, elapsed / halfDuration);
-            SetOverlayAlpha(overlay, alpha);
-            yield return null;
-        }
-
-        elapsed = 0f;
-        while (elapsed < halfDuration)
-        {
-            elapsed += Time.deltaTime;
-            float alpha = Mathf.Lerp(maxFlashAlpha, 0f, elapsed / halfDuration);
-            SetOverlayAlpha(overlay, alpha);
-            yield return null;
-        }
-
-        SetOverlayAlpha(overlay, 0f);
-    }
-
-    private void TriggerRarityScreenShake()
-    {
-        float intensity = commonShakeIntensity;
-        switch (rarity)
-        {
-            case Rarity.Rare: intensity = rareShakeIntensity; break;
-            case Rarity.Legendary: intensity = legendaryShakeIntensity; break;
-        }
-
-        StartCoroutine(Routine_ScreenShake(intensity, shakeDuration));
-    }
-
-    private IEnumerator Routine_ScreenShake(float intensity, float duration)
-    {
-        Camera mainCam = Camera.main;
-        if (mainCam == null) yield break;
-
-        Vector3 originalCamPos = mainCam.transform.localPosition;
-        float elapsed = 0f;
-
-        while (elapsed < duration)
-        {
-            elapsed += Time.deltaTime;
-            Vector2 randomOffset = Random.insideUnitCircle * intensity * 0.01f;
-            mainCam.transform.localPosition = originalCamPos + new Vector3(randomOffset.x, randomOffset.y, 0f);
-            yield return null;
-        }
-
-        mainCam.transform.localPosition = originalCamPos;
-    }
-
-    private void ApplyRarityColor()
-    {
-        if (tierImage == null) return;
-
-        switch (rarity)
-        {
-            case Rarity.Common: tierImage.color = commonColor; break;
-            case Rarity.Rare: tierImage.color = rareColor; break;
-            case Rarity.Legendary: tierImage.color = legendaryColor; break;
-        }
-    }
-
-    private void UpdateValueTextUI()
-    {
-        if (valueText == null) return;
-
-        if (category == CardCategory.Support)
-        {
-            valueText.gameObject.SetActive(false);
-        }
-        else
-        {
-            valueText.gameObject.SetActive(true);
-            valueText.text = cardValue.ToString();
-        }
-    }
-
-    private void UpdateCategoryTextUI()
-    {
-        if (categoryText != null)
-        {
-            switch (category)
-            {
-                case CardCategory.Attack:
-                    categoryText.text = "ATTACK";
-                    break;
-                case CardCategory.Defense:
-                    categoryText.text = "DEFENSE";
-                    break;
-                case CardCategory.Support:
-                    categoryText.text = "SUPPORT";
-                    break;
-            }
-        }
-    }
-
-    private void UpdateSupportTextUI()
-    {
-        if (category == CardCategory.Support)
-        {
-            if (nameText != null)
-            {
-                nameText.gameObject.SetActive(true);
-                nameText.text = supportName;
-            }
-
-            if (descriptionText != null)
-            {
-                descriptionText.gameObject.SetActive(true);
-                descriptionText.text = supportEffect;
-            }
-        }
-        else
-        {
-            if (nameText != null) nameText.gameObject.SetActive(false);
-            if (descriptionText != null) descriptionText.gameObject.SetActive(false);
-        }
-    }
-
-    public void SaveBaseTransform()
-    {
-        baseLocalPosition = rectTransform.localPosition;
-        baseLocalRotation = rectTransform.localRotation;
-        UpdateTargetVisuals();
-    }
-
-    private void Update()
-    {
-        if (isRevealing) return;
-
-        if (isHovered && !isSelected)
-        {
-            CalculateCursorTilt();
-        }
-
-        rectTransform.localPosition = Vector3.Lerp(rectTransform.localPosition, targetLocalPosition, Time.deltaTime * lerpSpeed);
-        rectTransform.localRotation = Quaternion.Slerp(rectTransform.localRotation, targetLocalRotation, Time.deltaTime * lerpSpeed);
-        rectTransform.localScale = Vector3.Lerp(rectTransform.localScale, targetScale, Time.deltaTime * lerpSpeed);
-    }
-
-    private void CalculateCursorTilt()
-    {
-        Vector2 mousePos = Vector2.zero;
-
-        if (Mouse.current != null) mousePos = Mouse.current.position.ReadValue();
-        else if (Pointer.current != null) mousePos = Pointer.current.position.ReadValue();
-        else return;
-
-        Camera uiCamera = (parentCanvas != null && parentCanvas.renderMode != RenderMode.ScreenSpaceOverlay) ? parentCanvas.worldCamera : null;
-
-        if (RectTransformUtility.ScreenPointToLocalPointInRectangle(rectTransform, mousePos, uiCamera, out Vector2 localMousePos))
-        {
-            float normalizedX = Mathf.Clamp(localMousePos.x / rectTransform.rect.width, -0.5f, 0.5f);
-            float normalizedY = Mathf.Clamp(localMousePos.y / rectTransform.rect.height, -0.5f, 0.5f);
-
-            float tiltX = -normalizedY * maxTiltAngle;
-            float tiltY = normalizedX * maxTiltAngle;
-
-            targetLocalRotation = baseLocalRotation * Quaternion.Euler(tiltX, tiltY, 0f);
-        }
-    }
-
-    public void OnPointerEnter(PointerEventData eventData)
-    {
-        if (isRevealing) return;
-        isHovered = true;
-        UpdateTargetVisuals();
-
-        if (!isSelected) transform.SetAsLastSibling();
-    }
-
-    public void OnPointerExit(PointerEventData eventData)
-    {
-        if (isRevealing) return;
-        isHovered = false;
-        UpdateTargetVisuals();
+        isInteractable = state;
+        if (cardButton != null) cardButton.interactable = state;
     }
 
     public void OnPointerClick(PointerEventData eventData)
     {
-        if (isRevealing) return;
-        ToggleSelection();
-    }
-
-    public void OnCardClicked()
-    {
-        if (isRevealing) return;
+        if (!isInteractable)
+        {
+            Debug.Log($"[BalatroCardController] Click ignored on '{gameObject.name}' because isInteractable is false.");
+            return;
+        }
         ToggleSelection();
     }
 
     public void ToggleSelection()
     {
-        if (isRevealing) return;
-        isSelected = !isSelected;
-        UpdateTargetVisuals();
+        if (!isInteractable) return;
 
-        EndTurnManager endTurnMgr = FindFirstObjectByType<EndTurnManager>();
-        if (endTurnMgr != null)
+        IsSelected = !IsSelected;
+        Debug.Log($"[BalatroCardController] Toggled IsSelected to {IsSelected} on '{gameObject.name}'");
+
+        UpdateSelectionVisuals();
+
+        if (endTurnManager != null)
         {
-            endTurnMgr.UpdateEndTurnButtonVisibility();
+            endTurnManager.UpdateEndTurnButtonVisibility();
         }
     }
 
-    private void UpdateTargetVisuals()
+    // âœ… NEW: Bypasses the isInteractable check for programmatic cleanup
+    public void ForceDeselect()
     {
-        if (isSelected)
+        if (!IsSelected) return;
+
+        IsSelected = false;
+        UpdateSelectionVisuals();
+
+        if (endTurnManager != null)
         {
-            targetLocalPosition = baseLocalPosition + (transform.up * selectedLiftAmount);
-            targetLocalRotation = baseLocalRotation;
-            targetScale = selectedScale;
-            if (cardFrameOrOutline != null) cardFrameOrOutline.color = highlightColor;
-        }
-        else if (isHovered)
-        {
-            targetLocalPosition = baseLocalPosition + (transform.up * hoverLiftAmount);
-            targetScale = hoverScale;
-            if (cardFrameOrOutline != null) cardFrameOrOutline.color = highlightColor;
-        }
-        else
-        {
-            targetLocalPosition = baseLocalPosition;
-            targetLocalRotation = baseLocalRotation;
-            targetScale = restingScale;
-            if (cardFrameOrOutline != null) cardFrameOrOutline.color = originalColor;
+            endTurnManager.UpdateEndTurnButtonVisibility();
         }
     }
 
-    public void HighlightCardForCategory(CardCategory targetCategory, float scaleMultiplier = 1.25f)
+    // âœ… NEW: Helper to keep the visual logic DRY (Don't Repeat Yourself)
+    private void UpdateSelectionVisuals()
+    {
+        if (rectTransform != null)
+        {
+            Vector2 currentPos = rectTransform.anchoredPosition;
+            float targetY = IsSelected ? currentPos.y + 50f : currentPos.y - 50f;
+            rectTransform.anchoredPosition = new Vector2(currentPos.x, targetY);
+        }
+    }
+
+    public void HighlightCardForCategory(CardCategory targetCategory)
     {
         if (category != targetCategory) return;
 
-        targetScale = restingScale * scaleMultiplier;
-
-        Color targetHighlight = attackHighlightColor;
-        switch (category)
+        Color targetHighlight = category switch
         {
-            case CardCategory.Attack:
-                targetHighlight = attackHighlightColor;
-                break;
-            case CardCategory.Defense:
-                targetHighlight = defenseHighlightColor;
-                break;
-            case CardCategory.Support:
-                targetHighlight = supportHighlightColor;
-                break;
-        }
+            CardCategory.Attack => attackHighlightColor,
+            CardCategory.Defense => defenseHighlightColor,
+            CardCategory.Support => supportHighlightColor,
+            _ => highlightColor
+        };
 
-        if (cardFrameOrOutline != null)
-        {
-            cardFrameOrOutline.color = targetHighlight;
-        }
+        if (cardImage != null) cardImage.color = targetHighlight;
     }
 
-    public void ResetCombatHighlight()
+    public void ResetHighlight()
     {
-        targetScale = restingScale;
-        if (cardFrameOrOutline != null)
-        {
-            cardFrameOrOutline.color = originalColor;
-        }
+        if (cardImage != null) cardImage.color = defaultColor;
     }
 }
