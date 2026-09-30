@@ -93,7 +93,7 @@ public class DrawTimerManager : NetworkBehaviour
     {
         if (roundDisplayText != null && roundDisplayCanvasGroup != null)
         {
-            roundDisplayText.text = $"ROUND {currentRound}";
+            roundDisplayText.text = $"Round {currentRound}";
             roundDisplayCanvasGroup.alpha = 1f;
             yield return new WaitForSeconds(roundTextHoldDuration);
 
