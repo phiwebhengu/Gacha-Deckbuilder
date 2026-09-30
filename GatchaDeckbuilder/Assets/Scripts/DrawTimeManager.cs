@@ -43,7 +43,6 @@ public class DrawTimerManager : NetworkBehaviour
     private void Awake()
     {
         // Hide all UI elements initially
-        if (roundDisplayCanvasGroup != null) roundDisplayCanvasGroup.alpha = 0f;
         if (countdownText != null) countdownText.gameObject.SetActive(false);
         if (timerText != null) timerText.gameObject.SetActive(false); // Hide timer until draw phase
 
@@ -105,7 +104,7 @@ public class DrawTimerManager : NetworkBehaviour
                 roundDisplayCanvasGroup.alpha = Mathf.Lerp(1f, 0f, elapsed / roundTextFadeDuration);
                 yield return null;
             }
-            roundDisplayCanvasGroup.alpha = 0f;
+            roundDisplayCanvasGroup.alpha = 1f;
         }
 
         yield return StartCoroutine(Routine_ExecuteCountdown());
