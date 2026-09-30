@@ -472,7 +472,7 @@ public class UIManager : NetworkBehaviour
     async System.Threading.Tasks.Task ShowErrorPanelAsync(string message)
     {
         if (errorPanel == null || errorText == null) return;
-        errorText.text = message;
+        errorText.text = "Lobby not found!";
         errorPanel.SetActive(true);
         await System.Threading.Tasks.Task.Delay(2000);
         errorPanel.SetActive(false);
