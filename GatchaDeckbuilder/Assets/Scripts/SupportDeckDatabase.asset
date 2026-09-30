@@ -1,0 +1,196 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 77b3865b1a4a1d64da95410bd68de600, type: 3}
+  m_Name: SupportDeckDatabase
+  m_EditorClassIdentifier: Assembly-CSharp::GachaSystem.SupportDeckDatabase
+  csvFile: {fileID: 4900000, guid: b04994634792304418828f774d56a639, type: 3}
+  supportCards:
+  - id: 1
+    cardName: Jade Chamber
+    tier: 2
+    effectDescription: Increase luck by 10% for legendary pulls
+    effectType: Forever
+    copies: 1
+  - id: 2
+    cardName: Seirai Island
+    tier: 2
+    effectDescription: Double damage when your damage is more than 10
+    effectType: Forever
+    copies: 1
+  - id: 3
+    cardName: Liben
+    tier: 2
+    effectDescription: Double defense when your defense is more than 10
+    effectType: Forever
+    copies: 1
+  - id: 4
+    cardName: Liyue Harbor Wharf
+    tier: 1
+    effectDescription: Pull 2 cards for free
+    effectType: Immediate
+    copies: 1
+  - id: 5
+    cardName: Wangshu Inn
+    tier: 1
+    effectDescription: -1 attack from opponent each round
+    effectType: Forever
+    copies: 1
+  - id: 6
+    cardName: Golden House
+    tier: 1
+    effectDescription: Trigger a gold pull
+    effectType: Immediate
+    copies: 1
+  - id: 7
+    cardName: Grand Narukami Shrine
+    tier: 1
+    effectDescription: If the total cards used that round is odd, +1 attack, or -1 attack
+    effectType: Forever
+    copies: 1
+  - id: 8
+    cardName: Paimon
+    tier: 1
+    effectDescription: Get 2 tokens
+    effectType: Immediate
+    copies: 1
+  - id: 9
+    cardName: Ellin
+    tier: 1
+    effectDescription: +3 dmg if you played less action cards than support cards (once per round)
+    effectType: Forever
+    copies: 1
+  - id: 10
+    cardName: Parametric Transformer
+    tier: 1
+    effectDescription: Convert all your played defence points into attack this round
+    effectType: Immediate
+    copies: 1
+  - id: 11
+    cardName: Hanachirusato
+    tier: 1
+    effectDescription: Draw 1 card if you pull a Weapon or Artefact card
+    effectType: Forever
+    copies: 1
+  - id: 12
+    cardName: Stadium of the Sacred Flame
+    tier: 1
+    effectDescription: Opponent's Pity counter resets to 0
+    effectType: Immediate
+    copies: 1
+  - id: 13
+    cardName: Favonius Cathedral
+    tier: 0
+    effectDescription: +2 defense if you have defense cards
+    effectType: Immediate
+    copies: 1
+  - id: 14
+    cardName: Knights of Favonius Library
+    tier: 0
+    effectDescription: Discard this pull and pull again for free
+    effectType: Immediate
+    copies: 1
+  - id: 15
+    cardName: Dawn Winery
+    tier: 0
+    effectDescription: If a companion card is played, the effect is doubled
+    effectType: Immediate
+    copies: 1
+  - id: 16
+    cardName: Stormterror's Lair
+    tier: 0
+    effectDescription: The next Support effect you play this match is doubled
+    effectType: Immediate
+    copies: 1
+  - id: 17
+    cardName: Vanarana
+    tier: 0
+    effectDescription: Reclaim a token that was used to draw
+    effectType: Immediate
+    copies: 1
+  - id: 18
+    cardName: Weeping Willow of the Lake
+    tier: 0
+    effectDescription: If the player pulled less than 2 cards this round, draw 2 cards
+    effectType: Immediate
+    copies: 1
+  - id: 19
+    cardName: Frostmoon Enclave
+    tier: 0
+    effectDescription: Discard 2 cards from your collection, then pull 2 new ones for free
+    effectType: Immediate
+    copies: 1
+  - id: 20
+    cardName: Katheryne
+    tier: 0
+    effectDescription: Get a token if you win that round
+    effectType: Immediate
+    copies: 1
+  - id: 21
+    cardName: Tubby
+    tier: 0
+    effectDescription: If a location support is played, the effect is doubled
+    effectType: Forever
+    copies: 1
+  - id: 22
+    cardName: Xudong
+    tier: 0
+    effectDescription: Your next 2 pulls costs no tokens
+    effectType: Immediate
+    copies: 1
+  - id: 23
+    cardName: Kid Kujirai
+    tier: 0
+    effectDescription: This card disappears if you have less support cards than the opponent
+    effectType: Forever
+    copies: 1
+  - id: 24
+    cardName: Setaria
+    tier: 0
+    effectDescription: If your collection is empty, pull 2 cards for free
+    effectType: Forever
+    copies: 1
+  - id: 25
+    cardName: Seymour
+    tier: 0
+    effectDescription: Copy the first card of the opponents deck
+    effectType: Immediate
+    copies: 1
+  - id: 26
+    cardName: Treasure-Seeking Seelie
+    tier: 0
+    effectDescription: Double your attack that round
+    effectType: Immediate
+    copies: 1
+  - id: 27
+    cardName: Memento Lens
+    tier: 0
+    effectDescription: Immune all opponent's attack that round
+    effectType: Immediate
+    copies: 1
+  - id: 28
+    cardName: Atea
+    tier: 0
+    effectDescription: Reduce the cost of your next Support card pull by 1 token
+    effectType: Immediate
+    copies: 1
+  - id: 29
+    cardName: Central Laboratory Ruins
+    tier: 0
+    effectDescription: If you own 3+ Monster cards, gain 1 attack this round
+    effectType: Immediate
+    copies: 1
+  - id: 30
+    cardName: Mamere
+    tier: 0
+    effectDescription: If you played more Weapon/Artefact cards than your opponent this round, +2 attack
+    effectType: Immediate
+    copies: 1

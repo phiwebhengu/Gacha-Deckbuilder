@@ -6,13 +6,16 @@ public class PlayerHandManager : MonoBehaviour
 {
     [Header("UI References")]
     [SerializeField] private GameObject cardPrefab;
-    [SerializeField] private RectTransform handTransform;  // Parent object representing the hand
-    [SerializeField] private Canvas targetCanvas;          // Main UI Canvas
+    [SerializeField] private RectTransform handTransform;
+    [SerializeField] private Canvas targetCanvas;
     [Tooltip("Invisible raycast target image activated during card reveal to block token/card clicks.")]
     [SerializeField] private GameObject clickBlockerOverlay;
 
+    [Header("Pull System Reference")]
+    [Tooltip("The real pull engine — reads real card data, handles pity and the 50/50 correctly.")]
+    [SerializeField] private PlayerPullController pullController;
+
     [Header("Reveal Animation Timings")]
-    [Tooltip("Center world point override. If left null, Screen center will be used automatically.")]
     [SerializeField] private Transform centerPointTarget;
     [SerializeField] private float moveToCenterDuration = 0.45f;
     [SerializeField] private float shrinkDuration = 0.12f;
@@ -21,28 +24,20 @@ public class PlayerHandManager : MonoBehaviour
     [SerializeField] private float postRevealPause = 0.35f;
 
     [Header("Fan Layout Settings")]
-    [Tooltip("Maximum arc spread angle for the outer cards")]
     [SerializeField] private float maxFanAngle = 30f;
-
-    [Tooltip("Horizontal spacing offset between cards")]
     [SerializeField] private float cardSpacing = 80f;
-
-    [Tooltip("Slight downward dip for outer cards to create an arc")]
     [SerializeField] private float arcHeightDip = 15f;
 
     [Header("Animation Settings")]
-    [Tooltip("Time it takes for a single card to reach the hand")]
     [SerializeField] private float cardMoveDuration = 0.4f;
-
-    [Tooltip("Delay between spawning consecutive cards from the deck")]
     [SerializeField] private float dealDelay = 0.15f;
 
     [Header("Identity Config")]
-    [Tooltip("Check this TRUE on the AI Hand Manager instance to skip close-up reveal sequences and screen shake.")]
     [SerializeField] private bool isAI = false;
 
     [Header("System References")]
     [SerializeField] private DrawTimerManager timerManager;
+    [SerializeField] private PityManager pityManager;
 
     private List<CardUI> cardsInHand = new List<CardUI>();
 
@@ -63,18 +58,30 @@ public class PlayerHandManager : MonoBehaviour
         }
     }
 
-    public void DealCardsFromTokens(int count, RectTransform spawnDeckTransform, DeckType deckType)
+    public void DealCardsFromTokens(int count, DeckButton selectedDeck)
     {
         if (!isAI && timerManager != null)
         {
             timerManager.NotifyCardsDrawn();
         }
 
-        StartCoroutine(Routine_DealCards(count, spawnDeckTransform, deckType));
+        StartCoroutine(Routine_DealCards(count, selectedDeck));
     }
 
-    private IEnumerator Routine_DealCards(int count, RectTransform spawnDeckTransform, DeckType deckType)
+    private IEnumerator Routine_DealCards(int count, DeckButton selectedDeck)
     {
+        if (selectedDeck == null)
+        {
+            Debug.LogError("[Hand Manager] Selected Deck is null!");
+            yield break;
+        }
+
+        if (pullController == null)
+        {
+            Debug.LogError("[Hand Manager] No PlayerPullController assigned — cannot perform a real pull.");
+            yield break;
+        }
+
         if (!isAI && clickBlockerOverlay != null)
         {
             clickBlockerOverlay.SetActive(true);
@@ -82,7 +89,7 @@ public class PlayerHandManager : MonoBehaviour
 
         Vector3 screenCenterWorldPos = (centerPointTarget != null)
             ? centerPointTarget.position
-            : (targetCanvas != null ? targetCanvas.transform.position : Vector3.zero);
+            : targetCanvas.transform.position;
 
         for (int i = 0; i < count; i++)
         {
@@ -99,18 +106,41 @@ public class PlayerHandManager : MonoBehaviour
 
             if (cardRect == null || cardScript == null || controller == null)
             {
-                Debug.LogError("[Hand Manager] Card Prefab is missing required components!");
+                Debug.LogError("[Hand Manager] Card Prefab is missing components!");
                 yield break;
             }
 
-            // Fixed: Initialize card category and rarity with zero arguments
-            controller.InitializeCardCategoryAndRarity();
+            // The real pull — real card, real rarity, real pity, real 50/50.
+            PullResult result = selectedDeck.IsSupportDeck
+                ? pullController.PullSupport()
+                : pullController.PullAction();
+
+            CardCategory cardCategory;
+            int value = 0;
+            string effect = "";
+            bool isForever = false;
+
+            if (result.Deck == DeckType.Action)
+            {
+                cardCategory = result.ActionData.Role == "Attack" ? CardCategory.Attack : CardCategory.Defense;
+                value = result.ActionData.Value;
+            }
+            else
+            {
+                cardCategory = CardCategory.Support;
+                effect = result.SupportData.Effect;
+                isForever = result.SupportData.EffectType == "Forever";
+            }
+
+            controller.ApplyPulledCardData(result.CardName, cardCategory, result.Tier, value, effect, isForever);
+
+            if (pityManager != null)
+            {
+                pityManager.RegisterPull(result.Tier);
+            }
 
             cardRect.localScale = Vector3.one;
-            if (spawnDeckTransform != null)
-            {
-                cardRect.position = spawnDeckTransform.position;
-            }
+            cardRect.position = selectedDeck.DeckTransform.position;
 
             Vector3 localPos = cardRect.localPosition;
             localPos.z = 0f;
@@ -150,8 +180,15 @@ public class PlayerHandManager : MonoBehaviour
         }
     }
 
+    private void CleanupNullCards()
+    {
+        cardsInHand.RemoveAll(card => card == null || card.gameObject == null);
+    }
+
     public void UpdateHandFanLayout()
     {
+        CleanupNullCards();
+
         int totalCards = cardsInHand.Count;
         if (totalCards == 0) return;
 
@@ -180,10 +217,13 @@ public class PlayerHandManager : MonoBehaviour
 
     public List<CardUI> GetSelectedCards()
     {
+        CleanupNullCards();
+
         List<CardUI> selected = new List<CardUI>();
         foreach (CardUI card in cardsInHand)
         {
             if (card == null) continue;
+
             BalatroCardController controller = card.GetComponent<BalatroCardController>();
             if (controller != null && controller.IsSelected)
             {
@@ -195,8 +235,6 @@ public class PlayerHandManager : MonoBehaviour
 
     public void SubmitSelectedCardsToHand(RectTransform selectedHandTarget)
     {
-        if (selectedHandTarget == null) return;
-
         List<CardUI> selectedCards = GetSelectedCards();
 
         for (int i = 0; i < selectedCards.Count; i++)
@@ -208,11 +246,8 @@ public class PlayerHandManager : MonoBehaviour
             card.transform.SetParent(selectedHandTarget, true);
 
             BalatroCardController controller = card.GetComponent<BalatroCardController>();
-            Vector3 restingScale = Vector3.one;
-
             if (controller != null)
             {
-                restingScale = controller.RestingScale;
                 controller.enabled = false;
             }
 
@@ -220,7 +255,7 @@ public class PlayerHandManager : MonoBehaviour
             float xPos = (i - (selectedCards.Count - 1) / 2f) * spacing;
             Vector3 targetPos = new Vector3(xPos, 0f, 0f);
 
-            StartCoroutine(card.AnimateToHand(targetPos, Quaternion.identity, restingScale, cardMoveDuration));
+            StartCoroutine(card.AnimateToHand(targetPos, Quaternion.identity, (controller != null) ? controller.RestingScale : Vector3.one, cardMoveDuration));
         }
 
         UpdateHandFanLayout();
@@ -235,7 +270,7 @@ public class PlayerHandManager : MonoBehaviour
 
         foreach (CardUI card in submittedCards)
         {
-            if (card == null) continue;
+            if (card == null || card.gameObject == null) continue;
 
             card.transform.SetParent(handTransform, true);
 
@@ -284,7 +319,10 @@ public class PlayerHandManager : MonoBehaviour
 
             foreach (CardUI card in cardsToClear)
             {
-                if (card != null) card.transform.localScale = Vector3.Lerp(Vector3.one, popScale, t);
+                if (card != null && card.gameObject != null)
+                {
+                    card.transform.localScale = Vector3.Lerp(Vector3.one, popScale, t);
+                }
             }
             yield return null;
         }
@@ -297,14 +335,23 @@ public class PlayerHandManager : MonoBehaviour
 
             foreach (CardUI card in cardsToClear)
             {
-                if (card != null) card.transform.localScale = Vector3.Lerp(popScale, Vector3.zero, t);
+                if (card != null && card.gameObject != null)
+                {
+                    card.transform.localScale = Vector3.Lerp(popScale, Vector3.zero, t);
+                }
             }
             yield return null;
         }
 
         foreach (CardUI card in cardsToClear)
         {
-            if (card != null) Destroy(card.gameObject);
+            if (card != null)
+            {
+                cardsInHand.Remove(card);
+                Destroy(card.gameObject);
+            }
         }
+
+        CleanupNullCards();
     }
 }

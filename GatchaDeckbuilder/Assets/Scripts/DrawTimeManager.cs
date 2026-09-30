@@ -16,7 +16,7 @@ public class DrawTimerManager : MonoBehaviour
     [SerializeField] private float roundTextHoldDuration = 0.6f;
 
     [Header("Timer Settings")]
-    [SerializeField] private float drawWindowDuration = 20f;
+    [SerializeField] private float drawWindowDuration = 5f;
     [SerializeField] private float pulseSpeed = 8f;
     [SerializeField] private float pulseScaleAmount = 0.15f;
 
@@ -38,6 +38,8 @@ public class DrawTimerManager : MonoBehaviour
     [SerializeField] private Image radialTimerImage;
     [SerializeField] private TextMeshProUGUI timerText;
     [SerializeField] private RectTransform timerContainer;
+    [Tooltip("UI Image placed over the player's hand to block clicks during the draw phase")]
+    [SerializeField] private Image handBlockerImage;
 
     [Header("System References")]
     [SerializeField] private TokenSelectionManager tokenManager;
@@ -52,7 +54,7 @@ public class DrawTimerManager : MonoBehaviour
     private bool playerHasDrawn = false;
     private Vector3 originalTimerScale = Vector3.one;
 
-    public bool IsDrawPhaseActive => isTimerRunning; // <-- Add this public property
+    public bool IsDrawPhaseActive => isTimerRunning;
 
     public int CurrentRound => currentRound;
     public int MaxRounds => maxRounds;
@@ -72,19 +74,28 @@ public class DrawTimerManager : MonoBehaviour
 
         if (tokenManager == null)
         {
-            tokenManager = FindFirstObjectByType<TokenSelectionManager>();
+            tokenManager = FindObjectOfType<TokenSelectionManager>();
         }
 
+        // Hide Hand Blocker on Awake
+        if (handBlockerImage != null)
+        {
+            handBlockerImage.gameObject.SetActive(false);
+        }
+
+        // Hide Player's Tokens on Start
         if (tokenManager != null)
         {
             tokenManager.gameObject.SetActive(false);
         }
 
+        // Hide AI's Tokens on Start
         if (aiRival != null)
         {
             aiRival.StopAIDrawPhase();
         }
 
+        // Hide countdown text on start
         if (countdownText != null)
         {
             countdownText.gameObject.SetActive(false);
@@ -116,6 +127,7 @@ public class DrawTimerManager : MonoBehaviour
 
     private IEnumerator Routine_StartRoundSequence()
     {
+        // 1. Display and Fade-Out Round Banner Text
         if (roundDisplayText != null && roundDisplayCanvasGroup != null)
         {
             roundDisplayText.text = $"ROUND {currentRound}";
@@ -134,6 +146,7 @@ public class DrawTimerManager : MonoBehaviour
             roundDisplayCanvasGroup.alpha = 0f;
         }
 
+        // 2. Execute Ready... Set... Draw!
         yield return StartCoroutine(Routine_ExecuteCountdown());
     }
 
@@ -179,7 +192,12 @@ public class DrawTimerManager : MonoBehaviour
     {
         playerHasDrawn = false;
         currentTimer = drawWindowDuration;
-        isTimerRunning = true; // <-- Controls draw state
+        isTimerRunning = true;
+
+        if (handBlockerImage != null)
+        {
+            handBlockerImage.gameObject.SetActive(true);
+        }
 
         if (timerContainer != null)
         {
@@ -234,6 +252,11 @@ public class DrawTimerManager : MonoBehaviour
     {
         isTimerRunning = false;
 
+        if (handBlockerImage != null)
+        {
+            handBlockerImage.gameObject.SetActive(false);
+        }
+
         if (timerContainer != null)
         {
             timerContainer.localScale = originalTimerScale;
@@ -263,6 +286,7 @@ public class DrawTimerManager : MonoBehaviour
     {
         if (tokenManager == null || availableDecks.Count == 0) yield break;
 
+        // Filter available decks to make sure support deck buttons can be picked if added
         int randomIndex = Random.Range(0, availableDecks.Count);
         DeckButton chosenDeck = availableDecks[randomIndex];
 

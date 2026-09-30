@@ -11,15 +11,15 @@ public enum DeckType
 public class DeckButton : MonoBehaviour, IPointerClickHandler, IPointerEnterHandler, IPointerExitHandler
 {
     [Header("Deck Config")]
-    [SerializeField] private DeckType deckType;
+    [SerializeField] private DeckType deckType = DeckType.Action;
     [SerializeField] private RectTransform deckTransform;
 
-    [Header("Target Managers")]
-    [Tooltip("Drag the corresponding TokenSelectionManager here in the Inspector")]
-    [SerializeField] private TokenSelectionManager tokenManager;
+    [Header("Deck Category Settings")]
+    [SerializeField] private bool isSupportDeck = false;
 
-    [Tooltip("Drag the DrawTimerManager here to restrict drawing window.")]
-    [SerializeField] private DrawTimerManager timerManager; // <-- Added reference
+    [Header("Target Managers")]
+    [SerializeField] private TokenSelectionManager tokenManager;
+    [SerializeField] private DrawTimerManager timerManager;
 
     [Header("Visual Tuning")]
     [SerializeField] private Vector3 hoverScale = new Vector3(1.08f, 1.08f, 1f);
@@ -29,6 +29,7 @@ public class DeckButton : MonoBehaviour, IPointerClickHandler, IPointerEnterHand
     private Vector3 targetScale;
 
     public DeckType Type => deckType;
+    public bool IsSupportDeck => isSupportDeck || deckType == DeckType.Support;
     public RectTransform DeckTransform => deckTransform != null ? deckTransform : GetComponent<RectTransform>();
 
     private void Awake()
@@ -36,16 +37,28 @@ public class DeckButton : MonoBehaviour, IPointerClickHandler, IPointerEnterHand
         originalScale = transform.localScale;
         targetScale = originalScale;
 
-        // Fallback searches if unassigned
+        if (deckType == DeckType.Support)
+        {
+            isSupportDeck = true;
+        }
+
         if (tokenManager == null)
         {
             tokenManager = GetComponentInParent<TokenSelectionManager>();
-            if (tokenManager == null) tokenManager = FindObjectOfType<TokenSelectionManager>();
+            if (tokenManager == null) tokenManager = FindFirstObjectByType<TokenSelectionManager>();
         }
 
         if (timerManager == null)
         {
-            timerManager = FindObjectOfType<DrawTimerManager>();
+            timerManager = FindFirstObjectByType<DrawTimerManager>();
+        }
+    }
+
+    private void OnValidate()
+    {
+        if (deckType == DeckType.Support)
+        {
+            isSupportDeck = true;
         }
     }
 
@@ -56,7 +69,6 @@ public class DeckButton : MonoBehaviour, IPointerClickHandler, IPointerEnterHand
 
     public void OnPointerEnter(PointerEventData eventData)
     {
-        // Only trigger hover animation if draw phase is active
         if (timerManager != null && timerManager.IsDrawPhaseActive)
         {
             targetScale = hoverScale;
@@ -70,7 +82,6 @@ public class DeckButton : MonoBehaviour, IPointerClickHandler, IPointerEnterHand
 
     public void OnPointerClick(PointerEventData eventData)
     {
-        // Block clicks if draw phase is not currently running
         if (timerManager != null && !timerManager.IsDrawPhaseActive)
         {
             Debug.LogWarning("[DeckButton] Draw attempted outside active draw window!");

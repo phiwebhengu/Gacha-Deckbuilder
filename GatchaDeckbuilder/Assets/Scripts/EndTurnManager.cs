@@ -6,28 +6,33 @@ using UnityEngine.SceneManagement;
 using UnityEngine.InputSystem;
 using TMPro;
 
+public struct TurnResultData
+{
+    public int playerAttack;
+    public int playerDefense;
+    public int opponentAttack;
+    public int opponentDefense;
+    public int netDamageToPlayer;
+    public int netDamageToOpponent;
+    public int finalPlayerHP;
+    public int finalOpponentHP;
+}
+
 public class EndTurnManager : MonoBehaviour
 {
     [Header("Health & Points Settings")]
     [SerializeField] private int playerMaxHP = 20;
-    [SerializeField] private int aiMaxHP = 20;
+    [SerializeField] private int opponentMaxHP = 20;
 
     [Header("HP UI References")]
     [SerializeField] private TextMeshProUGUI playerHPText;
-    [SerializeField] private TextMeshProUGUI aiHPText;
+    [SerializeField] private TextMeshProUGUI opponentHPText;
 
     [Header("Combat Count UI References")]
-    [Tooltip("TextMeshPro displaying the Player's accumulated Attack value.")]
     [SerializeField] private TextMeshProUGUI playerAttackText;
-
-    [Tooltip("TextMeshPro displaying the Player's accumulated Defense value.")]
     [SerializeField] private TextMeshProUGUI playerDefenseText;
-
-    [Tooltip("TextMeshPro displaying the AI Rival's accumulated Attack value.")]
-    [SerializeField] private TextMeshProUGUI aiAttackText;
-
-    [Tooltip("TextMeshPro displaying the AI Rival's accumulated Defense value.")]
-    [SerializeField] private TextMeshProUGUI aiDefenseText;
+    [SerializeField] private TextMeshProUGUI opponentAttackText;
+    [SerializeField] private TextMeshProUGUI opponentDefenseText;
 
     [Header("Center Difference Display")]
     [SerializeField] private TextMeshProUGUI centerDifferenceText;
@@ -45,8 +50,6 @@ public class EndTurnManager : MonoBehaviour
     [Header("UI References")]
     [SerializeField] private Button endTurnButton;
     [SerializeField] private RectTransform selectedHandTransform;
-
-    [Tooltip("Transparent UI Image with Raycast Target enabled to block card interaction after locking in.")]
     [SerializeField] private Image raycastBlockerImage;
 
     [Header("System References")]
@@ -54,49 +57,37 @@ public class EndTurnManager : MonoBehaviour
     [SerializeField] private AIRivalController aiRival;
     [SerializeField] private DrawTimerManager timerManager;
 
-    // Internal State
+    [Header("Multiplayer Identity")]
+    [SerializeField] private bool isMultiplayerMode = false;
+
     private int currentPlayerHP;
-    private int currentAIHP;
+    private int currentOpponentHP;
     private Vector3 originalCenterScale = Vector3.one;
     private Vector3 originalPlayerHPScale = Vector3.one;
-    private Vector3 originalAIHPScale = Vector3.one;
+    private Vector3 originalOpponentHPScale = Vector3.one;
 
     private Vector3 originalPlayerAttackScale = Vector3.one;
     private Vector3 originalPlayerDefenseScale = Vector3.one;
-    private Vector3 originalAIAttackScale = Vector3.one;
-    private Vector3 originalAIDefenseScale = Vector3.one;
+    private Vector3 originalOpponentAttackScale = Vector3.one;
+    private Vector3 originalOpponentDefenseScale = Vector3.one;
 
     private Vector3 originalCamPos;
 
     public int CurrentPlayerHP => currentPlayerHP;
-    public int CurrentAIHP => currentAIHP;
+    public int CurrentOpponentHP => currentOpponentHP;
 
     private void Start()
     {
         currentPlayerHP = playerMaxHP;
-        currentAIHP = aiMaxHP;
+        currentOpponentHP = opponentMaxHP;
 
-        if (mainCamera == null)
-        {
-            mainCamera = Camera.main;
-        }
-
-        if (mainCamera != null)
-        {
-            originalCamPos = mainCamera.transform.localPosition;
-        }
+        if (mainCamera == null) mainCamera = Camera.main;
+        if (mainCamera != null) originalCamPos = mainCamera.transform.localPosition;
 
         CacheAndResetUI();
 
-        if (endTurnButton != null)
-        {
-            endTurnButton.onClick.AddListener(OnEndTurnClicked);
-        }
-
-        if (raycastBlockerImage != null)
-        {
-            raycastBlockerImage.gameObject.SetActive(false);
-        }
+        if (endTurnButton != null) endTurnButton.onClick.AddListener(OnEndTurnClicked);
+        if (raycastBlockerImage != null) raycastBlockerImage.gameObject.SetActive(false);
 
         UpdateEndTurnButtonVisibility();
     }
@@ -110,7 +101,7 @@ public class EndTurnManager : MonoBehaviour
         }
 
         if (playerHPText != null) originalPlayerHPScale = playerHPText.transform.localScale;
-        if (aiHPText != null) originalAIHPScale = aiHPText.transform.localScale;
+        if (opponentHPText != null) originalOpponentHPScale = opponentHPText.transform.localScale;
 
         if (playerAttackText != null)
         {
@@ -122,32 +113,23 @@ public class EndTurnManager : MonoBehaviour
             originalPlayerDefenseScale = playerDefenseText.transform.localScale;
             playerDefenseText.text = "0";
         }
-        if (aiAttackText != null)
+        if (opponentAttackText != null)
         {
-            originalAIAttackScale = aiAttackText.transform.localScale;
-            aiAttackText.text = "0";
+            originalOpponentAttackScale = opponentAttackText.transform.localScale;
+            opponentAttackText.text = "0";
         }
-        if (aiDefenseText != null)
+        if (opponentDefenseText != null)
         {
-            originalAIDefenseScale = aiDefenseText.transform.localScale;
-            aiDefenseText.text = "0";
+            originalOpponentDefenseScale = opponentDefenseText.transform.localScale;
+            opponentDefenseText.text = "0";
         }
 
         UpdateHPUI();
     }
 
-    private void Update()
-    {
-        if (Keyboard.current != null && Keyboard.current.rKey.wasPressedThisFrame)
-        {
-            SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
-        }
-    }
-
     public void UpdateEndTurnButtonVisibility()
     {
         if (handManager == null || endTurnButton == null) return;
-
         bool hasSelectedCards = handManager.GetSelectedCards().Count > 0;
         endTurnButton.gameObject.SetActive(hasSelectedCards);
     }
@@ -159,25 +141,157 @@ public class EndTurnManager : MonoBehaviour
         List<CardUI> playerSelectedCards = handManager.GetSelectedCards();
         if (playerSelectedCards.Count == 0) return;
 
-        if (raycastBlockerImage != null)
-        {
-            raycastBlockerImage.gameObject.SetActive(true);
-        }
+        if (raycastBlockerImage != null) raycastBlockerImage.gameObject.SetActive(true);
 
-        // Move cards to central played hand areas
         handManager.SubmitSelectedCardsToHand(selectedHandTransform);
 
-        if (aiRival != null)
+        if (endTurnButton != null) endTurnButton.gameObject.SetActive(false);
+
+        if (isMultiplayerMode)
         {
-            aiRival.SubmitRivalHand();
+            // TODO: Send client choices to Server/Host via Network RPC
+        }
+        else
+        {
+            if (aiRival != null) aiRival.SubmitRivalHand();
+
+            TurnResultData result = CalculateTurnResult();
+            StartCoroutine(Routine_ResolveCombatSequence(result));
+        }
+    }
+
+    public TurnResultData CalculateTurnResult()
+    {
+        List<BalatroCardController> playerCards = GetControllersFromTransform(selectedHandTransform);
+        List<BalatroCardController> opponentCards = (aiRival != null) ? GetControllersFromTransform(aiRival.RivalSelectedHandTransform) : new List<BalatroCardController>();
+
+        int pAttack = CalculateTotalValueForCategory(playerCards, CardCategory.Attack);
+        int pDefense = CalculateTotalValueForCategory(playerCards, CardCategory.Defense);
+        int oAttack = CalculateTotalValueForCategory(opponentCards, CardCategory.Attack);
+        int oDefense = CalculateTotalValueForCategory(opponentCards, CardCategory.Defense);
+
+        int damageToOpponent = Mathf.Max(0, pAttack - oDefense);
+        int damageToPlayer = Mathf.Max(0, oAttack - pDefense);
+
+        TurnResultData data = new TurnResultData
+        {
+            playerAttack = pAttack,
+            playerDefense = pDefense,
+            opponentAttack = oAttack,
+            opponentDefense = oDefense,
+            netDamageToPlayer = damageToPlayer,
+            netDamageToOpponent = damageToOpponent,
+            finalPlayerHP = Mathf.Max(0, currentPlayerHP - damageToPlayer),
+            finalOpponentHP = Mathf.Max(0, currentOpponentHP - damageToOpponent)
+        };
+
+        return data;
+    }
+
+    public void OnReceiveNetworkTurnResult(TurnResultData result)
+    {
+        StartCoroutine(Routine_ResolveCombatSequence(result));
+    }
+
+    private IEnumerator Routine_ResolveCombatSequence(TurnResultData result)
+    {
+        yield return new WaitForSeconds(cardMovementWaitDelay);
+
+        List<BalatroCardController> playerCards = GetControllersFromTransform(selectedHandTransform);
+        List<BalatroCardController> opponentCards = (aiRival != null) ? GetControllersFromTransform(aiRival.RivalSelectedHandTransform) : new List<BalatroCardController>();
+
+        ProcessPlayedSupportCards(playerCards, "Player");
+        ProcessPlayedSupportCards(opponentCards, "Opponent");
+
+        HighlightCardsByCategory(playerCards, opponentCards, CardCategory.Attack);
+        yield return StartCoroutine(Routine_CountUpPair(
+            result.playerAttack, playerAttackText, originalPlayerAttackScale,
+            result.opponentAttack, opponentAttackText, originalOpponentAttackScale
+        ));
+        yield return new WaitForSeconds(phaseTransitionPause);
+        ResetCardHighlights(playerCards, opponentCards);
+
+        HighlightCardsByCategory(playerCards, opponentCards, CardCategory.Defense);
+        yield return StartCoroutine(Routine_CountUpPair(
+            result.playerDefense, playerDefenseText, originalPlayerDefenseScale,
+            result.opponentDefense, opponentDefenseText, originalOpponentDefenseScale
+        ));
+        yield return new WaitForSeconds(phaseTransitionPause);
+        ResetCardHighlights(playerCards, opponentCards);
+
+        int maxNetDamage = Mathf.Max(result.netDamageToOpponent, result.netDamageToPlayer);
+        if (centerDifferenceText != null && maxNetDamage > 0)
+        {
+            centerDifferenceText.text = "0";
+            for (int i = 1; i <= maxNetDamage; i++)
+            {
+                centerDifferenceText.text = i.ToString();
+                StartCoroutine(Routine_PopText(centerDifferenceText.transform, originalCenterScale));
+                yield return new WaitForSeconds(countStepInterval);
+            }
+        }
+        yield return new WaitForSeconds(phaseTransitionPause);
+
+        if (result.netDamageToPlayer > 0)
+        {
+            for (int i = 1; i <= result.netDamageToPlayer; i++)
+            {
+                currentPlayerHP = Mathf.Max(0, currentPlayerHP - 1);
+                UpdateHPUI();
+
+                if (playerHPText != null) StartCoroutine(Routine_PopText(playerHPText.transform, originalPlayerHPScale));
+                StartCoroutine(Routine_CameraShake());
+                yield return new WaitForSeconds(countStepInterval);
+            }
         }
 
-        if (endTurnButton != null)
+        if (result.netDamageToOpponent > 0)
         {
-            endTurnButton.gameObject.SetActive(false);
+            for (int i = 1; i <= result.netDamageToOpponent; i++)
+            {
+                currentOpponentHP = Mathf.Max(0, currentOpponentHP - 1);
+                UpdateHPUI();
+
+                if (opponentHPText != null) StartCoroutine(Routine_PopText(opponentHPText.transform, originalOpponentHPScale));
+                StartCoroutine(Routine_CameraShake());
+                yield return new WaitForSeconds(countStepInterval);
+            }
         }
 
-        StartCoroutine(Routine_ResolveCombatSequence());
+        currentPlayerHP = result.finalPlayerHP;
+        currentOpponentHP = result.finalOpponentHP;
+        UpdateHPUI();
+
+        yield return new WaitForSeconds(0.5f);
+        yield return StartCoroutine(Routine_CheckNextRoundOrEndGame());
+    }
+
+    private void ProcessPlayedSupportCards(List<BalatroCardController> cards, string ownerName)
+    {
+        if (cards == null) return;
+
+        foreach (var card in cards)
+        {
+            if (card == null || card.Category != CardCategory.Support) continue;
+
+            string name = card.SupportName;
+            string desc = card.SupportEffect;
+            string durationLabel = card.IsForever ? "FOREVER (Rest of Game)" : "IMMEDIATE (Current Round Only)";
+
+            Debug.Log($"[Support Trigger] {ownerName} played Support Card: '{name}' | Duration: {durationLabel} | Description: '{desc}'");
+        }
+    }
+
+    private void HighlightCardsByCategory(List<BalatroCardController> playerList, List<BalatroCardController> opponentList, CardCategory category)
+    {
+        foreach (var card in playerList) card.HighlightCardForCategory(category);
+        foreach (var card in opponentList) card.HighlightCardForCategory(category);
+    }
+
+    private void ResetCardHighlights(List<BalatroCardController> playerList, List<BalatroCardController> opponentList)
+    {
+        foreach (var card in playerList) card.ResetCombatHighlight();
+        foreach (var card in opponentList) card.ResetCombatHighlight();
     }
 
     private List<BalatroCardController> GetControllersFromTransform(RectTransform container)
@@ -207,124 +321,11 @@ public class EndTurnManager : MonoBehaviour
         return total;
     }
 
-    private IEnumerator Routine_ResolveCombatSequence()
-    {
-        // 1. Wait for played cards to finish animating into center slots
-        yield return new WaitForSeconds(cardMovementWaitDelay);
-
-        List<BalatroCardController> playerCards = GetControllersFromTransform(selectedHandTransform);
-        List<BalatroCardController> aiCards = (aiRival != null) ? GetControllersFromTransform(aiRival.RivalSelectedHandTransform) : new List<BalatroCardController>();
-
-        int playerAttack = CalculateTotalValueForCategory(playerCards, CardCategory.Attack);
-        int playerDefense = CalculateTotalValueForCategory(playerCards, CardCategory.Defense);
-        int aiAttack = CalculateTotalValueForCategory(aiCards, CardCategory.Attack);
-        int aiDefense = CalculateTotalValueForCategory(aiCards, CardCategory.Defense);
-
-        // -------------------------------------------------------------
-        // STEP 1: CALCULATE & DISPLAY ATTACK
-        // -------------------------------------------------------------
-        HighlightCardsByCategory(playerCards, aiCards, CardCategory.Attack);
-
-        yield return StartCoroutine(Routine_CountUpPair(
-            playerAttack, playerAttackText, originalPlayerAttackScale,
-            aiAttack, aiAttackText, originalAIAttackScale
-        ));
-
-        yield return new WaitForSeconds(phaseTransitionPause);
-        ResetCardHighlights(playerCards, aiCards);
-
-        // -------------------------------------------------------------
-        // STEP 2: CALCULATE & DISPLAY DEFENSE
-        // -------------------------------------------------------------
-        HighlightCardsByCategory(playerCards, aiCards, CardCategory.Defense);
-
-        yield return StartCoroutine(Routine_CountUpPair(
-            playerDefense, playerDefenseText, originalPlayerDefenseScale,
-            aiDefense, aiDefenseText, originalAIDefenseScale
-        ));
-
-        yield return new WaitForSeconds(phaseTransitionPause);
-        ResetCardHighlights(playerCards, aiCards);
-
-        // -------------------------------------------------------------
-        // STEP 3: CALCULATE NET DAMAGE & DISPLAY IN CENTER
-        // -------------------------------------------------------------
-        int netDamageToAI = Mathf.Max(0, playerAttack - aiDefense);
-        int netDamageToPlayer = Mathf.Max(0, aiAttack - playerDefense);
-
-        int maxNetDamage = Mathf.Max(netDamageToAI, netDamageToPlayer);
-
-        if (centerDifferenceText != null && maxNetDamage > 0)
-        {
-            centerDifferenceText.text = "0";
-            for (int i = 1; i <= maxNetDamage; i++)
-            {
-                centerDifferenceText.text = i.ToString();
-                StartCoroutine(Routine_PopText(centerDifferenceText.transform, originalCenterScale));
-                yield return new WaitForSeconds(countStepInterval);
-            }
-        }
-
-        yield return new WaitForSeconds(phaseTransitionPause);
-
-        // -------------------------------------------------------------
-        // STEP 4: APPLY DAMAGE TO LOSING HAND
-        // -------------------------------------------------------------
-        if (netDamageToPlayer > 0)
-        {
-            for (int i = 1; i <= netDamageToPlayer; i++)
-            {
-                currentPlayerHP = Mathf.Max(0, currentPlayerHP - 1);
-                UpdateHPUI();
-
-                if (playerHPText != null)
-                {
-                    StartCoroutine(Routine_PopText(playerHPText.transform, originalPlayerHPScale));
-                }
-
-                StartCoroutine(Routine_CameraShake());
-                yield return new WaitForSeconds(countStepInterval);
-            }
-        }
-
-        if (netDamageToAI > 0)
-        {
-            for (int i = 1; i <= netDamageToAI; i++)
-            {
-                currentAIHP = Mathf.Max(0, currentAIHP - 1);
-                UpdateHPUI();
-
-                if (aiHPText != null)
-                {
-                    StartCoroutine(Routine_PopText(aiHPText.transform, originalAIHPScale));
-                }
-
-                StartCoroutine(Routine_CameraShake());
-                yield return new WaitForSeconds(countStepInterval);
-            }
-        }
-
-        yield return new WaitForSeconds(0.5f);
-        CheckNextRoundOrEndGame();
-    }
-
-    private void HighlightCardsByCategory(List<BalatroCardController> playerList, List<BalatroCardController> aiList, CardCategory category)
-    {
-        foreach (var card in playerList) card.HighlightCardForCategory(category);
-        foreach (var card in aiList) card.HighlightCardForCategory(category);
-    }
-
-    private void ResetCardHighlights(List<BalatroCardController> playerList, List<BalatroCardController> aiList)
-    {
-        foreach (var card in playerList) card.ResetCombatHighlight();
-        foreach (var card in aiList) card.ResetCombatHighlight();
-    }
-
     private IEnumerator Routine_CountUpPair(
         int playerTargetVal, TextMeshProUGUI playerText, Vector3 playerScale,
-        int aiTargetVal, TextMeshProUGUI aiText, Vector3 aiScale)
+        int opponentTargetVal, TextMeshProUGUI opponentText, Vector3 opponentScale)
     {
-        int maxSteps = Mathf.Max(playerTargetVal, aiTargetVal);
+        int maxSteps = Mathf.Max(playerTargetVal, opponentTargetVal);
 
         for (int step = 1; step <= maxSteps; step++)
         {
@@ -334,38 +335,38 @@ public class EndTurnManager : MonoBehaviour
                 StartCoroutine(Routine_PopText(playerText.transform, playerScale));
             }
 
-            if (step <= aiTargetVal && aiText != null)
+            if (step <= opponentTargetVal && opponentText != null)
             {
-                aiText.text = step.ToString();
-                StartCoroutine(Routine_PopText(aiText.transform, aiScale));
+                opponentText.text = step.ToString();
+                StartCoroutine(Routine_PopText(opponentText.transform, opponentScale));
             }
 
             yield return new WaitForSeconds(countStepInterval);
         }
     }
 
-    private void CheckNextRoundOrEndGame()
+    private IEnumerator Routine_CheckNextRoundOrEndGame()
     {
-        if (currentAIHP <= 0 && currentPlayerHP <= 0)
+        if (currentOpponentHP <= 0 && currentPlayerHP <= 0)
         {
             Debug.Log("[Match Over] BOTH PLAYERS KNOCKED OUT! DRAW GAME!");
-            ClearAllSubmittedCards();
-            return;
+            yield return StartCoroutine(Routine_ClearAllSubmittedCards());
+            yield break;
         }
-        if (currentAIHP <= 0)
+        if (currentOpponentHP <= 0)
         {
             Debug.Log("[Match Over] PLAYER WINS BY KNOCKOUT!");
-            ClearAllSubmittedCards();
-            return;
+            yield return StartCoroutine(Routine_ClearAllSubmittedCards());
+            yield break;
         }
         if (currentPlayerHP <= 0)
         {
-            Debug.Log("[Match Over] AI RIVAL WINS BY KNOCKOUT!");
-            ClearAllSubmittedCards();
-            return;
+            Debug.Log("[Match Over] OPPONENT WINS BY KNOCKOUT!");
+            yield return StartCoroutine(Routine_ClearAllSubmittedCards());
+            yield break;
         }
 
-        ClearAllSubmittedCards();
+        yield return StartCoroutine(Routine_ClearAllSubmittedCards());
         ResetTurnUI();
 
         if (timerManager != null)
@@ -379,16 +380,18 @@ public class EndTurnManager : MonoBehaviour
     {
         if (playerAttackText != null) playerAttackText.text = "0";
         if (playerDefenseText != null) playerDefenseText.text = "0";
-        if (aiAttackText != null) aiAttackText.text = "0";
-        if (aiDefenseText != null) aiDefenseText.text = "0";
+        if (opponentAttackText != null) opponentAttackText.text = "0";
+        if (opponentDefenseText != null) opponentDefenseText.text = "0";
         if (centerDifferenceText != null) centerDifferenceText.text = "";
     }
 
-    private void ClearAllSubmittedCards()
+    private IEnumerator Routine_ClearAllSubmittedCards()
     {
+        List<Coroutine> cleanupRoutines = new List<Coroutine>();
+
         if (handManager != null && selectedHandTransform != null)
         {
-            handManager.ReturnSubmittedCardsToHand(selectedHandTransform);
+            cleanupRoutines.Add(StartCoroutine(Routine_ProcessContainerCleanup(handManager, selectedHandTransform)));
         }
 
         if (aiRival != null)
@@ -398,8 +401,78 @@ public class EndTurnManager : MonoBehaviour
 
             if (aiHandManager != null && aiSelectedTransform != null)
             {
-                aiHandManager.ReturnSubmittedCardsToHand(aiSelectedTransform);
+                cleanupRoutines.Add(StartCoroutine(Routine_ProcessContainerCleanup(aiHandManager, aiSelectedTransform)));
             }
+        }
+
+        foreach (var routine in cleanupRoutines)
+        {
+            yield return routine;
+        }
+    }
+
+    private IEnumerator Routine_ProcessContainerCleanup(PlayerHandManager ownerHandManager, RectTransform selectedTransform)
+    {
+        CardUI[] cardsInContainer = selectedTransform.GetComponentsInChildren<CardUI>();
+        List<CardUI> immediateCardsToDestroy = new List<CardUI>();
+
+        foreach (CardUI card in cardsInContainer)
+        {
+            if (card == null) continue;
+
+            BalatroCardController controller = card.GetComponent<BalatroCardController>();
+            if (controller != null && controller.Category == CardCategory.Support)
+            {
+                if (!controller.IsForever)
+                {
+                    immediateCardsToDestroy.Add(card);
+                }
+            }
+        }
+
+        if (immediateCardsToDestroy.Count > 0)
+        {
+            yield return StartCoroutine(Routine_AnimateImmediateCardsDisappearance(immediateCardsToDestroy));
+        }
+
+        ownerHandManager.ReturnSubmittedCardsToHand(selectedTransform);
+    }
+
+    private IEnumerator Routine_AnimateImmediateCardsDisappearance(List<CardUI> cardsToClear)
+    {
+        float popUpDuration = 0.12f;
+        float shrinkDuration = 0.18f;
+        Vector3 popScale = new Vector3(1.3f, 1.3f, 1f);
+
+        float elapsed = 0f;
+        while (elapsed < popUpDuration)
+        {
+            elapsed += Time.deltaTime;
+            float t = elapsed / popUpDuration;
+
+            foreach (CardUI card in cardsToClear)
+            {
+                if (card != null) card.transform.localScale = Vector3.Lerp(Vector3.one, popScale, t);
+            }
+            yield return null;
+        }
+
+        elapsed = 0f;
+        while (elapsed < shrinkDuration)
+        {
+            elapsed += Time.deltaTime;
+            float t = elapsed / shrinkDuration;
+
+            foreach (CardUI card in cardsToClear)
+            {
+                if (card != null) card.transform.localScale = Vector3.Lerp(popScale, Vector3.zero, t);
+            }
+            yield return null;
+        }
+
+        foreach (CardUI card in cardsToClear)
+        {
+            if (card != null) Destroy(card.gameObject);
         }
     }
 
@@ -446,22 +519,12 @@ public class EndTurnManager : MonoBehaviour
 
     private void UpdateHPUI()
     {
-        if (playerHPText != null)
-        {
-            playerHPText.text = $"{currentPlayerHP}";
-        }
-
-        if (aiHPText != null)
-        {
-            aiHPText.text = $"{currentAIHP}";
-        }
+        if (playerHPText != null) playerHPText.text = $"{currentPlayerHP}";
+        if (opponentHPText != null) opponentHPText.text = $"{currentOpponentHP}";
     }
 
     public void ResetTurnBlocker()
     {
-        if (raycastBlockerImage != null)
-        {
-            raycastBlockerImage.gameObject.SetActive(false);
-        }
+        if (raycastBlockerImage != null) raycastBlockerImage.gameObject.SetActive(false);
     }
 }
