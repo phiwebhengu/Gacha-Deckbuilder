@@ -704,13 +704,31 @@ public class EndTurnManager : NetworkBehaviour
 
     private IEnumerator Routine_ClearAllSubmittedCards()
     {
-        PlayerHandManager localHandManager = GetLocalHandManager();
-        if (localHandManager != null && selectedHandTransform != null)
+        if (selectedHandTransform != null)
         {
-            localHandManager.ReturnSubmittedCardsToHand(selectedHandTransform);
+            // ✅ FIX: Only destroy cards that are Support AND not Forever.
+            // This protects Attack and Defense cards from being accidentally destroyed.
+            BalatroCardController[] submittedCards = selectedHandTransform.GetComponentsInChildren<BalatroCardController>();
+            foreach (var card in submittedCards)
+            {
+                if (card != null && card.Category == CardCategory.Support && !card.IsForever)
+                {
+                    Debug.Log($"[EndTurnManager] Discarding immediate support card: {card.gameObject.name}");
+                    Destroy(card.gameObject);
+                }
+            }
+
+            // 2. Return the remaining valid cards (Attack, Defense, and Forever Support) to the player's hand
+            PlayerHandManager localHandManager = GetLocalHandManager();
+            if (localHandManager != null)
+            {
+                localHandManager.ReturnSubmittedCardsToHand(selectedHandTransform);
+            }
+
             yield return new WaitForSeconds(0.3f);
         }
 
+        // 3. Clean up opponent's submitted cards (always destroyed after turn)
         if (opponentSelectedHandTransform != null)
         {
             BalatroCardController[] oppCards = opponentSelectedHandTransform.GetComponentsInChildren<BalatroCardController>();
@@ -722,7 +740,6 @@ public class EndTurnManager : NetworkBehaviour
 
         yield return null;
     }
-
     private IEnumerator Routine_PopText(Transform textTransform, Vector3 baseScale)
     {
         Vector3 targetScale = baseScale * popScaleMultiplier;

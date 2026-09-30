@@ -147,6 +147,9 @@ public class PlayerHandManager : MonoBehaviour
 
     public void SetAllCardsInteractable(bool state)
     {
+        // ✅ Clean up destroyed cards first
+        CleanupHandList();
+
         foreach (BalatroCardController controller in cardsInHand)
         {
             if (controller != null) controller.SetInteractable(state);
@@ -155,14 +158,18 @@ public class PlayerHandManager : MonoBehaviour
 
     public List<BalatroCardController> GetSelectedCards()
     {
+        // ✅ CRITICAL: Clean up destroyed cards before checking
+        CleanupHandList();
+
         List<BalatroCardController> selected = new List<BalatroCardController>();
 
-        // DIAGNOSTIC LOG: Dumps the entire state of the internal list
         Debug.Log($"[PlayerHandManager] GetSelectedCards: Checking {cardsInHand.Count} cards in internal list.");
         foreach (BalatroCardController controller in cardsInHand)
         {
-            Debug.Log($"[PlayerHandManager] - Checking: '{controller.gameObject.name}' (Instance ID: {controller.GetEntityId()}), IsSelected: {controller.IsSelected}, IsInteractable: {controller.IsInteractable}");
-            if (controller != null && controller.IsSelected)
+            if (controller == null) continue; // Safety check
+
+            Debug.Log($"[PlayerHandManager] - Checking: '{controller.gameObject.name}' (Card ID: {controller.CardId}), IsSelected: {controller.IsSelected}, IsInteractable: {controller.IsInteractable}");
+            if (controller.IsSelected)
             {
                 selected.Add(controller);
             }
@@ -174,10 +181,15 @@ public class PlayerHandManager : MonoBehaviour
 
     public List<int> GetSelectedCardIds()
     {
+        // ✅ Clean up destroyed cards first
+        CleanupHandList();
+
         List<int> ids = new List<int>();
         foreach (BalatroCardController controller in cardsInHand)
         {
-            if (controller != null && controller.IsSelected)
+            if (controller == null) continue; // Safety check
+
+            if (controller.IsSelected)
             {
                 ids.Add(controller.CardId);
             }
@@ -202,7 +214,9 @@ public class PlayerHandManager : MonoBehaviour
 
     public void ReturnSubmittedCardsToHand(RectTransform containerTransform)
     {
-        // Create a copy of the list to iterate over safely while modifying the original
+        // ✅ CRITICAL: Wipe out references to cards that were just destroyed by EndTurnManager
+        submittedCards.RemoveAll(c => c == null);
+
         List<BalatroCardController> cardsToReturn = new List<BalatroCardController>(submittedCards);
 
         foreach (BalatroCardController controller in cardsToReturn)
@@ -211,7 +225,6 @@ public class PlayerHandManager : MonoBehaviour
 
             submittedCards.Remove(controller);
 
-            // ✅ SAFETY: Prevent duplicate entries in the hand list
             if (!cardsInHand.Contains(controller))
             {
                 cardsInHand.Add(controller);
@@ -220,13 +233,16 @@ public class PlayerHandManager : MonoBehaviour
             controller.transform.SetParent(handTransform, true);
             controller.enabled = true;
 
-            // ✅ FIX: Use ForceDeselect to guarantee the selection state is cleared, 
-            // regardless of the current isInteractable state.
             if (controller.IsSelected)
             {
                 controller.ForceDeselect();
             }
         }
+    }
+    private void CleanupHandList()
+    {
+        // Remove all destroyed/null card references from the hand
+        cardsInHand.RemoveAll(c => c == null);
     }
 
     public void ClearSubmittedCardsJuicy(RectTransform containerTransform, float delay = 0f) => StartCoroutine(Routine_ClearCardsJuicy(delay));
