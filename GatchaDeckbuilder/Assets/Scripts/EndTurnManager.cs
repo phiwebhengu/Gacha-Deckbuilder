@@ -103,7 +103,10 @@ public class EndTurnManager : NetworkBehaviour
     [SerializeField] private Button pauseButton;
 
     [Header("Scene Settings")]
-    [SerializeField] private string gameType = "CardGame"; // Used for scene unloading logic
+    [SerializeField] private string gameType = "Game"; // Used for scene unloading logic
+
+    [Header("Match Settings")]
+    [SerializeField] private int maxRounds = 4; 
 
     private int currentPlayerHP;
     private int currentOpponentHP;
@@ -587,7 +590,7 @@ public class EndTurnManager : NetworkBehaviour
 
     private IEnumerator Routine_CheckNextRoundOrEndGame()
     {
-        // 1. HEALTH KNOCKOUT CHECK
+        // 1. HEALTH KNOCKOUT CHECK (Takes priority over round limits)
         if (currentOpponentHP <= 0 && currentPlayerHP <= 0)
         {
             Debug.Log("[Match Over] BOTH PLAYERS KNOCKED OUT! DRAW GAME!");
@@ -607,7 +610,15 @@ public class EndTurnManager : NetworkBehaviour
             yield break;
         }
 
-        // 2. CONTINUE TO NEXT ROUND
+        // ✅ 2. NEW: MAX ROUNDS CHECK
+        if (currentRound >= maxRounds)
+        {
+            Debug.Log($"[Match Over] MAX ROUNDS ({maxRounds}) REACHED! Evaluating winner based on HP.");
+            EvaluateWinnerByHP();
+            yield break;
+        }
+
+        // 3. CONTINUE TO NEXT ROUND
         yield return StartCoroutine(Routine_ClearAllSubmittedCards());
         ResetTurnUI();
 
@@ -621,6 +632,25 @@ public class EndTurnManager : NetworkBehaviour
 
             currentRound++;
             timerManager.RequestStartRound(currentRound);
+        }
+    }
+
+    private void EvaluateWinnerByHP()
+    {
+        if (currentPlayerHP > currentOpponentHP)
+        {
+            Debug.Log("[Match Over] PLAYER WINS BY HP!");
+            TriggerLocalGameOver(true, false);
+        }
+        else if (currentOpponentHP > currentPlayerHP)
+        {
+            Debug.Log("[Match Over] OPPONENT WINS BY HP!");
+            TriggerLocalGameOver(false, false);
+        }
+        else
+        {
+            Debug.Log("[Match Over] DRAW BY HP!");
+            TriggerLocalGameOver(false, true);
         }
     }
 

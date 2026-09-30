@@ -6,9 +6,6 @@ using UnityEngine;
 
 public class DrawTimerManager : NetworkBehaviour
 {
-    [Header("Match & Round Settings")]
-    [SerializeField] private int maxRounds = 4;
-
     [Header("Round Display UI")]
     [SerializeField] private TextMeshProUGUI roundDisplayText;
     [SerializeField] private CanvasGroup roundDisplayCanvasGroup;
