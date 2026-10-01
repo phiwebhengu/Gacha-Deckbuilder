@@ -1,4 +1,4 @@
-using TMPro;
+﻿using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 using System.Collections;
@@ -14,7 +14,7 @@ public class GachaUI : MonoBehaviour
     public TMP_Text supportPityText;
     public string pityFormat = "{0} / {1}";
 
-    [Header("Pity Colors")] // <-- NEW: Easy color tweaking in Inspector
+    [Header("Pity Colors")]
     public Color normalPityColor = Color.white;
     public Color highPityColor = Color.orange;
 
@@ -72,7 +72,6 @@ public class GachaUI : MonoBehaviour
         currentTokens = mgr.GetLocalPlayerTokens();
         if (tokenText != null) tokenText.text = string.Format(tokenFormat, currentTokens);
 
-        // Initialize Pity UI with current server state so it's accurate on load
         if (mgr != null)
         {
             var actionPity = mgr.GetLocalPlayerPity(true);
@@ -149,7 +148,9 @@ public class GachaUI : MonoBehaviour
 
         if (playerHandManager != null)
         {
-            playerHandManager.DealCardsFromTokens(1, DeckType.Action);
+            // ✨ NEW: Passing button RectTransform to calculate spawn source
+            RectTransform sourceBtnRect = pullActionButton != null ? pullActionButton.GetComponent<RectTransform>() : null;
+            playerHandManager.DealCardsFromTokens(1, DeckType.Action, sourceBtnRect);
         }
         else if (mgr != null)
         {
@@ -172,7 +173,9 @@ public class GachaUI : MonoBehaviour
 
         if (playerHandManager != null)
         {
-            playerHandManager.DealCardsFromTokens(1, DeckType.Support);
+            // ✨ NEW: Passing button RectTransform to calculate spawn source
+            RectTransform sourceBtnRect = pullSupportButton != null ? pullSupportButton.GetComponent<RectTransform>() : null;
+            playerHandManager.DealCardsFromTokens(1, DeckType.Support, sourceBtnRect);
         }
         else if (mgr != null)
         {
@@ -203,10 +206,8 @@ public class GachaUI : MonoBehaviour
         }
     }
 
-    // NEW: Helper method to handle the color logic
     private void UpdatePityTextColor(TMP_Text text, int pulls, int threshold)
     {
-        // Turns orange if we are 1 away from pity OR have reached/exceeded it (e.g., 4/5 or 5/5)
         if (threshold > 0 && pulls >= threshold - 1)
         {
             text.color = highPityColor;
