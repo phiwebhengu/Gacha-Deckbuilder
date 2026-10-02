@@ -6,14 +6,24 @@ public class JuiceFXManager : MonoBehaviour
 {
     public static JuiceFXManager Instance { get; private set; }
 
-    [Header("✨ JUICE: Camera Shake Settings ✨")]
-    [SerializeField] private Transform cameraTransform;
+    [Header("✨ JUICE: UI Background Shake Settings ✨")]
+    [Tooltip("Assign your UI Background Image or Panel RectTransform here.")]
+    [SerializeField] private RectTransform backgroundTransform;
+
+    [Header("Common Shake")]
     [SerializeField] private float commonShakeDuration = 0.15f;
-    [SerializeField] private float commonShakeMagnitude = 10f;
+    [SerializeField] private float commonShakeMagnitude = 12f;
+    [SerializeField] private float commonShakeRotation = 1.5f; // Max rotation angle in degrees
+
+    [Header("Rare Shake")]
     [SerializeField] private float rareShakeDuration = 0.25f;
-    [SerializeField] private float rareShakeMagnitude = 20f;
+    [SerializeField] private float rareShakeMagnitude = 25f;
+    [SerializeField] private float rareShakeRotation = 3.5f;
+
+    [Header("Legendary Shake")]
     [SerializeField] private float legendaryShakeDuration = 0.45f;
-    [SerializeField] private float legendaryShakeMagnitude = 40f;
+    [SerializeField] private float legendaryShakeMagnitude = 50f;
+    [SerializeField] private float legendaryShakeRotation = 7.0f;
 
     [Header("✨ JUICE: Audio Settings ✨")]
     [SerializeField] private AudioSource sfxSource;
@@ -37,7 +47,8 @@ public class JuiceFXManager : MonoBehaviour
     [SerializeField] private float maxFlashOpacity = 0.75f;
     [SerializeField] private float flashFadeDuration = 0.35f;
 
-    private Vector3 originalCamPos;
+    private Vector2 originalAnchoredPos;
+    private Quaternion originalRotation;
     private Coroutine activeShakeCoroutine;
     private Coroutine activeFlashCoroutine;
 
@@ -50,14 +61,10 @@ public class JuiceFXManager : MonoBehaviour
         }
         Instance = this;
 
-        if (cameraTransform == null && Camera.main != null)
+        if (backgroundTransform != null)
         {
-            cameraTransform = Camera.main.transform;
-        }
-
-        if (cameraTransform != null)
-        {
-            originalCamPos = cameraTransform.localPosition;
+            originalAnchoredPos = backgroundTransform.anchoredPosition;
+            originalRotation = backgroundTransform.localRotation;
         }
 
         if (sfxSource == null)
@@ -75,21 +82,20 @@ public class JuiceFXManager : MonoBehaviour
         if (legendaryFlashImage != null) SetImageOpacity(legendaryFlashImage, 0f);
     }
 
-    // ✨ CHANGED: Accept 'Rarity' instead of 'CardTier' ✨
     public void TriggerRarityJuice(Rarity rarity)
     {
         switch (rarity)
         {
             case Rarity.Common:
-                TriggerJuiceEffects(commonShakeDuration, commonShakeMagnitude, commonRareImpactSFX, commonPitch, commonFlashImage);
+                TriggerJuiceEffects(commonShakeDuration, commonShakeMagnitude, commonShakeRotation, commonRareImpactSFX, commonPitch, commonFlashImage);
                 break;
 
             case Rarity.Rare:
-                TriggerJuiceEffects(rareShakeDuration, rareShakeMagnitude, commonRareImpactSFX, rarePitch, rareFlashImage);
+                TriggerJuiceEffects(rareShakeDuration, rareShakeMagnitude, rareShakeRotation, commonRareImpactSFX, rarePitch, rareFlashImage);
                 break;
 
             case Rarity.Legendary:
-                TriggerJuiceEffects(legendaryShakeDuration, legendaryShakeMagnitude, legendaryImpactSFX, 1.0f, legendaryFlashImage);
+                TriggerJuiceEffects(legendaryShakeDuration, legendaryShakeMagnitude, legendaryShakeRotation, legendaryImpactSFX, 1.0f, legendaryFlashImage);
                 if (legendaryFoundStingSFX != null && sfxSource != null)
                 {
                     sfxSource.PlayOneShot(legendaryFoundStingSFX);
@@ -97,17 +103,17 @@ public class JuiceFXManager : MonoBehaviour
                 break;
 
             default:
-                TriggerJuiceEffects(commonShakeDuration, commonShakeMagnitude, commonRareImpactSFX, commonPitch, commonFlashImage);
+                TriggerJuiceEffects(commonShakeDuration, commonShakeMagnitude, commonShakeRotation, commonRareImpactSFX, commonPitch, commonFlashImage);
                 break;
         }
     }
 
-    private void TriggerJuiceEffects(float shakeDuration, float shakeMagnitude, AudioClip clip, float pitch, Image flashImage)
+    private void TriggerJuiceEffects(float duration, float magnitude, float rotationMagnitude, AudioClip clip, float pitch, Image flashImage)
     {
-        if (cameraTransform != null)
+        if (backgroundTransform != null)
         {
             if (activeShakeCoroutine != null) StopCoroutine(activeShakeCoroutine);
-            activeShakeCoroutine = StartCoroutine(Routine_ScreenShake(shakeDuration, shakeMagnitude));
+            activeShakeCoroutine = StartCoroutine(Routine_UIShake(duration, magnitude, rotationMagnitude));
         }
 
         if (sfxSource != null && clip != null)
@@ -123,22 +129,32 @@ public class JuiceFXManager : MonoBehaviour
         }
     }
 
-    private IEnumerator Routine_ScreenShake(float duration, float magnitude)
+    private IEnumerator Routine_UIShake(float duration, float positionMagnitude, float rotationMagnitude)
     {
         float elapsed = 0f;
 
         while (elapsed < duration)
         {
-            float x = Random.Range(-1f, 1f) * magnitude;
-            float y = Random.Range(-1f, 1f) * magnitude;
+            // Calculate a decay factor so the shake smoothly dies down near the end
+            float damping = 1f - (elapsed / duration);
 
-            cameraTransform.localPosition = originalCamPos + new Vector3(x, y, 0f);
+            // Position offset in UI space
+            float offsetX = Random.Range(-1f, 1f) * positionMagnitude * damping;
+            float offsetY = Random.Range(-1f, 1f) * positionMagnitude * damping;
+            backgroundTransform.anchoredPosition = originalAnchoredPos + new Vector2(offsetX, offsetY);
 
-            elapsed += Time.deltaTime;
+            // Z-axis rotation offset
+            float offsetAngle = Random.Range(-1f, 1f) * rotationMagnitude * damping;
+            backgroundTransform.localRotation = originalRotation * Quaternion.Euler(0f, 0f, offsetAngle);
+
+            elapsed += Time.unscaledDeltaTime;
             yield return null;
         }
 
-        cameraTransform.localPosition = originalCamPos;
+        // Snap cleanly back to rest transform
+        backgroundTransform.anchoredPosition = originalAnchoredPos;
+        backgroundTransform.localRotation = originalRotation;
+        activeShakeCoroutine = null;
     }
 
     private IEnumerator Routine_FlashUI(Image flashImage)
@@ -150,13 +166,14 @@ public class JuiceFXManager : MonoBehaviour
 
         while (elapsed < flashFadeDuration)
         {
-            elapsed += Time.deltaTime;
+            elapsed += Time.unscaledDeltaTime;
             float currentOpacity = Mathf.Lerp(maxFlashOpacity, 0f, elapsed / flashFadeDuration);
             SetImageOpacity(flashImage, currentOpacity);
             yield return null;
         }
 
         SetImageOpacity(flashImage, 0f);
+        activeFlashCoroutine = null;
     }
 
     private void SetImageOpacity(Image img, float alpha)

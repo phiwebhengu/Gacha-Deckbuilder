@@ -52,7 +52,6 @@ public class EndTurnManager : NetworkBehaviour
     public NetworkVariable<int> Player1_HP = new NetworkVariable<int>(20, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
     public NetworkVariable<int> Player2_HP = new NetworkVariable<int>(20, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
 
-    // ✅ NEW: Network state for Pause, Forfeit, and Game Over
     public NetworkVariable<bool> IsGamePaused = new NetworkVariable<bool>(false, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
     public NetworkVariable<ulong> PauseRequesterClientId = new NetworkVariable<ulong>(0, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
     public NetworkVariable<bool> GameEnded = new NetworkVariable<bool>(false, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
@@ -75,7 +74,16 @@ public class EndTurnManager : NetworkBehaviour
     [SerializeField] private float cardMovementWaitDelay = 0.5f;
     [SerializeField] private float phaseTransitionPause = 0.4f;
 
-    [Header("Juice & Camera Shake Settings")]
+    [Header("✨ JUICE: Damage UI Shake Settings ✨")]
+    [Tooltip("Optional parent panel or transform overrides for health shake. If null, defaults to playerHPText/opponentHPText RectTransforms.")]
+    [SerializeField] private RectTransform playerHPRectTransformOverride;
+    [SerializeField] private RectTransform opponentHPRectTransformOverride;
+
+    [SerializeField] private float damageShakeDuration = 0.15f;
+    [SerializeField] private float damageShakeMagnitude = 12f;
+    [SerializeField] private float damageShakeRotation = 1.5f;
+
+    [Header("Camera Shake (Legacy / Background)")]
     [SerializeField] private Camera mainCamera;
     [SerializeField] private float shakeIntensity = 0.25f;
     [SerializeField] private float shakeDuration = 0.08f;
@@ -103,10 +111,10 @@ public class EndTurnManager : NetworkBehaviour
     [SerializeField] private Button pauseButton;
 
     [Header("Scene Settings")]
-    [SerializeField] private string gameType = "Game"; // Used for scene unloading logic
+    [SerializeField] private string gameType = "Game";
 
     [Header("Match Settings")]
-    [SerializeField] private int maxRounds = 4; 
+    [SerializeField] private int maxRounds = 4;
 
     private int currentPlayerHP;
     private int currentOpponentHP;
@@ -128,6 +136,10 @@ public class EndTurnManager : NetworkBehaviour
     private Vector3 originalOpponentDefenseScale = Vector3.one;
     private Vector3 originalCamPos;
 
+    // Track active shake routines per UI element to prevent stacking bugs
+    private Coroutine activePlayerShakeCoroutine;
+    private Coroutine activeOpponentShakeCoroutine;
+
     private PlayerHandManager _cachedLocalHandManager;
     private bool _hasCachedHandManager = false;
 
@@ -145,7 +157,6 @@ public class EndTurnManager : NetworkBehaviour
             NetworkManager.Singleton.OnClientDisconnectCallback += HandleClientDisconnect;
         }
 
-        // ✅ NEW: Listen for game over state changes from the server
         GameEnded.OnValueChanged += OnGameEndedChanged;
     }
 
@@ -452,25 +463,53 @@ public class EndTurnManager : NetworkBehaviour
         }
         yield return new WaitForSeconds(phaseTransitionPause);
 
+        // Incremental damage loop to local Player
         if (result.netDamageToPlayer > 0)
         {
+            RectTransform targetTargetRect = playerHPRectTransformOverride != null
+                ? playerHPRectTransformOverride
+                : (playerHPText != null ? playerHPText.rectTransform : null);
+
             for (int i = 1; i <= result.netDamageToPlayer; i++)
             {
                 currentPlayerHP = Mathf.Max(0, currentPlayerHP - 1);
                 UpdateHPUI();
+
                 if (playerHPText != null) StartCoroutine(Routine_PopText(playerHPText.transform, originalPlayerHPScale));
+
+                // Trigger Juice UI Shake for Player HP
+                if (targetTargetRect != null)
+                {
+                    if (activePlayerShakeCoroutine != null) StopCoroutine(activePlayerShakeCoroutine);
+                    activePlayerShakeCoroutine = StartCoroutine(Routine_UIRectShake(targetTargetRect, damageShakeDuration, damageShakeMagnitude, damageShakeRotation, () => activePlayerShakeCoroutine = null));
+                }
+
                 StartCoroutine(Routine_CameraShake());
                 yield return new WaitForSeconds(countStepInterval);
             }
         }
 
+        // Incremental damage loop to Opponent
         if (result.netDamageToOpponent > 0)
         {
+            RectTransform targetTargetRect = opponentHPRectTransformOverride != null
+                ? opponentHPRectTransformOverride
+                : (opponentHPText != null ? opponentHPText.rectTransform : null);
+
             for (int i = 1; i <= result.netDamageToOpponent; i++)
             {
                 currentOpponentHP = Mathf.Max(0, currentOpponentHP - 1);
                 UpdateHPUI();
+
                 if (opponentHPText != null) StartCoroutine(Routine_PopText(opponentHPText.transform, originalOpponentHPScale));
+
+                // Trigger Juice UI Shake for Opponent HP
+                if (targetTargetRect != null)
+                {
+                    if (activeOpponentShakeCoroutine != null) StopCoroutine(activeOpponentShakeCoroutine);
+                    activeOpponentShakeCoroutine = StartCoroutine(Routine_UIRectShake(targetTargetRect, damageShakeDuration, damageShakeMagnitude, damageShakeRotation, () => activeOpponentShakeCoroutine = null));
+                }
+
                 StartCoroutine(Routine_CameraShake());
                 yield return new WaitForSeconds(countStepInterval);
             }
@@ -590,7 +629,6 @@ public class EndTurnManager : NetworkBehaviour
 
     private IEnumerator Routine_CheckNextRoundOrEndGame()
     {
-        // 1. HEALTH KNOCKOUT CHECK (Takes priority over round limits)
         if (currentOpponentHP <= 0 && currentPlayerHP <= 0)
         {
             Debug.Log("[Match Over] BOTH PLAYERS KNOCKED OUT! DRAW GAME!");
@@ -610,7 +648,6 @@ public class EndTurnManager : NetworkBehaviour
             yield break;
         }
 
-        // ✅ 2. NEW: MAX ROUNDS CHECK
         if (currentRound >= maxRounds)
         {
             Debug.Log($"[Match Over] MAX ROUNDS ({maxRounds}) REACHED! Evaluating winner based on HP.");
@@ -618,7 +655,6 @@ public class EndTurnManager : NetworkBehaviour
             yield break;
         }
 
-        // 3. CONTINUE TO NEXT ROUND
         yield return StartCoroutine(Routine_ClearAllSubmittedCards());
         ResetTurnUI();
 
@@ -654,11 +690,10 @@ public class EndTurnManager : NetworkBehaviour
         }
     }
 
-    // ✅ UPDATED: Triggers game over and syncs network state
     private void TriggerLocalGameOver(bool isPlayerWinner, bool isDraw)
     {
         isMatchOver = true;
-        GameEnded.Value = true; // ✅ Sync network state
+        GameEnded.Value = true;
         NotifyServerGameOverServerRpc();
 
         StopAllCoroutines();
@@ -706,8 +741,6 @@ public class EndTurnManager : NetworkBehaviour
     {
         if (selectedHandTransform != null)
         {
-            // ✅ FIX: Only destroy cards that are Support AND not Forever.
-            // This protects Attack and Defense cards from being accidentally destroyed.
             BalatroCardController[] submittedCards = selectedHandTransform.GetComponentsInChildren<BalatroCardController>();
             foreach (var card in submittedCards)
             {
@@ -718,7 +751,6 @@ public class EndTurnManager : NetworkBehaviour
                 }
             }
 
-            // 2. Return the remaining valid cards (Attack, Defense, and Forever Support) to the player's hand
             PlayerHandManager localHandManager = GetLocalHandManager();
             if (localHandManager != null)
             {
@@ -728,7 +760,6 @@ public class EndTurnManager : NetworkBehaviour
             yield return new WaitForSeconds(0.3f);
         }
 
-        // 3. Clean up opponent's submitted cards (always destroyed after turn)
         if (opponentSelectedHandTransform != null)
         {
             BalatroCardController[] oppCards = opponentSelectedHandTransform.GetComponentsInChildren<BalatroCardController>();
@@ -740,6 +771,7 @@ public class EndTurnManager : NetworkBehaviour
 
         yield return null;
     }
+
     private IEnumerator Routine_PopText(Transform textTransform, Vector3 baseScale)
     {
         Vector3 targetScale = baseScale * popScaleMultiplier;
@@ -758,6 +790,37 @@ public class EndTurnManager : NetworkBehaviour
             yield return null;
         }
         textTransform.localScale = baseScale;
+    }
+
+    // ========================================================================
+    // ✨ JUICE: UI RECT TRANSFORM SHAKE COROUTINE
+    // ========================================================================
+    private IEnumerator Routine_UIRectShake(RectTransform targetRect, float duration, float positionMagnitude, float rotationMagnitude, Action onComplete = null)
+    {
+        if (targetRect == null) yield break;
+
+        Vector2 originalAnchoredPos = targetRect.anchoredPosition;
+        Quaternion originalRotation = targetRect.localRotation;
+        float elapsed = 0f;
+
+        while (elapsed < duration)
+        {
+            float damping = 1f - (elapsed / duration);
+
+            float offsetX = UnityEngine.Random.Range(-1f, 1f) * positionMagnitude * damping;
+            float offsetY = UnityEngine.Random.Range(-1f, 1f) * positionMagnitude * damping;
+            targetRect.anchoredPosition = originalAnchoredPos + new Vector2(offsetX, offsetY);
+
+            float offsetAngle = UnityEngine.Random.Range(-1f, 1f) * rotationMagnitude * damping;
+            targetRect.localRotation = originalRotation * Quaternion.Euler(0f, 0f, offsetAngle);
+
+            elapsed += Time.unscaledDeltaTime;
+            yield return null;
+        }
+
+        targetRect.anchoredPosition = originalAnchoredPos;
+        targetRect.localRotation = originalRotation;
+        onComplete?.Invoke();
     }
 
     private IEnumerator Routine_CameraShake()
@@ -780,16 +843,11 @@ public class EndTurnManager : NetworkBehaviour
         if (opponentHPText != null) opponentHPText.text = $"{currentOpponentHP}";
     }
 
-    // ========================================================================
-    // ✅ FORFEIT, PAUSE, AND RETURN TO LOBBY INTEGRATION
-    // ========================================================================
-
     public void OnForfeit()
     {
         if (!IsSpawned || GameEnded.Value)
             return;
 
-        // If game is paused, resume it first
         if (IsGamePaused.Value && IsServer)
         {
             IsGamePaused.Value = false;
@@ -802,7 +860,7 @@ public class EndTurnManager : NetworkBehaviour
 
     public void PlayerForfeit()
     {
-        OnForfeit(); // Alias for consistency
+        OnForfeit();
     }
 
     [ServerRpc(RequireOwnership = false)]
@@ -851,24 +909,14 @@ public class EndTurnManager : NetworkBehaviour
 
     System.Collections.IEnumerator ReturnToLobbyRoutine()
     {
-        // 1. Stop any lingering coroutines to prevent errors during scene transition
         StopAllCoroutines();
 
-        // 2. Cleanly shutdown the Network session. 
-        // This ensures the server stops, clients disconnect, and NetworkObjects are cleared 
-        // so you can host/join again cleanly from the lobby.
         if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening)
         {
             NetworkManager.Singleton.Shutdown();
         }
 
-        // 3. Load the Lobby Scene directly.
-        // ⚠️ IMPORTANT: Replace "LobbyScene" with the EXACT name of your Lobby/Main Menu scene 
-        // as it appears in your Unity Build Settings.
         string lobbySceneName = "Lobby";
-
-        // LoadScene (Single mode) will automatically unload the current Game scene 
-        // and load the Lobby scene fresh, bringing your UIManager back into existence.
         UnityEngine.SceneManagement.SceneManager.LoadScene(lobbySceneName);
 
         yield return null;
@@ -985,24 +1033,19 @@ public class EndTurnManager : NetworkBehaviour
         {
             localHandManager.SetAllCardsInteractable(finalState);
         }
-
-        // Optional: If you have a rewind button or other UI elements, handle them here
-        // if (rewindButton != null) rewindButton.interactable = finalState;
     }
+
     public void QuitGame()
     {
         Debug.Log("Quitting game...");
 
-        // 1. Ensure time is unpaused so scene transitions/animations don't freeze
         Time.timeScale = 1f;
 
-        // 2. Cleanly disconnect from the network to prevent server hangs or errors
         if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsConnectedClient)
         {
             NetworkManager.Singleton.Shutdown();
         }
 
-        // 3. Quit the application (or stop play mode if in the Unity Editor)
 #if UNITY_EDITOR
         UnityEditor.EditorApplication.isPlaying = false;
 #else

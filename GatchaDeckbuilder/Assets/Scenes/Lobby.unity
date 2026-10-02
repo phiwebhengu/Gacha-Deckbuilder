@@ -909,6 +909,7 @@ GameObject:
   - component: {fileID: 290682739}
   - component: {fileID: 290682738}
   - component: {fileID: 290682737}
+  - component: {fileID: 290682740}
   m_Layer: 5
   m_Name: BackButton
   m_TagString: Untagged
@@ -1030,6 +1031,32 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 290682735}
   m_CullTransparentMesh: 1
+--- !u!114 &290682740
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 290682735}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 13cb675769f450c4c83392b98f3470b8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::JuicyButton
+  hoverScale: 1.08
+  pressShrinkScale: 0.92
+  releaseBounceScale: 1.15
+  scaleLerpSpeed: 15
+  normalColor: {r: 1, g: 1, b: 1, a: 1}
+  hoverColor: {r: 1, g: 0.92, b: 0.5, a: 1}
+  pressColor: {r: 0.8, g: 0.8, b: 0.8, a: 1}
+  colorLerpSpeed: 15
+  audioSource: {fileID: 0}
+  hoverSFX: {fileID: 0}
+  clickDownSFX: {fileID: 0}
+  clickReleaseSFX: {fileID: 0}
+  hoverPitch: 1.1
+  clickPitch: 1
 --- !u!1 &309673977
 GameObject:
   m_ObjectHideFlags: 0
@@ -1613,6 +1640,7 @@ GameObject:
   - component: {fileID: 391212723}
   - component: {fileID: 391212722}
   - component: {fileID: 391212721}
+  - component: {fileID: 391212724}
   m_Layer: 5
   m_Name: JoinButton
   m_TagString: Untagged
@@ -1734,6 +1762,32 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 391212719}
   m_CullTransparentMesh: 1
+--- !u!114 &391212724
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 391212719}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 13cb675769f450c4c83392b98f3470b8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::JuicyButton
+  hoverScale: 1.08
+  pressShrinkScale: 0.92
+  releaseBounceScale: 1.15
+  scaleLerpSpeed: 15
+  normalColor: {r: 1, g: 1, b: 1, a: 1}
+  hoverColor: {r: 1, g: 0.92, b: 0.5, a: 1}
+  pressColor: {r: 0.8, g: 0.8, b: 0.8, a: 1}
+  colorLerpSpeed: 15
+  audioSource: {fileID: 0}
+  hoverSFX: {fileID: 0}
+  clickDownSFX: {fileID: 0}
+  clickReleaseSFX: {fileID: 0}
+  hoverPitch: 1.1
+  clickPitch: 1
 --- !u!1 &519420028
 GameObject:
   m_ObjectHideFlags: 0
@@ -2106,6 +2160,7 @@ GameObject:
   - component: {fileID: 616015214}
   - component: {fileID: 616015213}
   - component: {fileID: 616015212}
+  - component: {fileID: 616015215}
   m_Layer: 5
   m_Name: JoinButton
   m_TagString: Untagged
@@ -2227,6 +2282,32 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 616015210}
   m_CullTransparentMesh: 1
+--- !u!114 &616015215
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 616015210}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 13cb675769f450c4c83392b98f3470b8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::JuicyButton
+  hoverScale: 1.08
+  pressShrinkScale: 0.92
+  releaseBounceScale: 1.15
+  scaleLerpSpeed: 15
+  normalColor: {r: 1, g: 1, b: 1, a: 1}
+  hoverColor: {r: 1, g: 0.92, b: 0.5, a: 1}
+  pressColor: {r: 0.8, g: 0.8, b: 0.8, a: 1}
+  colorLerpSpeed: 15
+  audioSource: {fileID: 0}
+  hoverSFX: {fileID: 0}
+  clickDownSFX: {fileID: 0}
+  clickReleaseSFX: {fileID: 0}
+  hoverPitch: 1.1
+  clickPitch: 1
 --- !u!1 &668310546
 GameObject:
   m_ObjectHideFlags: 0
@@ -3179,6 +3260,7 @@ GameObject:
   - component: {fileID: 1340477014}
   - component: {fileID: 1340477013}
   - component: {fileID: 1340477012}
+  - component: {fileID: 1340477015}
   m_Layer: 5
   m_Name: ExitButton
   m_TagString: Untagged
@@ -3300,6 +3382,32 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1340477010}
   m_CullTransparentMesh: 1
+--- !u!114 &1340477015
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1340477010}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 13cb675769f450c4c83392b98f3470b8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::JuicyButton
+  hoverScale: 1.08
+  pressShrinkScale: 0.92
+  releaseBounceScale: 1.15
+  scaleLerpSpeed: 15
+  normalColor: {r: 1, g: 1, b: 1, a: 1}
+  hoverColor: {r: 1, g: 0.92, b: 0.5, a: 1}
+  pressColor: {r: 0.8, g: 0.8, b: 0.8, a: 1}
+  colorLerpSpeed: 15
+  audioSource: {fileID: 0}
+  hoverSFX: {fileID: 0}
+  clickDownSFX: {fileID: 0}
+  clickReleaseSFX: {fileID: 0}
+  hoverPitch: 1.1
+  clickPitch: 1
 --- !u!1 &1373987367
 GameObject:
   m_ObjectHideFlags: 0
@@ -3877,6 +3985,7 @@ GameObject:
   - component: {fileID: 1737777810}
   - component: {fileID: 1737777809}
   - component: {fileID: 1737777808}
+  - component: {fileID: 1737777811}
   m_Layer: 5
   m_Name: StartButton
   m_TagString: Untagged
@@ -3998,6 +4107,32 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1737777806}
   m_CullTransparentMesh: 1
+--- !u!114 &1737777811
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1737777806}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 13cb675769f450c4c83392b98f3470b8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::JuicyButton
+  hoverScale: 1.08
+  pressShrinkScale: 0.92
+  releaseBounceScale: 1.15
+  scaleLerpSpeed: 15
+  normalColor: {r: 1, g: 1, b: 1, a: 1}
+  hoverColor: {r: 1, g: 0.92, b: 0.5, a: 1}
+  pressColor: {r: 0.8, g: 0.8, b: 0.8, a: 1}
+  colorLerpSpeed: 15
+  audioSource: {fileID: 0}
+  hoverSFX: {fileID: 0}
+  clickDownSFX: {fileID: 0}
+  clickReleaseSFX: {fileID: 0}
+  hoverPitch: 1.1
+  clickPitch: 1
 --- !u!1 &1745831311
 GameObject:
   m_ObjectHideFlags: 0
@@ -4087,6 +4222,7 @@ GameObject:
   - component: {fileID: 1747655566}
   - component: {fileID: 1747655565}
   - component: {fileID: 1747655564}
+  - component: {fileID: 1747655567}
   m_Layer: 5
   m_Name: BackButton
   m_TagString: Untagged
@@ -4208,6 +4344,32 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1747655562}
   m_CullTransparentMesh: 1
+--- !u!114 &1747655567
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1747655562}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 13cb675769f450c4c83392b98f3470b8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::JuicyButton
+  hoverScale: 1.08
+  pressShrinkScale: 0.92
+  releaseBounceScale: 1.15
+  scaleLerpSpeed: 15
+  normalColor: {r: 1, g: 1, b: 1, a: 1}
+  hoverColor: {r: 1, g: 0.92, b: 0.5, a: 1}
+  pressColor: {r: 0.8, g: 0.8, b: 0.8, a: 1}
+  colorLerpSpeed: 15
+  audioSource: {fileID: 0}
+  hoverSFX: {fileID: 0}
+  clickDownSFX: {fileID: 0}
+  clickReleaseSFX: {fileID: 0}
+  hoverPitch: 1.1
+  clickPitch: 1
 --- !u!1 &1769716224
 GameObject:
   m_ObjectHideFlags: 0
@@ -4220,6 +4382,7 @@ GameObject:
   - component: {fileID: 1769716228}
   - component: {fileID: 1769716227}
   - component: {fileID: 1769716226}
+  - component: {fileID: 1769716229}
   m_Layer: 5
   m_Name: HostButton
   m_TagString: Untagged
@@ -4341,6 +4504,32 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1769716224}
   m_CullTransparentMesh: 1
+--- !u!114 &1769716229
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1769716224}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 13cb675769f450c4c83392b98f3470b8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::JuicyButton
+  hoverScale: 1.08
+  pressShrinkScale: 0.92
+  releaseBounceScale: 1.15
+  scaleLerpSpeed: 15
+  normalColor: {r: 1, g: 1, b: 1, a: 1}
+  hoverColor: {r: 1, g: 0.92, b: 0.5, a: 1}
+  pressColor: {r: 0.8, g: 0.8, b: 0.8, a: 1}
+  colorLerpSpeed: 15
+  audioSource: {fileID: 0}
+  hoverSFX: {fileID: 0}
+  clickDownSFX: {fileID: 0}
+  clickReleaseSFX: {fileID: 0}
+  hoverPitch: 1.1
+  clickPitch: 1
 --- !u!1 &1843387753
 GameObject:
   m_ObjectHideFlags: 0
