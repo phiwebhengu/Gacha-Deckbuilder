@@ -2,6 +2,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.UI;
 
 public class PlayerHandManager : MonoBehaviour
 {
@@ -13,7 +14,6 @@ public class PlayerHandManager : MonoBehaviour
     [Header("Animation Settings")]
     [SerializeField] private float dealDelay = 0.15f;
 
-    // ✨ NEW: JUICY REVEAL ANIMATION SETTINGS ✨
     [Header("Juicy Draw Reveal Settings")]
     [Tooltip("Total duration in seconds for the entire draw animation sequence.")]
     [SerializeField] private float totalDrawDuration = 2.0f;
@@ -40,7 +40,6 @@ public class PlayerHandManager : MonoBehaviour
     [Header("System References")]
     [SerializeField] private DrawTimerManager timerManager;
     [SerializeField] private GachaManager gachaManager;
-    // ✨ NEW: Optional direct reference to JuiceFXManager if not using Singleton
     [SerializeField] private JuiceFXManager juiceFXManager;
 
     private List<BalatroCardController> cardsInHand = new List<BalatroCardController>();
@@ -85,10 +84,25 @@ public class PlayerHandManager : MonoBehaviour
             if (gachaManager == null) Debug.LogError("[PlayerHandManager] Could not find GachaManager in the scene!");
         }
 
-        // ✨ NEW: Find JuiceFXManager if missing
         if (juiceFXManager == null)
         {
             juiceFXManager = FindFirstObjectByType<JuiceFXManager>();
+        }
+
+        // Disable layout group if present to prevent position conflict
+        DisableLayoutGroupsOnHand();
+    }
+
+    private void DisableLayoutGroupsOnHand()
+    {
+        if (handTransform != null)
+        {
+            LayoutGroup layoutGroup = handTransform.GetComponent<LayoutGroup>();
+            if (layoutGroup != null)
+            {
+                Debug.LogWarning("[PlayerHandManager] Disabling LayoutGroup on handTransform to allow manual fanning math.");
+                layoutGroup.enabled = false;
+            }
         }
     }
 
@@ -200,9 +214,6 @@ public class PlayerHandManager : MonoBehaviour
             cardRect.position = centerPosition;
             cardRect.localScale = targetCenterScale;
 
-            // ========================================================================
-            // ✨ NEW: TRIGGER RARITY JUICE (SHAKE + AUDIO + UI FLASH) AT CENTER STAGE ✨
-            // ========================================================================
             if (JuiceFXManager.Instance != null)
             {
                 JuiceFXManager.Instance.TriggerRarityJuice(result.Tier);
@@ -212,10 +223,8 @@ public class PlayerHandManager : MonoBehaviour
                 juiceFXManager.TriggerRarityJuice(result.Tier);
             }
 
-            // Play reveal shader / flip effects while centered
             visual.PlayReveal(result.Tier);
 
-            // Pause at center to let player inspect card
             yield return new WaitForSeconds(centerPauseDuration);
 
             // PHASE 3: MOVE TO HAND & RE-FAN HAND LAYOUT
@@ -234,13 +243,15 @@ public class PlayerHandManager : MonoBehaviour
             }
 
             newCardObj.transform.SetParent(handTransform, false);
+
+            // Normalize card anchors & pivot to middle center when placed in hand
+            cardRect.anchorMin = new Vector2(0.5f, 0.5f);
+            cardRect.anchorMax = new Vector2(0.5f, 0.5f);
+            cardRect.pivot = new Vector2(0.5f, 0.5f);
             cardRect.localScale = Vector3.one;
-            cardRect.anchoredPosition = Vector2.zero;
 
             cardsInHand.Add(controller);
             UpdateHandLayout();
-
-            Debug.Log($"[PlayerHandManager] Added card '{controller.gameObject.name}' (Instance ID: {controller.GetEntityId()}) to internal hand list. Total: {cardsInHand.Count}");
 
             yield return new WaitForSeconds(dealDelay);
         }
@@ -268,19 +279,16 @@ public class PlayerHandManager : MonoBehaviour
 
         List<BalatroCardController> selected = new List<BalatroCardController>();
 
-        Debug.Log($"[PlayerHandManager] GetSelectedCards: Checking {cardsInHand.Count} cards in internal list.");
         foreach (BalatroCardController controller in cardsInHand)
         {
             if (controller == null) continue;
 
-            Debug.Log($"[PlayerHandManager] - Checking: '{controller.gameObject.name}' (Card ID: {controller.CardId}), IsSelected: {controller.IsSelected}, IsInteractable: {controller.IsInteractable}");
             if (controller.IsSelected)
             {
                 selected.Add(controller);
             }
         }
 
-        Debug.Log($"[PlayerHandManager] Found {selected.Count} selected cards from internal list.");
         return selected;
     }
 
@@ -335,12 +343,31 @@ public class PlayerHandManager : MonoBehaviour
                 cardsInHand.Add(controller);
             }
 
-            controller.transform.SetParent(handTransform, true);
-            controller.enabled = true;
+            // 1. Re-parent to hand transform
+            controller.transform.SetParent(handTransform, false);
 
-            if (controller.IsSelected)
+            // 2. Enable controller AND all attached UI components
+            controller.enabled = true;
+            MonoBehaviour[] scripts = controller.GetComponents<MonoBehaviour>();
+            foreach (var script in scripts)
             {
-                controller.ForceDeselect();
+                if (script != null) script.enabled = true;
+            }
+
+            // 3. Re-enable interactability & raycast target
+            controller.SetInteractable(true);
+
+            // 4. Reset scale, hover flags, and deselection flags cleanly
+            controller.ResetCardState();
+
+            // 5. Ensure scale and anchors are completely normalized
+            RectTransform cardRect = controller.GetComponent<RectTransform>();
+            if (cardRect != null)
+            {
+                cardRect.anchorMin = new Vector2(0.5f, 0.5f);
+                cardRect.anchorMax = new Vector2(0.5f, 0.5f);
+                cardRect.pivot = new Vector2(0.5f, 0.5f);
+                cardRect.localScale = Vector3.one;
             }
         }
 
@@ -373,8 +400,6 @@ public class PlayerHandManager : MonoBehaviour
     {
         bool shouldBeInteractable = !isDrawPhaseActive;
         SetAllCardsInteractable(shouldBeInteractable);
-
-        Debug.Log($"[PlayerHandManager] Draw phase active: {isDrawPhaseActive}. Cards interactable: {shouldBeInteractable}");
     }
 
     public void UpdateHandLayout()
@@ -411,6 +436,13 @@ public class PlayerHandManager : MonoBehaviour
                 float xPos = startX + (i * cardSpacing);
                 float normalizedIndex = (2f * i / (cardCount - 1)) - 1f;
                 float yPos = -Mathf.Pow(normalizedIndex, 2f) * arcHeight;
+
+                // Add selection offset dynamically if card happens to be selected
+                if (cardsInHand[i] != null && cardsInHand[i].IsSelected)
+                {
+                    yPos += cardsInHand[i].SelectYOffset;
+                }
+
                 float zAngle = -normalizedIndex * maxFanAngle;
 
                 targetPositions[i] = new Vector3(xPos, yPos, 0f);
@@ -441,8 +473,16 @@ public class PlayerHandManager : MonoBehaviour
                     Time.deltaTime * fanLerpSpeed
                 );
 
+                // Enforce scale lerp back to 1.0f in case external systems modified card scale
+                cardRect.localScale = Vector3.Lerp(
+                    cardRect.localScale,
+                    Vector3.one,
+                    Time.deltaTime * fanLerpSpeed
+                );
+
                 if (Vector2.Distance(cardRect.anchoredPosition, targetPositions[i]) > 0.05f ||
-                    Quaternion.Angle(cardRect.localRotation, targetRotations[i]) > 0.1f)
+                    Quaternion.Angle(cardRect.localRotation, targetRotations[i]) > 0.1f ||
+                    Vector3.Distance(cardRect.localScale, Vector3.one) > 0.01f)
                 {
                     isAnimating = true;
                 }
@@ -451,6 +491,7 @@ public class PlayerHandManager : MonoBehaviour
             yield return null;
         }
 
+        // Final snap
         for (int i = 0; i < cardsInHand.Count; i++)
         {
             if (cardsInHand[i] == null) continue;
@@ -458,6 +499,7 @@ public class PlayerHandManager : MonoBehaviour
             RectTransform cardRect = cardsInHand[i].GetComponent<RectTransform>();
             cardRect.anchoredPosition = targetPositions[i];
             cardRect.localRotation = targetRotations[i];
+            cardRect.localScale = Vector3.one;
         }
     }
 }
