@@ -902,8 +902,8 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: -1.69, y: 1.7}
-  m_SizeDelta: {x: 2065.31, y: 1050.51}
+  m_AnchoredPosition: {x: -1.27, y: 1.38}
+  m_SizeDelta: {x: 4141.39, y: 3104.32}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &329894160
 MonoBehaviour:
@@ -2355,8 +2355,8 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: -1.69, y: 1.7}
-  m_SizeDelta: {x: 2065.31, y: 1050.51}
+  m_AnchoredPosition: {x: -1.27, y: 1.38}
+  m_SizeDelta: {x: 4141.39, y: 3104.32}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &618830805
 MonoBehaviour:
@@ -5490,6 +5490,81 @@ MonoBehaviour:
   AutoObjectParentSync: 1
   SyncOwnerTransformWhenParented: 1
   AllowOwnerToParent: 0
+--- !u!1 &1255304635
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1255304636}
+  - component: {fileID: 1255304638}
+  - component: {fileID: 1255304637}
+  m_Layer: 5
+  m_Name: DAMAGE_FLASH
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!224 &1255304636
+RectTransform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1255304635}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1805831405}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+  m_AnchorMin: {x: 0.5, y: 0.5}
+  m_AnchorMax: {x: 0.5, y: 0.5}
+  m_AnchoredPosition: {x: -1.27, y: 1.38}
+  m_SizeDelta: {x: 4141.39, y: 3104.32}
+  m_Pivot: {x: 0.5, y: 0.5}
+--- !u!114 &1255304637
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1255304635}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Image
+  m_Material: {fileID: 0}
+  m_Color: {r: 1, g: 0, b: 0, a: 0}
+  m_RaycastTarget: 0
+  m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
+  m_Maskable: 1
+  m_OnCullStateChanged:
+    m_PersistentCalls:
+      m_Calls: []
+  m_Sprite: {fileID: 0}
+  m_Type: 0
+  m_PreserveAspect: 0
+  m_FillCenter: 1
+  m_FillMethod: 4
+  m_FillAmount: 1
+  m_FillClockwise: 1
+  m_FillOrigin: 0
+  m_UseSpriteMesh: 0
+  m_PixelsPerUnitMultiplier: 1
+--- !u!222 &1255304638
+CanvasRenderer:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1255304635}
+  m_CullTransparentMesh: 1
 --- !u!1 &1330780493
 GameObject:
   m_ObjectHideFlags: 0
@@ -6795,8 +6870,8 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: -1.69, y: 1.7}
-  m_SizeDelta: {x: 2065.31, y: 1050.51}
+  m_AnchoredPosition: {x: -1.27, y: 1.38}
+  m_SizeDelta: {x: 4141.39, y: 3104.32}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &1606794367
 MonoBehaviour:
@@ -7080,14 +7155,19 @@ MonoBehaviour:
   playerDefenseText: {fileID: 198072894}
   opponentAttackText: {fileID: 835900314}
   opponentDefenseText: {fileID: 2038881930}
+  opponentText: {fileID: 0}
   centerDifferenceText: {fileID: 1547539320}
   countStepInterval: 0.08
   popScaleMultiplier: 1.35
   popDuration: 0.06
   cardMovementWaitDelay: 0.5
   phaseTransitionPause: 0.4
+  damageFlashImage: {fileID: 1255304637}
+  flashInDuration: 0.05
+  flashOutDuration: 0.25
+  maxFlashAlpha: 0.6
   playerHPRectTransformOverride: {fileID: 388937982}
-  opponentHPRectTransformOverride: {fileID: 0}
+  opponentHPRectTransformOverride: {fileID: 1255304636}
   damageShakeDuration: 0.15
   damageShakeMagnitude: 12
   damageShakeRotation: 1.5
@@ -7828,6 +7908,7 @@ RectTransform:
   - {fileID: 618830804}
   - {fileID: 1606794366}
   - {fileID: 329894159}
+  - {fileID: 1255304636}
   m_Father: {fileID: 441985026}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}

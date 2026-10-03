@@ -65,6 +65,7 @@ public class EndTurnManager : NetworkBehaviour
     [SerializeField] private TextMeshProUGUI playerDefenseText;
     [SerializeField] private TextMeshProUGUI opponentAttackText;
     [SerializeField] private TextMeshProUGUI opponentDefenseText;
+    [SerializeField] private TextMeshProUGUI opponentText;
 
     [Header("Center Difference Display")]
     [SerializeField] private TextMeshProUGUI centerDifferenceText;
@@ -73,6 +74,13 @@ public class EndTurnManager : NetworkBehaviour
     [SerializeField] private float popDuration = 0.06f;
     [SerializeField] private float cardMovementWaitDelay = 0.5f;
     [SerializeField] private float phaseTransitionPause = 0.4f;
+
+    [Header("✨ JUICE: Damage Flash UI ✨")]
+    [Tooltip("Full screen red overlay or vignette Image component for player taking damage.")]
+    [SerializeField] private Image damageFlashImage;
+    [SerializeField] private float flashInDuration = 0.05f;
+    [SerializeField] private float flashOutDuration = 0.25f;
+    [SerializeField][Range(0f, 1f)] private float maxFlashAlpha = 0.6f;
 
     [Header("✨ JUICE: Damage UI Shake Settings ✨")]
     [Tooltip("Optional parent panel or transform overrides for health shake. If null, defaults to playerHPText/opponentHPText RectTransforms.")]
@@ -135,10 +143,11 @@ public class EndTurnManager : NetworkBehaviour
     private Vector3 originalOpponentAttackScale = Vector3.one;
     private Vector3 originalOpponentDefenseScale = Vector3.one;
     private Vector3 originalCamPos;
+    private Quaternion originalCamRot;
 
-    // Track active shake routines per UI element to prevent stacking bugs
     private Coroutine activePlayerShakeCoroutine;
     private Coroutine activeOpponentShakeCoroutine;
+    private Coroutine activeDamageFlashCoroutine;
 
     private PlayerHandManager _cachedLocalHandManager;
     private bool _hasCachedHandManager = false;
@@ -198,7 +207,19 @@ public class EndTurnManager : NetworkBehaviour
     private void Start()
     {
         if (mainCamera == null) mainCamera = Camera.main;
-        if (mainCamera != null) originalCamPos = mainCamera.transform.localPosition;
+        if (mainCamera != null)
+        {
+            originalCamPos = mainCamera.transform.localPosition;
+            originalCamRot = mainCamera.transform.localRotation;
+        }
+
+        if (damageFlashImage != null)
+        {
+            Color c = damageFlashImage.color;
+            c.a = 0f;
+            damageFlashImage.color = c;
+            damageFlashImage.gameObject.SetActive(true);
+        }
 
         CacheAndResetUI();
         UpdateEndTurnButtonVisibility();
@@ -463,12 +484,15 @@ public class EndTurnManager : NetworkBehaviour
         }
         yield return new WaitForSeconds(phaseTransitionPause);
 
-        // Incremental damage loop to local Player
         if (result.netDamageToPlayer > 0)
         {
             RectTransform targetTargetRect = playerHPRectTransformOverride != null
                 ? playerHPRectTransformOverride
                 : (playerHPText != null ? playerHPText.rectTransform : null);
+
+            // Trigger visual damage flash effect
+            if (activeDamageFlashCoroutine != null) StopCoroutine(activeDamageFlashCoroutine);
+            activeDamageFlashCoroutine = StartCoroutine(Routine_DamageFlash());
 
             for (int i = 1; i <= result.netDamageToPlayer; i++)
             {
@@ -477,7 +501,6 @@ public class EndTurnManager : NetworkBehaviour
 
                 if (playerHPText != null) StartCoroutine(Routine_PopText(playerHPText.transform, originalPlayerHPScale));
 
-                // Trigger Juice UI Shake for Player HP
                 if (targetTargetRect != null)
                 {
                     if (activePlayerShakeCoroutine != null) StopCoroutine(activePlayerShakeCoroutine);
@@ -489,7 +512,6 @@ public class EndTurnManager : NetworkBehaviour
             }
         }
 
-        // Incremental damage loop to Opponent
         if (result.netDamageToOpponent > 0)
         {
             RectTransform targetTargetRect = opponentHPRectTransformOverride != null
@@ -503,7 +525,6 @@ public class EndTurnManager : NetworkBehaviour
 
                 if (opponentHPText != null) StartCoroutine(Routine_PopText(opponentHPText.transform, originalOpponentHPScale));
 
-                // Trigger Juice UI Shake for Opponent HP
                 if (targetTargetRect != null)
                 {
                     if (activeOpponentShakeCoroutine != null) StopCoroutine(activeOpponentShakeCoroutine);
@@ -792,9 +813,39 @@ public class EndTurnManager : NetworkBehaviour
         textTransform.localScale = baseScale;
     }
 
-    // ========================================================================
-    // ✨ JUICE: UI RECT TRANSFORM SHAKE COROUTINE
-    // ========================================================================
+    private IEnumerator Routine_DamageFlash()
+    {
+        if (damageFlashImage == null) yield break;
+
+        Color flashColor = damageFlashImage.color;
+        float elapsed = 0f;
+
+        // Flash In
+        while (elapsed < flashInDuration)
+        {
+            elapsed += Time.unscaledDeltaTime;
+            flashColor.a = Mathf.Lerp(0f, maxFlashAlpha, elapsed / flashInDuration);
+            damageFlashImage.color = flashColor;
+            yield return null;
+        }
+
+        flashColor.a = maxFlashAlpha;
+        damageFlashImage.color = flashColor;
+        elapsed = 0f;
+
+        // Fade Out
+        while (elapsed < flashOutDuration)
+        {
+            elapsed += Time.unscaledDeltaTime;
+            flashColor.a = Mathf.Lerp(maxFlashAlpha, 0f, elapsed / flashOutDuration);
+            damageFlashImage.color = flashColor;
+            yield return null;
+        }
+
+        flashColor.a = 0f;
+        damageFlashImage.color = flashColor;
+    }
+
     private IEnumerator Routine_UIRectShake(RectTransform targetRect, float duration, float positionMagnitude, float rotationMagnitude, Action onComplete = null)
     {
         if (targetRect == null) yield break;
@@ -827,6 +878,7 @@ public class EndTurnManager : NetworkBehaviour
     {
         if (mainCamera == null) yield break;
         float elapsed = 0f;
+
         while (elapsed < shakeDuration)
         {
             elapsed += Time.deltaTime;
@@ -834,7 +886,9 @@ public class EndTurnManager : NetworkBehaviour
             mainCamera.transform.localPosition = originalCamPos + new Vector3(randomOffset.x, randomOffset.y, 0f);
             yield return null;
         }
+
         mainCamera.transform.localPosition = originalCamPos;
+        mainCamera.transform.localRotation = originalCamRot;
     }
 
     private void UpdateHPUI()
