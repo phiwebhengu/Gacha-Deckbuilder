@@ -14,6 +14,7 @@ public class BalatroCardController : MonoBehaviour, IPointerClickHandler, IPoint
     [Header("References")]
     [SerializeField] private Button cardButton;
     [SerializeField] private Image cardImage;
+    [SerializeField] private CardJuice cardJuice;
 
     [Header("Hover Settings")]
     [SerializeField] private float hoverScale = 1.15f;
@@ -43,6 +44,7 @@ public class BalatroCardController : MonoBehaviour, IPointerClickHandler, IPoint
         rectTransform = GetComponent<RectTransform>();
         if (cardButton == null) cardButton = GetComponent<Button>();
         if (cardImage == null) cardImage = GetComponent<Image>();
+        if (cardJuice == null) cardJuice = GetComponent<CardJuice>();
 
         if (endTurnManager == null)
         {
@@ -60,8 +62,6 @@ public class BalatroCardController : MonoBehaviour, IPointerClickHandler, IPoint
     {
         isInteractable = state;
         if (cardButton != null) cardButton.interactable = state;
-
-        // Ensure raycast target is active so EventSystem registers hover
         if (cardImage != null) cardImage.raycastTarget = state;
     }
 
@@ -70,11 +70,10 @@ public class BalatroCardController : MonoBehaviour, IPointerClickHandler, IPoint
         if (!isInteractable) return;
         isHovered = true;
 
-        // Highlight & scale feedback on hover
         if (!IsSelected)
         {
-            if (cardImage != null) cardImage.color = hoverColor;
-            if (rectTransform != null) rectTransform.localScale = Vector3.one * hoverScale;
+            if (cardImage != null && cardJuice == null) cardImage.color = hoverColor;
+            if (rectTransform != null && cardJuice == null) rectTransform.localScale = Vector3.one * hoverScale;
         }
     }
 
@@ -83,11 +82,10 @@ public class BalatroCardController : MonoBehaviour, IPointerClickHandler, IPoint
         if (!isInteractable) return;
         isHovered = false;
 
-        // Revert to normal state when mouse leaves
         if (!IsSelected)
         {
             ResetHighlight();
-            if (rectTransform != null) rectTransform.localScale = Vector3.one;
+            if (rectTransform != null && cardJuice == null) rectTransform.localScale = Vector3.one;
         }
     }
 
@@ -104,6 +102,11 @@ public class BalatroCardController : MonoBehaviour, IPointerClickHandler, IPoint
         IsSelected = !IsSelected;
         UpdateSelectionVisuals(IsSelected);
 
+        if (cardJuice != null)
+        {
+            cardJuice.SetSelectedState(IsSelected, isHovered);
+        }
+
         if (endTurnManager != null)
         {
             endTurnManager.UpdateEndTurnButtonVisibility();
@@ -116,6 +119,11 @@ public class BalatroCardController : MonoBehaviour, IPointerClickHandler, IPoint
 
         IsSelected = false;
         UpdateSelectionVisuals(false);
+
+        if (cardJuice != null)
+        {
+            cardJuice.SetSelectedState(false, isHovered);
+        }
 
         if (endTurnManager != null)
         {
@@ -132,7 +140,11 @@ public class BalatroCardController : MonoBehaviour, IPointerClickHandler, IPoint
         isHovered = false;
         ResetHighlight();
 
-        if (rectTransform != null)
+        if (cardJuice != null)
+        {
+            cardJuice.ForceResetCardState();
+        }
+        else if (rectTransform != null)
         {
             rectTransform.localScale = Vector3.one;
         }

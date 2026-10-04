@@ -183,9 +183,9 @@ MonoBehaviour:
   highlightColor: {r: 1, g: 0.92, b: 0.65, a: 1}
   selectedColor: {r: 0.6, g: 1, b: 0.6, a: 1}
   audioSource: {fileID: 2892398992880353851}
-  hoverSFX: {fileID: 0}
-  selectSFX: {fileID: 0}
-  deselectSFX: {fileID: 0}
+  hoverSFX: {fileID: 8300000, guid: a5a702110d4057f4a858afc72f992f0f, type: 3}
+  selectSFX: {fileID: 8300000, guid: 5554252bdd0a5224dad61ea04dacec1d, type: 3}
+  deselectSFX: {fileID: 8300000, guid: 2d7b0bf4e3a08574fb3d20420363934a, type: 3}
 --- !u!1 &4438249126949184194
 GameObject:
   m_ObjectHideFlags: 0

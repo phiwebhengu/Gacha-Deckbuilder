@@ -5,7 +5,7 @@ using UnityEngine.EventSystems;
 
 [RequireComponent(typeof(Button))]
 [RequireComponent(typeof(Image))]
-public class CardJuice : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler, IPointerClickHandler
+public class CardJuice : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
 {
     [Header("Scale Parameters")]
     [SerializeField] private Vector3 normalScale = Vector3.one;
@@ -50,14 +50,14 @@ public class CardJuice : MonoBehaviour, IPointerEnterHandler, IPointerExitHandle
 
         // Initialize state
         transform.localScale = normalScale;
-        cardImage.color = normalColor;
+        if (cardImage != null) cardImage.color = normalColor;
     }
 
     // --- EVENT SYSTEM INTERFACES ---
 
     public void OnPointerEnter(PointerEventData eventData)
     {
-        if (!cardButton.interactable) return;
+        if (cardButton != null && !cardButton.interactable) return;
 
         isHovered = true;
 
@@ -71,7 +71,7 @@ public class CardJuice : MonoBehaviour, IPointerEnterHandler, IPointerExitHandle
 
     public void OnPointerExit(PointerEventData eventData)
     {
-        if (!cardButton.interactable) return;
+        if (cardButton != null && !cardButton.interactable) return;
 
         isHovered = false;
 
@@ -82,23 +82,21 @@ public class CardJuice : MonoBehaviour, IPointerEnterHandler, IPointerExitHandle
         }
     }
 
-    public void OnPointerClick(PointerEventData eventData)
-    {
-        if (!cardButton.interactable) return;
+    // --- SELECTION CONTROL FROM CONTROLLER ---
 
-        // Toggle selection state
-        isSelected = !isSelected;
+    public void SetSelectedState(bool selected, bool hovered)
+    {
+        isHovered = hovered;
+        isSelected = selected;
 
         if (isSelected)
         {
-            // Selected state takes priority
             ApplyScale(selectedScale);
             ApplyColor(selectedColor);
             PlaySFX(selectSFX);
         }
         else
         {
-            // Deselected: return to hovered state if mouse is still on card, otherwise return to normal
             Vector3 targetScale = isHovered ? hoveredScale : normalScale;
             Color targetColor = isHovered ? highlightColor : normalColor;
 
@@ -134,12 +132,12 @@ public class CardJuice : MonoBehaviour, IPointerEnterHandler, IPointerExitHandle
 
     private IEnumerator Routine_LerpColor(Color targetColor)
     {
-        while (Vector4.Distance(cardImage.color, targetColor) > 0.001f)
+        while (cardImage != null && Vector4.Distance(cardImage.color, targetColor) > 0.001f)
         {
             cardImage.color = Color.Lerp(cardImage.color, targetColor, Time.deltaTime * transitionSpeed);
             yield return null;
         }
-        cardImage.color = targetColor;
+        if (cardImage != null) cardImage.color = targetColor;
     }
 
     private void PlaySFX(AudioClip clip)
@@ -150,14 +148,18 @@ public class CardJuice : MonoBehaviour, IPointerEnterHandler, IPointerExitHandle
         }
     }
 
-    // --- EXTERNAL STATE API (FOR NETWORK SYNC & ROUND RESETS) ---
+    // --- EXTERNAL STATE API ---
 
     public void ForceResetCardState()
     {
         isSelected = false;
         isHovered = false;
-        ApplyScale(normalScale);
-        ApplyColor(normalColor);
+
+        if (activeScaleCoroutine != null) StopCoroutine(activeScaleCoroutine);
+        if (activeColorCoroutine != null) StopCoroutine(activeColorCoroutine);
+
+        transform.localScale = normalScale;
+        if (cardImage != null) cardImage.color = normalColor;
     }
 
     public bool IsSelected => isSelected;

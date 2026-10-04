@@ -75,6 +75,21 @@ public class EndTurnManager : NetworkBehaviour
     [SerializeField] private float cardMovementWaitDelay = 0.5f;
     [SerializeField] private float phaseTransitionPause = 0.4f;
 
+    [Header("✨ AUDIO SETTINGS ✨")]
+    [SerializeField] private AudioSource audioSource;
+    [Header("Incremental Points Sound")]
+    [SerializeField] private AudioClip pointCountSFX;
+    [SerializeField] private float minPitch = 0.9f;
+    [SerializeField] private float maxPitch = 1.8f;
+
+    [Header("Combat Damage Sound")]
+    [SerializeField] private AudioClip damageSFX;
+
+    [Header("Card Highlight Sounds")]
+    [SerializeField] private AudioClip attackHighlightSFX;
+    [SerializeField] private AudioClip defenseHighlightSFX;
+    [SerializeField] private AudioClip supportHighlightSFX;
+
     [Header("✨ JUICE: Damage Flash UI ✨")]
     [Tooltip("Full screen red overlay or vignette Image component for player taking damage.")]
     [SerializeField] private Image damageFlashImage;
@@ -206,6 +221,16 @@ public class EndTurnManager : NetworkBehaviour
 
     private void Start()
     {
+        if (audioSource == null)
+        {
+            audioSource = GetComponent<AudioSource>();
+            if (audioSource == null)
+            {
+                audioSource = gameObject.AddComponent<AudioSource>();
+                audioSource.playOnAwake = false;
+            }
+        }
+
         if (mainCamera == null) mainCamera = Camera.main;
         if (mainCamera != null)
         {
@@ -455,7 +480,9 @@ public class EndTurnManager : NetworkBehaviour
         List<BalatroCardController> playerCards = GetControllersFromTransform(selectedHandTransform);
         List<BalatroCardController> opponentCards = InstantiateOpponentCards(result.opponentCardIds);
 
+        // --- ATTACK PHASE ---
         HighlightCardsByCategory(playerCards, opponentCards, CardCategory.Attack);
+        PlayHighlightSFX(CardCategory.Attack);
         yield return StartCoroutine(Routine_CountUpPair(
             result.playerAttack, playerAttackText, originalPlayerAttackScale,
             result.opponentAttack, opponentAttackText, originalOpponentAttackScale
@@ -463,7 +490,9 @@ public class EndTurnManager : NetworkBehaviour
         yield return new WaitForSeconds(phaseTransitionPause);
         ResetCardHighlights(playerCards, opponentCards);
 
+        // --- DEFENSE PHASE ---
         HighlightCardsByCategory(playerCards, opponentCards, CardCategory.Defense);
+        PlayHighlightSFX(CardCategory.Defense);
         yield return StartCoroutine(Routine_CountUpPair(
             result.playerDefense, playerDefenseText, originalPlayerDefenseScale,
             result.opponentDefense, opponentDefenseText, originalOpponentDefenseScale
@@ -471,6 +500,7 @@ public class EndTurnManager : NetworkBehaviour
         yield return new WaitForSeconds(phaseTransitionPause);
         ResetCardHighlights(playerCards, opponentCards);
 
+        // --- DIFFERENCE STEP ---
         int maxNetDamage = Mathf.Max(result.netDamageToOpponent, result.netDamageToPlayer);
         if (centerDifferenceText != null && maxNetDamage > 0)
         {
@@ -484,13 +514,13 @@ public class EndTurnManager : NetworkBehaviour
         }
         yield return new WaitForSeconds(phaseTransitionPause);
 
+        // --- PLAYER DAMAGE PHASE ---
         if (result.netDamageToPlayer > 0)
         {
             RectTransform targetTargetRect = playerHPRectTransformOverride != null
                 ? playerHPRectTransformOverride
                 : (playerHPText != null ? playerHPText.rectTransform : null);
 
-            // Trigger visual damage flash effect
             if (activeDamageFlashCoroutine != null) StopCoroutine(activeDamageFlashCoroutine);
             activeDamageFlashCoroutine = StartCoroutine(Routine_DamageFlash());
 
@@ -498,6 +528,7 @@ public class EndTurnManager : NetworkBehaviour
             {
                 currentPlayerHP = Mathf.Max(0, currentPlayerHP - 1);
                 UpdateHPUI();
+                PlayFixedDamageSFX();
 
                 if (playerHPText != null) StartCoroutine(Routine_PopText(playerHPText.transform, originalPlayerHPScale));
 
@@ -512,6 +543,7 @@ public class EndTurnManager : NetworkBehaviour
             }
         }
 
+        // --- OPPONENT DAMAGE PHASE ---
         if (result.netDamageToOpponent > 0)
         {
             RectTransform targetTargetRect = opponentHPRectTransformOverride != null
@@ -522,6 +554,7 @@ public class EndTurnManager : NetworkBehaviour
             {
                 currentOpponentHP = Mathf.Max(0, currentOpponentHP - 1);
                 UpdateHPUI();
+                PlayFixedDamageSFX();
 
                 if (opponentHPText != null) StartCoroutine(Routine_PopText(opponentHPText.transform, originalOpponentHPScale));
 
@@ -542,6 +575,32 @@ public class EndTurnManager : NetworkBehaviour
 
         yield return new WaitForSeconds(0.5f);
         yield return StartCoroutine(Routine_CheckNextRoundOrEndGame());
+    }
+
+    private void PlayHighlightSFX(CardCategory category)
+    {
+        AudioClip clipToPlay = category switch
+        {
+            CardCategory.Attack => attackHighlightSFX,
+            CardCategory.Defense => defenseHighlightSFX,
+            CardCategory.Support => supportHighlightSFX,
+            _ => null
+        };
+
+        if (clipToPlay != null && audioSource != null)
+        {
+            audioSource.pitch = 1.0f;
+            audioSource.PlayOneShot(clipToPlay);
+        }
+    }
+
+    private void PlayFixedDamageSFX()
+    {
+        if (damageSFX != null && audioSource != null)
+        {
+            audioSource.pitch = 1.0f;
+            audioSource.PlayOneShot(damageSFX);
+        }
     }
 
     private void HighlightCardsByCategory(List<BalatroCardController> playerList, List<BalatroCardController> opponentList, CardCategory category)
@@ -632,8 +691,19 @@ public class EndTurnManager : NetworkBehaviour
     private IEnumerator Routine_CountUpPair(int playerTargetVal, TextMeshProUGUI playerText, Vector3 playerScale, int opponentTargetVal, TextMeshProUGUI opponentText, Vector3 opponentScale)
     {
         int maxSteps = Mathf.Max(playerTargetVal, opponentTargetVal);
+        if (maxSteps <= 0) yield break;
+
         for (int step = 1; step <= maxSteps; step++)
         {
+            float t = maxSteps > 1 ? (float)(step - 1) / (maxSteps - 1) : 1f;
+            float currentPitch = Mathf.Lerp(minPitch, maxPitch, t);
+
+            if (pointCountSFX != null && audioSource != null)
+            {
+                audioSource.pitch = currentPitch;
+                audioSource.PlayOneShot(pointCountSFX);
+            }
+
             if (step <= playerTargetVal && playerText != null)
             {
                 playerText.text = step.ToString();
@@ -644,8 +714,11 @@ public class EndTurnManager : NetworkBehaviour
                 opponentText.text = step.ToString();
                 StartCoroutine(Routine_PopText(opponentText.transform, opponentScale));
             }
+
             yield return new WaitForSeconds(countStepInterval);
         }
+
+        if (audioSource != null) audioSource.pitch = 1.0f;
     }
 
     private IEnumerator Routine_CheckNextRoundOrEndGame()
