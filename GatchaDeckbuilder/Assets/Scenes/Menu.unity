@@ -3118,6 +3118,10 @@ MonoBehaviour:
   statusTextLogin: {fileID: 217295022}
   signInPanel: {fileID: 1863999415}
   notificationPanel: {fileID: 1708761131}
+  audioSource: {fileID: 601546731}
+  typingSound: {fileID: 8300000, guid: e08f536639c5f514eb8522060f85f396, type: 3}
+  minPitch: 0.85
+  maxPitch: 0.908
   lobbySceneName: Lobby
 --- !u!4 &755245184
 Transform:

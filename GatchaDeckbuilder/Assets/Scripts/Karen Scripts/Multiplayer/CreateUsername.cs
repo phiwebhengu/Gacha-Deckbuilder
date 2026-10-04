@@ -26,6 +26,16 @@ public class CreateUsername : MonoBehaviour
     public GameObject signInPanel;
     public GameObject notificationPanel;
 
+    // ==========================================
+    // NEW ADDITION: Audio Settings
+    // ==========================================
+    [Header("Audio Settings")]
+    public AudioSource audioSource;
+    public AudioClip typingSound;
+    [Range(0.5f, 2.0f)] public float minPitch = 0.85f;
+    [Range(0.5f, 2.0f)] public float maxPitch = 1.15f;
+    // ==========================================
+
     [Header("Scene Settings")]
     public string lobbySceneName = "Lobby"; // Change to your actual lobby scene name
 
@@ -39,11 +49,33 @@ public class CreateUsername : MonoBehaviour
         // Disable button until services are ready
         if (signInButton != null) signInButton.interactable = false;
 
+        // ==========================================
+        // NEW ADDITION: Bind Typing Sound Listeners
+        // ==========================================
+        if (userInputCreate != null) userInputCreate.onValueChanged.AddListener(PlayTypingSound);
+        if (userPasswordCreate != null) userPasswordCreate.onValueChanged.AddListener(PlayTypingSound);
+        if (userInput != null) userInput.onValueChanged.AddListener(PlayTypingSound);
+        if (userPassword != null) userPassword.onValueChanged.AddListener(PlayTypingSound);
+        // ==========================================
+
         await UnityServices.InitializeAsync();
 
         // Enable button once ready
         if (signInButton != null) signInButton.interactable = true;
     }
+
+    // ==========================================
+    // NEW ADDITION: Typing Sound Helper Method
+    // ==========================================
+    private void PlayTypingSound(string text)
+    {
+        if (audioSource != null && typingSound != null)
+        {
+            audioSource.pitch = Random.Range(minPitch, maxPitch);
+            audioSource.PlayOneShot(typingSound);
+        }
+    }
+    // ==========================================
 
     public async void OnCreateAccount()
     {
@@ -237,7 +269,7 @@ public class CreateUsername : MonoBehaviour
         Debug.Log("Username saved to CloudSave");
     }
 
-    async Task LoadCloudData() 
+    async Task LoadCloudData()
     {
 
         var data = await CloudSaveService.Instance.Data.LoadAsync(new HashSet<string> { "wins", "losses", "username", "password", "draw" });
@@ -253,7 +285,7 @@ public class CreateUsername : MonoBehaviour
         Debug.Log("Password: " + password);
     }
 
-    public void openSignInPanel() 
+    public void openSignInPanel()
     {
         signInPanel.SetActive(true);
     }

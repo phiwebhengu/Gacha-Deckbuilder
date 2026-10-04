@@ -37,6 +37,16 @@ public class UIManager : NetworkBehaviour
     public Transform joinPlayerListContainer;
     public PlayerSlots joinPlayerSlotPrefab;
 
+    // ==========================================
+    // NEW ADDITION: Audio Settings
+    // ==========================================
+    [Header("Audio Settings")]
+    public AudioSource audioSource;
+    public AudioClip typingSound;
+    [Range(0.5f, 2.0f)] public float minPitch = 0.85f;
+    [Range(0.5f, 2.0f)] public float maxPitch = 1.15f;
+    // ==========================================
+
     // Lobby Data
     private string lobbyCode;
     private Dictionary<ulong, PlayerSceneState> playerSceneStates
@@ -64,6 +74,7 @@ public class UIManager : NetworkBehaviour
             Destroy(gameObject);
         }
     }
+
     private async void Start()
     {
         try
@@ -79,7 +90,7 @@ public class UIManager : NetworkBehaviour
             Debug.LogError($"Services initialization failed: {e.Message}");
         }
 
-        //Spawn NetworkObject if not already spawned
+        // Spawn NetworkObject if not already spawned
         var networkObject = GetComponent<NetworkObject>();
         if (networkObject != null && !networkObject.IsSpawned)
         {
@@ -93,6 +104,15 @@ public class UIManager : NetworkBehaviour
 
         ShowMainMenu();
 
+        // ==========================================
+        // NEW ADDITION: Bind Typing Sound Listener
+        // ==========================================
+        if (joinLobbyCodeInput != null)
+        {
+            joinLobbyCodeInput.onValueChanged.AddListener(PlayTypingSound);
+        }
+        // ==========================================
+
         joinLobbyCodeInput.onEndEdit.AddListener(OnLobbyCodeSubmitted);
         joinLobbyCodeInput.onValueChanged.AddListener(UpdateJoinButtonState);
         UpdateJoinButtonState("");
@@ -102,9 +122,20 @@ public class UIManager : NetworkBehaviour
             NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
             NetworkManager.Singleton.OnClientDisconnectCallback += OnClientDisconnected;
         }
-
-
     }
+
+    // ==========================================
+    // NEW ADDITION: Typing Sound Helper Method
+    // ==========================================
+    private void PlayTypingSound(string text)
+    {
+        if (audioSource != null && typingSound != null)
+        {
+            audioSource.pitch = Random.Range(minPitch, maxPitch);
+            audioSource.PlayOneShot(typingSound);
+        }
+    }
+    // ==========================================
 
     public void ReturnToMainMenuAsClient()
     {
@@ -243,7 +274,7 @@ public class UIManager : NetworkBehaviour
                 }
             }
 
-            //  Add with proper format
+            // Add with proper format
             playersInLobbyRaw.Add($"{myName}|CID:0");
             Debug.Log($" Added to raw list: {playersInLobbyRaw[0]}");
 
@@ -318,7 +349,7 @@ public class UIManager : NetworkBehaviour
             ConfigureRelayTransportForClient(joinAllocation);
             lobbyCode = code;
 
-            //  Don't pre-populate player list - wait for server broadcast
+            // Don't pre-populate player list - wait for server broadcast
             playersInLobbyRaw.Clear();
             playersInLobbyDisplay.Clear();
             UpdateJoiningPlayerList();
@@ -528,7 +559,7 @@ public class UIManager : NetworkBehaviour
             NetworkManager.Singleton.IsConnectedClient
         );
 
-        //  Wait for NetworkObjects to sync (critical for RPCs to work)
+        // Wait for NetworkObjects to sync (critical for RPCs to work)
         float timeout = 5f;
         float elapsed = 0f;
         while (!GetComponent<NetworkObject>().IsSpawned && elapsed < timeout)
@@ -543,7 +574,7 @@ public class UIManager : NetworkBehaviour
             yield break;
         }
 
-        //  Get username with fallbacks
+        // Get username with fallbacks
         string myName = "Guest";
         if (PlayerData.Instance != null && !string.IsNullOrEmpty(PlayerData.Instance.Username))
         {
@@ -567,7 +598,6 @@ public class UIManager : NetworkBehaviour
         }
     }
 
-
     [ClientRpc]
     void UpdatePlayerListClientRpc(string displayNamesDelimited)
     {
@@ -575,7 +605,7 @@ public class UIManager : NetworkBehaviour
             ? new List<string>()
             : new List<string>(displayNamesDelimited.Split('|'));
 
-        //  Only update display list - raw data stays on server
+        // Only update display list - raw data stays on server
         playersInLobbyDisplay = displayNames;
 
         if (isHost)
@@ -625,11 +655,9 @@ public class UIManager : NetworkBehaviour
 
     void OnClientDisconnected(ulong clientId)
     {
-
         if (IsServer)
         {
             Debug.Log($" Client disconnected: {clientId}");
-
 
             playersInLobbyRaw.RemoveAll(p => p.Contains($"|CID:{clientId}"));
 
@@ -658,7 +686,7 @@ public class UIManager : NetworkBehaviour
 
         Debug.Log($" Received username RPC: clientId={clientId}, name='{cleanName}'");
 
-        //  Find entry by CID in RAW list
+        // Find entry by CID in RAW list
         int playerIndex = playersInLobbyRaw.FindIndex(p => p.Contains($"|CID:{clientId}"));
 
         if (playerIndex >= 0)
@@ -668,7 +696,7 @@ public class UIManager : NetworkBehaviour
         }
         else
         {
-            //  Add new entry - but ONLY if it's not the host (CID:0)
+            // Add new entry - but ONLY if it's not the host (CID:0)
             if (clientId == 0)
             {
                 Debug.LogWarning(" Host username update received but no CID:0 entry found - re-adding");
@@ -694,7 +722,7 @@ public class UIManager : NetworkBehaviour
         {
             if (string.IsNullOrEmpty(raw)) continue;
 
-            //parsing with error handling
+            // Parsing with error handling
             int cidIndex = raw.LastIndexOf("|CID:");
             if (cidIndex > 0)
             {
