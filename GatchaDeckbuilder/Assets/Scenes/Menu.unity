@@ -273,10 +273,10 @@ MonoBehaviour:
   hoverColor: {r: 1, g: 0.92, b: 0.5, a: 1}
   pressColor: {r: 0.8, g: 0.8, b: 0.8, a: 1}
   colorLerpSpeed: 15
-  audioSource: {fileID: 0}
-  hoverSFX: {fileID: 0}
-  clickDownSFX: {fileID: 0}
-  clickReleaseSFX: {fileID: 0}
+  audioSource: {fileID: 601546731}
+  hoverSFX: {fileID: 8300000, guid: 0cd4113c93879964e9c83d6d2dba4ae3, type: 3}
+  clickDownSFX: {fileID: 8300000, guid: 258053312aad3e748935d578511b7683, type: 3}
+  clickReleaseSFX: {fileID: 8300000, guid: 258053312aad3e748935d578511b7683, type: 3}
   hoverPitch: 1.1
   clickPitch: 1
 --- !u!1 &139471924
@@ -2033,6 +2033,135 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 589440740}
   m_CullTransparentMesh: 1
+--- !u!1 &601546730
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 601546732}
+  - component: {fileID: 601546731}
+  m_Layer: 0
+  m_Name: Audio Source
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!82 &601546731
+AudioSource:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 601546730}
+  m_Enabled: 1
+  serializedVersion: 4
+  OutputAudioMixerGroup: {fileID: 0}
+  m_audioClip: {fileID: 0}
+  m_Resource: {fileID: 0}
+  m_PlayOnAwake: 0
+  m_Volume: 1
+  m_Pitch: 1
+  Loop: 0
+  Mute: 0
+  Spatialize: 0
+  SpatializePostEffects: 0
+  Priority: 128
+  DopplerLevel: 1
+  MinDistance: 1
+  MaxDistance: 500
+  Pan2D: 0
+  rolloffMode: 0
+  BypassEffects: 0
+  BypassListenerEffects: 0
+  BypassReverbZones: 0
+  rolloffCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 1
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    - serializedVersion: 3
+      time: 1
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  panLevelCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  spreadCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  reverbZoneMixCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 1
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+--- !u!4 &601546732
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 601546730}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0.11, y: 0.08, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &604561689
 GameObject:
   m_ObjectHideFlags: 0
@@ -2239,10 +2368,10 @@ MonoBehaviour:
   hoverColor: {r: 1, g: 0.92, b: 0.5, a: 1}
   pressColor: {r: 0.8, g: 0.8, b: 0.8, a: 1}
   colorLerpSpeed: 15
-  audioSource: {fileID: 0}
-  hoverSFX: {fileID: 0}
-  clickDownSFX: {fileID: 0}
-  clickReleaseSFX: {fileID: 0}
+  audioSource: {fileID: 601546731}
+  hoverSFX: {fileID: 8300000, guid: 0cd4113c93879964e9c83d6d2dba4ae3, type: 3}
+  clickDownSFX: {fileID: 8300000, guid: 258053312aad3e748935d578511b7683, type: 3}
+  clickReleaseSFX: {fileID: 8300000, guid: 258053312aad3e748935d578511b7683, type: 3}
   hoverPitch: 1.1
   clickPitch: 1
 --- !u!1 &630347583
@@ -4128,10 +4257,10 @@ MonoBehaviour:
   hoverColor: {r: 1, g: 0.92, b: 0.5, a: 1}
   pressColor: {r: 0.8, g: 0.8, b: 0.8, a: 1}
   colorLerpSpeed: 15
-  audioSource: {fileID: 0}
-  hoverSFX: {fileID: 0}
-  clickDownSFX: {fileID: 0}
-  clickReleaseSFX: {fileID: 0}
+  audioSource: {fileID: 601546731}
+  hoverSFX: {fileID: 8300000, guid: 0cd4113c93879964e9c83d6d2dba4ae3, type: 3}
+  clickDownSFX: {fileID: 8300000, guid: 258053312aad3e748935d578511b7683, type: 3}
+  clickReleaseSFX: {fileID: 8300000, guid: 258053312aad3e748935d578511b7683, type: 3}
   hoverPitch: 1.1
   clickPitch: 1
 --- !u!1 &1190225617
@@ -4699,10 +4828,10 @@ MonoBehaviour:
   hoverColor: {r: 1, g: 0.92, b: 0.5, a: 1}
   pressColor: {r: 0.8, g: 0.8, b: 0.8, a: 1}
   colorLerpSpeed: 15
-  audioSource: {fileID: 0}
-  hoverSFX: {fileID: 0}
-  clickDownSFX: {fileID: 0}
-  clickReleaseSFX: {fileID: 0}
+  audioSource: {fileID: 601546731}
+  hoverSFX: {fileID: 8300000, guid: 0cd4113c93879964e9c83d6d2dba4ae3, type: 3}
+  clickDownSFX: {fileID: 8300000, guid: 258053312aad3e748935d578511b7683, type: 3}
+  clickReleaseSFX: {fileID: 8300000, guid: 258053312aad3e748935d578511b7683, type: 3}
   hoverPitch: 1.1
   clickPitch: 1
 --- !u!1 &1382018225
@@ -5439,10 +5568,10 @@ MonoBehaviour:
   hoverColor: {r: 1, g: 0.92, b: 0.5, a: 1}
   pressColor: {r: 0.8, g: 0.8, b: 0.8, a: 1}
   colorLerpSpeed: 15
-  audioSource: {fileID: 0}
-  hoverSFX: {fileID: 0}
-  clickDownSFX: {fileID: 0}
-  clickReleaseSFX: {fileID: 0}
+  audioSource: {fileID: 601546731}
+  hoverSFX: {fileID: 8300000, guid: 0cd4113c93879964e9c83d6d2dba4ae3, type: 3}
+  clickDownSFX: {fileID: 8300000, guid: 258053312aad3e748935d578511b7683, type: 3}
+  clickReleaseSFX: {fileID: 8300000, guid: 258053312aad3e748935d578511b7683, type: 3}
   hoverPitch: 1.1
   clickPitch: 1
 --- !u!1 &1863999415
@@ -5862,3 +5991,4 @@ SceneRoots:
   - {fileID: 763330712}
   - {fileID: 722921162}
   - {fileID: 755245184}
+  - {fileID: 601546732}
