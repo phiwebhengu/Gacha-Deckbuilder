@@ -534,7 +534,11 @@ public class EndTurnManager : NetworkBehaviour
 
                 if (targetTargetRect != null)
                 {
-                    if (activePlayerShakeCoroutine != null) StopCoroutine(activePlayerShakeCoroutine);
+                    if (activePlayerShakeCoroutine != null)
+                    {
+                        StopCoroutine(activePlayerShakeCoroutine);
+                        targetTargetRect.localRotation = Quaternion.identity; // Reset rotation if interrupted
+                    }
                     activePlayerShakeCoroutine = StartCoroutine(Routine_UIRectShake(targetTargetRect, damageShakeDuration, damageShakeMagnitude, damageShakeRotation, () => activePlayerShakeCoroutine = null));
                 }
 
@@ -560,7 +564,11 @@ public class EndTurnManager : NetworkBehaviour
 
                 if (targetTargetRect != null)
                 {
-                    if (activeOpponentShakeCoroutine != null) StopCoroutine(activeOpponentShakeCoroutine);
+                    if (activeOpponentShakeCoroutine != null)
+                    {
+                        StopCoroutine(activeOpponentShakeCoroutine);
+                        targetTargetRect.localRotation = Quaternion.identity; // Reset rotation if interrupted
+                    }
                     activeOpponentShakeCoroutine = StartCoroutine(Routine_UIRectShake(targetTargetRect, damageShakeDuration, damageShakeMagnitude, damageShakeRotation, () => activeOpponentShakeCoroutine = null));
                 }
 
@@ -924,27 +932,32 @@ public class EndTurnManager : NetworkBehaviour
         if (targetRect == null) yield break;
 
         Vector2 originalAnchoredPos = targetRect.anchoredPosition;
-        Quaternion originalRotation = targetRect.localRotation;
         float elapsed = 0f;
 
-        while (elapsed < duration)
+        try
         {
-            float damping = 1f - (elapsed / duration);
+            while (elapsed < duration)
+            {
+                float damping = 1f - (elapsed / duration);
 
-            float offsetX = UnityEngine.Random.Range(-1f, 1f) * positionMagnitude * damping;
-            float offsetY = UnityEngine.Random.Range(-1f, 1f) * positionMagnitude * damping;
-            targetRect.anchoredPosition = originalAnchoredPos + new Vector2(offsetX, offsetY);
+                float offsetX = UnityEngine.Random.Range(-1f, 1f) * positionMagnitude * damping;
+                float offsetY = UnityEngine.Random.Range(-1f, 1f) * positionMagnitude * damping;
+                targetRect.anchoredPosition = originalAnchoredPos + new Vector2(offsetX, offsetY);
 
-            float offsetAngle = UnityEngine.Random.Range(-1f, 1f) * rotationMagnitude * damping;
-            targetRect.localRotation = originalRotation * Quaternion.Euler(0f, 0f, offsetAngle);
+                float offsetAngle = UnityEngine.Random.Range(-1f, 1f) * rotationMagnitude * damping;
+                targetRect.localRotation = Quaternion.Euler(0f, 0f, offsetAngle);
 
-            elapsed += Time.unscaledDeltaTime;
-            yield return null;
+                elapsed += Time.unscaledDeltaTime;
+                yield return null;
+            }
         }
-
-        targetRect.anchoredPosition = originalAnchoredPos;
-        targetRect.localRotation = originalRotation;
-        onComplete?.Invoke();
+        finally
+        {
+            // Reset position and force rotation back to 0 on all axes
+            targetRect.anchoredPosition = originalAnchoredPos;
+            targetRect.localRotation = Quaternion.identity;
+            onComplete?.Invoke();
+        }
     }
 
     private IEnumerator Routine_CameraShake()
