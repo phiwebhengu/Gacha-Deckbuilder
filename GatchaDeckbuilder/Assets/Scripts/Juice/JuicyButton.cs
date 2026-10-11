@@ -6,19 +6,19 @@ using UnityEngine.EventSystems;
 [RequireComponent(typeof(Image))]
 public class JuicyButton : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler, IPointerDownHandler, IPointerUpHandler
 {
-    [Header("✨ Scale Settings ✨")]
+    [Header("Scale Settings")]
     [SerializeField] private float hoverScale = 1.08f;
     [SerializeField] private float pressShrinkScale = 0.92f;
     [SerializeField] private float releaseBounceScale = 1.15f;
     [SerializeField] private float scaleLerpSpeed = 15f;
 
-    [Header("✨ Color Settings ✨")]
+    [Header("Color Settings")]
     [SerializeField] private Color normalColor = Color.white;
     [SerializeField] private Color hoverColor = new Color(1f, 0.92f, 0.5f, 1f); // Warm highlighted tint
     [SerializeField] private Color pressColor = new Color(0.8f, 0.8f, 0.8f, 1f);
     [SerializeField] private float colorLerpSpeed = 15f;
 
-    [Header("✨ Audio Clips ✨")]
+    [Header("Audio Clips")]
     [SerializeField] private AudioSource audioSource;
     [SerializeField] private AudioClip hoverSFX;
     [SerializeField] private AudioClip clickDownSFX;

@@ -31,8 +31,15 @@ public class GachaUI : MonoBehaviour
     public PlayerHandManager playerHandManager;
 
     private GachaManager mgr;
-    private int currentTokens = 0;
     private bool isDrawPhaseActive = true;
+
+    // Token bookkeeping.
+    // serverTokens = last value the server told us. pullsInFlight = pulls we've asked for but the server hasn't
+    // answered yet. The displayed number is serverTokens - pullsInFlight, so the UI reacts instantly on click
+    // instead of waiting a full network round trip (that wait is what made the joining player's buttons feel dead).
+    private int serverTokens = 0;
+    private int pullsInFlight = 0;
+    private int DisplayedTokens => Mathf.Max(0, serverTokens - pullsInFlight);
 
     private int actionPityCount = 0;
     private int supportPityCount = 0;
@@ -69,27 +76,25 @@ public class GachaUI : MonoBehaviour
         mgr.OnOpponentDrewCard += HandleOpponentDrewCard;
         mgr.OnPityUpdated += HandlePityUpdated;
 
-        currentTokens = mgr.GetLocalPlayerTokens();
-        if (tokenText != null) tokenText.text = string.Format(tokenFormat, currentTokens);
+        serverTokens = mgr.GetLocalPlayerTokens();
+        pullsInFlight = 0;
+        RefreshTokenText();
 
-        if (mgr != null)
+        var actionPity = mgr.GetLocalPlayerPity(true);
+        actionPityCount = actionPity.pulls;
+        pityThreshold = actionPity.threshold;
+        if (actionPityText != null)
         {
-            var actionPity = mgr.GetLocalPlayerPity(true);
-            actionPityCount = actionPity.pulls;
-            pityThreshold = actionPity.threshold;
-            if (actionPityText != null)
-            {
-                actionPityText.text = string.Format(pityFormat, actionPityCount, pityThreshold);
-                UpdatePityTextColor(actionPityText, actionPityCount, pityThreshold);
-            }
+            actionPityText.text = string.Format(pityFormat, actionPityCount, pityThreshold);
+            UpdatePityTextColor(actionPityText, actionPityCount, pityThreshold);
+        }
 
-            var supportPity = mgr.GetLocalPlayerPity(false);
-            supportPityCount = supportPity.pulls;
-            if (supportPityText != null)
-            {
-                supportPityText.text = string.Format(pityFormat, supportPityCount, pityThreshold);
-                UpdatePityTextColor(supportPityText, supportPityCount, pityThreshold);
-            }
+        var supportPity = mgr.GetLocalPlayerPity(false);
+        supportPityCount = supportPity.pulls;
+        if (supportPityText != null)
+        {
+            supportPityText.text = string.Format(pityFormat, supportPityCount, pityThreshold);
+            UpdatePityTextColor(supportPityText, supportPityCount, pityThreshold);
         }
 
         if (drawTimerManager != null)
@@ -101,10 +106,17 @@ public class GachaUI : MonoBehaviour
         UpdateButtonInteractability(isDrawPhaseActive);
     }
 
+    private void RefreshTokenText()
+    {
+        if (tokenText != null) tokenText.text = string.Format(tokenFormat, DisplayedTokens);
+    }
+
+    // Authoritative token count from the server (one arrives for every pull that succeeded).
     private void UpdateTokens(int tokens)
     {
-        currentTokens = tokens;
-        if (tokenText != null) tokenText.text = string.Format(tokenFormat, tokens);
+        serverTokens = tokens;
+        pullsInFlight = Mathf.Max(0, pullsInFlight - 1);
+        RefreshTokenText();
         UpdateButtonInteractability(isDrawPhaseActive);
     }
 
@@ -112,7 +124,7 @@ public class GachaUI : MonoBehaviour
     {
         isDrawPhaseActive = phaseActive;
         bool timerAllowsPull = (drawTimerManager == null) || isDrawPhaseActive;
-        bool canPull = currentTokens > 0 && timerAllowsPull;
+        bool canPull = DisplayedTokens > 0 && pullsInFlight == 0 && timerAllowsPull;
 
         if (pullActionButton != null) pullActionButton.interactable = canPull;
         if (pullSupportButton != null) pullSupportButton.interactable = canPull;
@@ -121,8 +133,11 @@ public class GachaUI : MonoBehaviour
     private void HandlePullFailed(string reason)
     {
         Debug.LogWarning($"Pull failed: {reason}");
-        if (pullActionButton != null) pullActionButton.interactable = true;
-        if (pullSupportButton != null) pullSupportButton.interactable = true;
+
+        // The server refused, so no token was spent: give back the optimistic deduction.
+        pullsInFlight = Mathf.Max(0, pullsInFlight - 1);
+        RefreshTokenText();
+        UpdateButtonInteractability(isDrawPhaseActive);
     }
 
     private void HandleOpponentDrewCard(ulong opponentClientId)
@@ -133,53 +148,32 @@ public class GachaUI : MonoBehaviour
         }
     }
 
-    public void OnClickPullAction()
-    {
-        if (pullActionButton != null) pullActionButton.interactable = false;
+    public void OnClickPullAction() => PullFromDeck(DeckType.Action);
+    public void OnClickPullSupport() => PullFromDeck(DeckType.Support);
 
-        if (drawTimerManager != null)
-        {
-            drawTimerManager.NotifyCardsDrawn();
-        }
-        else
-        {
-            Debug.LogWarning("[GachaUI] drawTimerManager is null!");
-        }
+    private void PullFromDeck(DeckType deck)
+    {
+        bool timerAllowsPull = (drawTimerManager == null) || drawTimerManager.IsDrawPhaseActive;
+        if (DisplayedTokens <= 0 || pullsInFlight > 0 || !timerAllowsPull) return;
+
+        // Must happen BEFORE the request: on the host the server answers synchronously inside this call.
+        pullsInFlight++;
+        RefreshTokenText();
+        UpdateButtonInteractability(isDrawPhaseActive);
 
         if (playerHandManager != null)
         {
-            // ✨ NEW: Passing button RectTransform to calculate spawn source
-            RectTransform sourceBtnRect = pullActionButton != null ? pullActionButton.GetComponent<RectTransform>() : null;
-            playerHandManager.DealCardsFromTokens(1, DeckType.Action, sourceBtnRect);
+            // PlayerHandManager notifies the draw timer and sends the pull request itself.
+            Button sourceButton = deck == DeckType.Action ? pullActionButton : pullSupportButton;
+            RectTransform sourceBtnRect = sourceButton != null ? sourceButton.GetComponent<RectTransform>() : null;
+            playerHandManager.DealCardsFromTokens(1, deck, sourceBtnRect);
         }
         else if (mgr != null)
         {
-            mgr.RequestPullAction();
-        }
-    }
+            if (drawTimerManager != null) drawTimerManager.NotifyCardsDrawn();
 
-    public void OnClickPullSupport()
-    {
-        if (pullSupportButton != null) pullSupportButton.interactable = false;
-
-        if (drawTimerManager != null)
-        {
-            drawTimerManager.NotifyCardsDrawn();
-        }
-        else
-        {
-            Debug.LogWarning("[GachaUI] drawTimerManager is null!");
-        }
-
-        if (playerHandManager != null)
-        {
-            // ✨ NEW: Passing button RectTransform to calculate spawn source
-            RectTransform sourceBtnRect = pullSupportButton != null ? pullSupportButton.GetComponent<RectTransform>() : null;
-            playerHandManager.DealCardsFromTokens(1, DeckType.Support, sourceBtnRect);
-        }
-        else if (mgr != null)
-        {
-            mgr.RequestPullSupport();
+            if (deck == DeckType.Action) mgr.RequestPullAction();
+            else mgr.RequestPullSupport();
         }
     }
 
