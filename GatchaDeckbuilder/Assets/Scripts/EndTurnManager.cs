@@ -88,7 +88,7 @@ public class EndTurnManager : NetworkBehaviour
     [SerializeField] private float cardMovementWaitDelay = 0.5f;
     [SerializeField] private float phaseTransitionPause = 0.4f;
 
-    [Header("Audio Setting")]
+    [Header("✨ AUDIO SETTINGS ✨")]
     [SerializeField] private AudioSource audioSource;
     [Header("Incremental Points Sound")]
     [SerializeField] private AudioClip pointCountSFX;
@@ -103,14 +103,14 @@ public class EndTurnManager : NetworkBehaviour
     [SerializeField] private AudioClip defenseHighlightSFX;
     [SerializeField] private AudioClip supportHighlightSFX;
 
-    [Header("JUICE: Damage Flash UI")]
+    [Header("✨ JUICE: Damage Flash UI ✨")]
     [Tooltip("Full screen red overlay or vignette Image component for player taking damage.")]
     [SerializeField] private Image damageFlashImage;
     [SerializeField] private float flashInDuration = 0.05f;
     [SerializeField] private float flashOutDuration = 0.25f;
     [SerializeField][Range(0f, 1f)] private float maxFlashAlpha = 0.6f;
 
-    [Header("JUICE: Damage UI Shake Settings")]
+    [Header("✨ JUICE: Damage UI Shake Settings ✨")]
     [Tooltip("Optional parent panel or transform overrides for health shake. If null, defaults to playerHPText/opponentHPText RectTransforms.")]
     [SerializeField] private RectTransform playerHPRectTransformOverride;
     [SerializeField] private RectTransform opponentHPRectTransformOverride;
@@ -146,8 +146,13 @@ public class EndTurnManager : NetworkBehaviour
     [SerializeField] private Button forfeitButton;
     [SerializeField] private Button pauseButton;
 
-    [Header("Leave To Lobby")]
+    [Header("Leave To Lobby (mid-match or after it ends)")]
+    [Tooltip("OPTIONAL. A button you can put anywhere (e.g. in the pause menu or a screen corner) that leaves the match and goes back to the lobby. It is wired up automatically.")]
+    [SerializeField] private Button leaveToLobbyButton;
+    [Tooltip("OPTIONAL. An 'Are you sure?' panel shown when leaving MID-match, because leaving counts as a forfeit. Leave empty to skip the confirmation.")]
     [SerializeField] private GameObject leaveConfirmPanel;
+    [SerializeField] private Button confirmLeaveButton;
+    [SerializeField] private Button cancelLeaveButton;
 
     [Header("Scene Settings")]
     [SerializeField] private string gameType = "Game";
@@ -164,6 +169,10 @@ public class EndTurnManager : NetworkBehaviour
     private bool isMatchOver = false;
     private bool isResolvingCombat = false;
     private bool leavingToLobby = false;
+
+    // True from the moment this player ends their turn until the next round starts. Used so that un-pausing
+    // doesn't re-enable cards that are supposed to stay locked.
+    private bool localTurnSubmitted = false;
 
     // How many of the opponent's played cards return to their hand after this round's resolution.
     private int opponentCardsReturningToHand = 0;
@@ -331,6 +340,14 @@ public class EndTurnManager : NetworkBehaviour
             damageFlashImage.gameObject.SetActive(true);
         }
 
+        // Leave-to-lobby buttons. OnGoToLobby ignores repeat calls, so it is safe if the same button is also
+        // wired in the Inspector.
+        if (returnToLobbyButton != null) returnToLobbyButton.onClick.AddListener(OnGoToLobby);
+        if (leaveToLobbyButton != null) leaveToLobbyButton.onClick.AddListener(OnLeaveClicked);
+        if (confirmLeaveButton != null) confirmLeaveButton.onClick.AddListener(OnGoToLobby);
+        if (cancelLeaveButton != null) cancelLeaveButton.onClick.AddListener(OnCancelLeave);
+        if (leaveConfirmPanel != null) leaveConfirmPanel.SetActive(false);
+
         CacheAndResetUI();
         UpdateEndTurnButtonVisibility();
         ClearOpponentPanel();
@@ -414,6 +431,7 @@ public class EndTurnManager : NetworkBehaviour
             return;
         }
 
+        localTurnSubmitted = true;
         localHandManager.SetAllCardsInteractable(false);
         localHandManager.SubmitSelectedCardsToHand(selectedHandTransform);
 
@@ -894,6 +912,7 @@ public class EndTurnManager : NetworkBehaviour
         }
 
         yield return StartCoroutine(Routine_ClearAllSubmittedCards());
+        localTurnSubmitted = false;
         ResetTurnUI();
 
         if (timerManager != null)
@@ -1424,19 +1443,30 @@ public class EndTurnManager : NetworkBehaviour
         }
     }
 
+    // Should the player's hand cards be clickable right now, ignoring the pause menu?
+    // (Not during the draw window, not after they've ended their turn, not once the match is over.)
+    private bool ShouldHandBeInteractable()
+    {
+        if (isMatchOver || localTurnSubmitted) return false;
+        if (timerManager != null && timerManager.IsDrawPhaseActive) return false;
+        return true;
+    }
+
     void SetGameBoardInteractable(bool enabled)
     {
-        bool finalState = enabled && !IsGamePaused.Value;
-
+        // `enabled` is the pause state this client was just told about, so use it directly.
+        // This used to also read IsGamePaused.Value. That is a NetworkVariable, and the update that says "resumed"
+        // can reach this client AFTER the resume message does, so on resume it still held the old value (true),
+        // the board stayed locked and the player could not interact after pressing Resume.
         if (endTurnButton != null)
         {
-            endTurnButton.interactable = finalState;
+            endTurnButton.interactable = enabled;
         }
 
         PlayerHandManager localHandManager = GetLocalHandManager();
         if (localHandManager != null)
         {
-            localHandManager.SetAllCardsInteractable(finalState);
+            localHandManager.SetAllCardsInteractable(enabled && ShouldHandBeInteractable());
         }
     }
 
