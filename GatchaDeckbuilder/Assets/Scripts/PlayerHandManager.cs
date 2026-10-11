@@ -45,6 +45,13 @@ public class PlayerHandManager : MonoBehaviour
     [Tooltip("Speed at which cards animate into their fanned positions.")]
     [SerializeField] private float fanLerpSpeed = 12f;
 
+    [Header("Played Cards Layout")]
+    [Tooltip("Horizontal gap between the cards you've locked in for the turn. They sit in a straight row: no arc, no tilt.")]
+    [SerializeField] private float playedCardSpacing = 120f;
+
+    [Tooltip("How fast played cards slide into their row.")]
+    [SerializeField] private float playedCardLerpSpeed = 14f;
+
     [Header("System References")]
     [SerializeField] private DrawTimerManager timerManager;
     [SerializeField] private GachaManager gachaManager;
@@ -59,6 +66,13 @@ public class PlayerHandManager : MonoBehaviour
     private int abandonedRequests = 0;
 
     private Coroutine activeFanCoroutine;
+    private Coroutine activePlayedRowCoroutine;
+
+    // Read-only access so the opponent's card-back fan (GachaUI) can use exactly the same layout numbers.
+    public float CardSpacing => cardSpacing;
+    public float MaxFanAngle => maxFanAngle;
+    public float ArcHeight => arcHeight;
+    public float FanLerpSpeed => fanLerpSpeed;
     private EndTurnManager cachedEndTurnManager;
 
     // ---------- Sprite cache ----------
@@ -418,6 +432,80 @@ public class PlayerHandManager : MonoBehaviour
         }
 
         UpdateHandLayout();
+        LayoutPlayedCards(selectedHandTarget);
+    }
+
+    /// <summary>
+    /// Locked-in cards sit in a plain horizontal row (no arc, no tilt), centred on the played-cards area.
+    /// </summary>
+    private void LayoutPlayedCards(RectTransform target)
+    {
+        if (activePlayedRowCoroutine != null)
+        {
+            StopCoroutine(activePlayedRowCoroutine);
+            activePlayedRowCoroutine = null;
+        }
+
+        submittedCards.RemoveAll(c => c == null);
+        if (target == null || submittedCards.Count == 0) return;
+
+        // A layout group on the played area would fight the manual positions (same as on the hand).
+        LayoutGroup layoutGroup = target.GetComponent<LayoutGroup>();
+        if (layoutGroup != null)
+        {
+            Debug.LogWarning("[PlayerHandManager] Disabling LayoutGroup on the played-cards area so the cards can be laid out in a straight row.");
+            layoutGroup.enabled = false;
+        }
+
+        activePlayedRowCoroutine = StartCoroutine(Routine_AnimatePlayedRow(target));
+    }
+
+    private IEnumerator Routine_AnimatePlayedRow(RectTransform target)
+    {
+        // Snapshot: the live list changes when cards are returned / discarded.
+        List<BalatroCardController> cards = new List<BalatroCardController>(submittedCards);
+        int count = cards.Count;
+
+        float startX = -playedCardSpacing * (count - 1) * 0.5f;
+
+        bool animating = true;
+        while (animating)
+        {
+            animating = false;
+            float blend = 1f - Mathf.Exp(-playedCardLerpSpeed * Time.unscaledDeltaTime);
+
+            for (int i = 0; i < count; i++)
+            {
+                BalatroCardController card = cards[i];
+                if (card == null || card.transform.parent != target) continue;
+
+                RectTransform rt = card.Rect;
+                Vector2 targetPos = new Vector2(startX + (i * playedCardSpacing), 0f);
+
+                rt.anchoredPosition = Vector2.Lerp(rt.anchoredPosition, targetPos, blend);
+                rt.localRotation = Quaternion.Slerp(rt.localRotation, Quaternion.identity, blend);
+
+                if (Vector2.Distance(rt.anchoredPosition, targetPos) > 0.05f ||
+                    Quaternion.Angle(rt.localRotation, Quaternion.identity) > 0.1f)
+                {
+                    animating = true;
+                }
+            }
+
+            yield return null;
+        }
+
+        for (int i = 0; i < count; i++)
+        {
+            BalatroCardController card = cards[i];
+            if (card == null || card.transform.parent != target) continue;
+
+            RectTransform rt = card.Rect;
+            rt.anchoredPosition = new Vector2(startX + (i * playedCardSpacing), 0f);
+            rt.localRotation = Quaternion.identity;
+        }
+
+        activePlayedRowCoroutine = null;
     }
 
     /// <summary>
@@ -443,6 +531,12 @@ public class PlayerHandManager : MonoBehaviour
 
     public void ReturnSubmittedCardsToHand(RectTransform containerTransform)
     {
+        if (activePlayedRowCoroutine != null)
+        {
+            StopCoroutine(activePlayedRowCoroutine);
+            activePlayedRowCoroutine = null;
+        }
+
         submittedCards.RemoveAll(c => c == null);
 
         List<BalatroCardController> cardsToReturn = new List<BalatroCardController>(submittedCards);

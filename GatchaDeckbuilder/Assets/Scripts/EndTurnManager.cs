@@ -160,6 +160,9 @@ public class EndTurnManager : NetworkBehaviour
     private bool isMatchOver = false;
     private bool isResolvingCombat = false;
 
+    // How many of the opponent's played cards return to their hand after this round's resolution.
+    private int opponentCardsReturningToHand = 0;
+
     // Server-side: which clients have finished watching the combat animation and are ready for the next round.
     private readonly HashSet<ulong> clientsReadyForNextRound = new HashSet<ulong>();
 
@@ -372,13 +375,39 @@ public class EndTurnManager : NetworkBehaviour
         }
 
         ulong clientId = rpcParams.Receive.SenderClientId;
+
+        // Ignore a repeat submission from the same player (it would otherwise remove card backs twice).
+        if (pendingTurns.ContainsKey(clientId)) return;
+
         pendingTurns[clientId] = selectedCardIds ?? Array.Empty<int>();
-        Debug.Log($"[Server] Received turn from Client {clientId} with {selectedCardIds.Length} cards.");
+        Debug.Log($"[Server] Received turn from Client {clientId} with {pendingTurns[clientId].Length} cards.");
+
+        // Tell the other player how many cards just left this player's hand. ONLY the count is sent, never the
+        // card IDs, so what was played stays hidden until the reveal.
+        var others = new List<ulong>();
+        foreach (ulong id in NetworkManager.Singleton.ConnectedClientsIds)
+            if (id != clientId) others.Add(id);
+
+        if (others.Count > 0)
+        {
+            OpponentPlayedCardsClientRpc(pendingTurns[clientId].Length, new ClientRpcParams
+            {
+                Send = new ClientRpcSendParams { TargetClientIds = others.ToArray() }
+            });
+        }
 
         if (pendingTurns.Count >= 2)
         {
             ResolveAndBroadcastCombat();
         }
+    }
+
+    [ClientRpc]
+    private void OpponentPlayedCardsClientRpc(int cardCount, ClientRpcParams rpcParams = default)
+    {
+        // Opponent's cards moved from their hand to the table: remove that many card backs.
+        foreach (GachaUI ui in FindObjectsByType<GachaUI>(FindObjectsSortMode.None))
+            ui.RemoveOpponentCardBacks(cardCount);
     }
 
     private void ResolveAndBroadcastCombat()
@@ -508,6 +537,7 @@ public class EndTurnManager : NetworkBehaviour
     private IEnumerator Routine_ResolveCombatSequence(TurnResultData result)
     {
         isResolvingCombat = true;
+        opponentCardsReturningToHand = CountOpponentCardsReturningToHand(result.opponentCardIds);
         yield return new WaitForSeconds(cardMovementWaitDelay);
 
         List<BalatroCardController> playerCards = GetControllersFromTransform(selectedHandTransform);
@@ -649,6 +679,30 @@ public class EndTurnManager : NetworkBehaviour
         foreach (var card in opponentList) card.ResetHighlight();
     }
 
+    // Same rule the local player's hand uses: Action cards and "Forever" Support cards go back to the hand,
+    // "Immediate" Support cards are spent and gone.
+    private int CountOpponentCardsReturningToHand(int[] opponentCardIds)
+    {
+        if (opponentCardIds == null) return 0;
+
+        var deckMgr = FindFirstObjectByType<DeckManager>();
+        int returning = 0;
+
+        foreach (int netId in opponentCardIds)
+        {
+            if (!CardNetId.IsSupport(netId))
+            {
+                returning++;
+                continue;
+            }
+
+            int id = CardNetId.Decode(netId);
+            var supportCard = deckMgr != null ? deckMgr.loadedSupportCards?.Find(c => c.Id == id) : null;
+            if (supportCard != null && supportCard.EffectType == "Forever") returning++;
+        }
+        return returning;
+    }
+
     private List<BalatroCardController> InstantiateOpponentCards(int[] opponentCardIds)
     {
         List<BalatroCardController> opponentCards = new List<BalatroCardController>();
@@ -698,6 +752,7 @@ public class EndTurnManager : NetworkBehaviour
                         Sprite sprite = GetCardSprite(cardId, false);
                         visual.Setup(supportCard, sprite);
                         controller.SetCategory(CardCategory.Support);
+                        controller.SetCardMetadata(supportCard.EffectType == "Forever");
                     }
                 }
                 opponentCards.Add(controller);
@@ -917,6 +972,15 @@ public class EndTurnManager : NetworkBehaviour
             {
                 if (card != null) Destroy(card.gameObject);
             }
+        }
+
+        // The opponent's non-spent cards go back to their hand, so their card-back stack grows back by that many.
+        // Spent Immediate Support cards are not added back, so they stay gone from the stack.
+        if (opponentCardsReturningToHand > 0)
+        {
+            foreach (GachaUI ui in FindObjectsByType<GachaUI>(FindObjectsSortMode.None))
+                ui.AddOpponentCardBacks(opponentCardsReturningToHand);
+            opponentCardsReturningToHand = 0;
         }
 
         yield return null;

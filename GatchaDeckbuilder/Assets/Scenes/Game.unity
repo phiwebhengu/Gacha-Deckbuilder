@@ -544,6 +544,8 @@ MonoBehaviour:
   maxFanAngle: 15
   arcHeight: 35
   fanLerpSpeed: 12
+  playedCardSpacing: 150
+  playedCardLerpSpeed: 14
   timerManager: {fileID: 1243131124}
   gachaManager: {fileID: 8834658468697125924}
   juiceFXManager: {fileID: 441985030}
@@ -1475,6 +1477,13 @@ MonoBehaviour:
   pullSupportButton: {fileID: 1059806172}
   cardBackPrefab: {fileID: 2682837092641137224, guid: 376ca7ad8e442ba41b967c79d759df7d, type: 3}
   OpponentCardContainer: {fileID: 1667410413}
+  matchPlayerHandFan: 1
+  mirrorFan: 1
+  spacingMultiplier: 1
+  cardSpacing: 120
+  maxFanAngle: 18
+  arcHeight: 35
+  fanLerpSpeed: 12
   drawTimerManager: {fileID: 1243131124}
   playerHandManager: {fileID: 105399625}
 --- !u!114 &441985030
