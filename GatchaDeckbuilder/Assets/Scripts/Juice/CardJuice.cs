@@ -30,8 +30,14 @@ public class CardJuice : MonoBehaviour, IPointerEnterHandler, IPointerExitHandle
     private bool isSelected = false;
     private bool isHovered = false;
 
+    // While true, combat highlight colors own the card's color and hover/select tints are ignored.
+    private bool hasColorOverride = false;
+
     private Coroutine activeScaleCoroutine;
     private Coroutine activeColorCoroutine;
+
+    // Frame-rate independent smoothing factor. (Time.deltaTime * speed overshoots / snaps on lag spikes.)
+    private float Blend => 1f - Mathf.Exp(-transitionSpeed * Time.unscaledDeltaTime);
 
     private void Awake()
     {
@@ -97,13 +103,38 @@ public class CardJuice : MonoBehaviour, IPointerEnterHandler, IPointerExitHandle
         }
         else
         {
-            Vector3 targetScale = isHovered ? hoveredScale : normalScale;
-            Color targetColor = isHovered ? highlightColor : normalColor;
-
-            ApplyScale(targetScale);
-            ApplyColor(targetColor);
+            ApplyScale(isHovered ? hoveredScale : normalScale);
+            ApplyColor(StateColor());
             PlaySFX(deselectSFX);
         }
+    }
+
+    // --- COMBAT HIGHLIGHT OVERRIDE (used by BalatroCardController) ---
+
+    /// <summary>Takes over the card color (e.g. attack/defense highlight) without fighting the hover/select lerps.</summary>
+    public void SetColorOverride(Color color)
+    {
+        hasColorOverride = true;
+        if (activeColorCoroutine != null)
+        {
+            StopCoroutine(activeColorCoroutine);
+            activeColorCoroutine = null;
+        }
+        if (cardImage != null) cardImage.color = color;
+    }
+
+    /// <summary>Gives the color back to the normal hover/selected logic.</summary>
+    public void ClearColorOverride()
+    {
+        if (!hasColorOverride) return;
+        hasColorOverride = false;
+        ApplyColor(StateColor());
+    }
+
+    private Color StateColor()
+    {
+        if (isSelected) return selectedColor;
+        return isHovered ? highlightColor : normalColor;
     }
 
     // --- SMOOTH INTERPOLATION HELPERS ---
@@ -111,12 +142,26 @@ public class CardJuice : MonoBehaviour, IPointerEnterHandler, IPointerExitHandle
     private void ApplyScale(Vector3 targetScale)
     {
         if (activeScaleCoroutine != null) StopCoroutine(activeScaleCoroutine);
+
+        if (!isActiveAndEnabled)
+        {
+            transform.localScale = targetScale;
+            return;
+        }
         activeScaleCoroutine = StartCoroutine(Routine_LerpScale(targetScale));
     }
 
     private void ApplyColor(Color targetColor)
     {
+        if (hasColorOverride) return; // combat highlight owns the color right now
+
         if (activeColorCoroutine != null) StopCoroutine(activeColorCoroutine);
+
+        if (!isActiveAndEnabled)
+        {
+            if (cardImage != null) cardImage.color = targetColor;
+            return;
+        }
         activeColorCoroutine = StartCoroutine(Routine_LerpColor(targetColor));
     }
 
@@ -124,20 +169,22 @@ public class CardJuice : MonoBehaviour, IPointerEnterHandler, IPointerExitHandle
     {
         while (Vector3.Distance(transform.localScale, targetScale) > 0.001f)
         {
-            transform.localScale = Vector3.Lerp(transform.localScale, targetScale, Time.deltaTime * transitionSpeed);
+            transform.localScale = Vector3.Lerp(transform.localScale, targetScale, Blend);
             yield return null;
         }
         transform.localScale = targetScale;
+        activeScaleCoroutine = null;
     }
 
     private IEnumerator Routine_LerpColor(Color targetColor)
     {
-        while (cardImage != null && Vector4.Distance(cardImage.color, targetColor) > 0.001f)
+        while (cardImage != null && !hasColorOverride && Vector4.Distance(cardImage.color, targetColor) > 0.001f)
         {
-            cardImage.color = Color.Lerp(cardImage.color, targetColor, Time.deltaTime * transitionSpeed);
+            cardImage.color = Color.Lerp(cardImage.color, targetColor, Blend);
             yield return null;
         }
-        if (cardImage != null) cardImage.color = targetColor;
+        if (cardImage != null && !hasColorOverride) cardImage.color = targetColor;
+        activeColorCoroutine = null;
     }
 
     private void PlaySFX(AudioClip clip)
@@ -154,9 +201,12 @@ public class CardJuice : MonoBehaviour, IPointerEnterHandler, IPointerExitHandle
     {
         isSelected = false;
         isHovered = false;
+        hasColorOverride = false;
 
         if (activeScaleCoroutine != null) StopCoroutine(activeScaleCoroutine);
         if (activeColorCoroutine != null) StopCoroutine(activeColorCoroutine);
+        activeScaleCoroutine = null;
+        activeColorCoroutine = null;
 
         transform.localScale = normalScale;
         if (cardImage != null) cardImage.color = normalColor;
