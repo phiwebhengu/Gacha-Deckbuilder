@@ -21,13 +21,13 @@ ID,Name,Category,Tier,WeaponType,Value,Role,Copies
 20,Large Cryo Slime,Monster,Common,,1,Defense,4
 21,Sacrificial Bow,Weapon,Rare,Bow,6,Defense,1
 22,Rightful Reward,Weapon,Rare,Polearm,6,Defense,1
-23,Flowing Purity,Weapon,Rare,Catalyst,6,Defense,1
+23,Flowing Purity,Weapon,Rare,Catalyst,6,Attack,1
 24,Favonius Sword,Weapon,Rare,Sword,7,Attack,1
-25,The Bell,Weapon,Rare,Claymore,7,Attack,1
+25,The Bell,Weapon,Rare,Claymore,7,Defense,1
 26,Viridescent Venerer,Artefact,Common,,2,Defense,2
-27,Archaic Petra,Artefact,Common,,2,Attack,2
-28,Thundering Fury,Artefact,Common,,2,Defense,2
+27,Archaic Petra,Artefact,Common,,2,Defense,2
+28,Thundering Fury,Artefact,Common,,2,Attack,2
 29,Deepwood Memories,Artefact,Common,,2,Attack,2
-30,Heart of Depth,Artefact,Common,,2,Defense,2
+30,Heart of Depth,Artefact,Common,,2,Attack,2
 31,Crimson Witch of Flames,Artefact,Common,,2,Attack,2
 32,Blizzard Strayer,Artefact,Common,,2,Defense,2
