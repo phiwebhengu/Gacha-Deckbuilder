@@ -88,7 +88,7 @@ public class EndTurnManager : NetworkBehaviour
     [SerializeField] private float cardMovementWaitDelay = 0.5f;
     [SerializeField] private float phaseTransitionPause = 0.4f;
 
-    [Header("✨ AUDIO SETTINGS ✨")]
+    [Header("Audio Setting")]
     [SerializeField] private AudioSource audioSource;
     [Header("Incremental Points Sound")]
     [SerializeField] private AudioClip pointCountSFX;
@@ -103,14 +103,14 @@ public class EndTurnManager : NetworkBehaviour
     [SerializeField] private AudioClip defenseHighlightSFX;
     [SerializeField] private AudioClip supportHighlightSFX;
 
-    [Header("✨ JUICE: Damage Flash UI ✨")]
+    [Header("JUICE: Damage Flash UI")]
     [Tooltip("Full screen red overlay or vignette Image component for player taking damage.")]
     [SerializeField] private Image damageFlashImage;
     [SerializeField] private float flashInDuration = 0.05f;
     [SerializeField] private float flashOutDuration = 0.25f;
     [SerializeField][Range(0f, 1f)] private float maxFlashAlpha = 0.6f;
 
-    [Header("✨ JUICE: Damage UI Shake Settings ✨")]
+    [Header("JUICE: Damage UI Shake Settings")]
     [Tooltip("Optional parent panel or transform overrides for health shake. If null, defaults to playerHPText/opponentHPText RectTransforms.")]
     [SerializeField] private RectTransform playerHPRectTransformOverride;
     [SerializeField] private RectTransform opponentHPRectTransformOverride;
@@ -146,8 +146,12 @@ public class EndTurnManager : NetworkBehaviour
     [SerializeField] private Button forfeitButton;
     [SerializeField] private Button pauseButton;
 
+    [Header("Leave To Lobby")]
+    [SerializeField] private GameObject leaveConfirmPanel;
+
     [Header("Scene Settings")]
     [SerializeField] private string gameType = "Game";
+    [SerializeField] private string lobbySceneName = "Lobby";
 
     [Header("Match Settings")]
     [SerializeField] private int maxRounds = 4;
@@ -159,6 +163,7 @@ public class EndTurnManager : NetworkBehaviour
 
     private bool isMatchOver = false;
     private bool isResolvingCombat = false;
+    private bool leavingToLobby = false;
 
     // How many of the opponent's played cards return to their hand after this round's resolution.
     private int opponentCardsReturningToHand = 0;
@@ -204,6 +209,11 @@ public class EndTurnManager : NetworkBehaviour
         {
             NetworkManager.Singleton.OnClientDisconnectCallback += HandleClientDisconnect;
         }
+        else
+        {
+            // Joining player: notice when the host disappears (they left, closed the game, or the connection dropped).
+            NetworkManager.Singleton.OnClientDisconnectCallback += HandleDisconnectedFromHost;
+        }
 
         GameEnded.OnValueChanged += OnGameEndedChanged;
     }
@@ -214,7 +224,16 @@ public class EndTurnManager : NetworkBehaviour
         {
             NetworkManager.Singleton.OnClientDisconnectCallback -= HandleClientDisconnect;
         }
+        else if (!IsServer && NetworkManager.Singleton != null)
+        {
+            NetworkManager.Singleton.OnClientDisconnectCallback -= HandleDisconnectedFromHost;
+        }
         GameEnded.OnValueChanged -= OnGameEndedChanged;
+
+        // On a joining player the networked scene objects despawn when the host goes away. Depending on the order
+        // Netcode runs things in, this can happen before the disconnect callback, so handle it here too.
+        // (Ignored when we are leaving ourselves, or the match has already ended.)
+        if (!IsServer) ShowMatchEndedByDisconnect("DISCONNECTED (Host left the match)");
     }
 
     private void OnGameEndedChanged(bool oldVal, bool newVal)
@@ -227,6 +246,7 @@ public class EndTurnManager : NetworkBehaviour
 
             isMatchOver = true;
             StopAllCoroutines();
+            ResetPauseState();
 
             if (gameOverPanel != null) gameOverPanel.SetActive(true);
             if (returnToLobbyButton != null) returnToLobbyButton.gameObject.SetActive(true);
@@ -245,6 +265,43 @@ public class EndTurnManager : NetworkBehaviour
             pendingTurns.Remove(clientId);
             Debug.Log($"[Server] Client {clientId} disconnected during turn. Clearing pending state.");
         }
+
+        clientsReadyForNextRound.Remove(clientId);
+
+        // The other player disconnected mid-match (closed the game / lost connection): the remaining player wins.
+        // (A player who leaves on purpose forfeits first, so the match is already over and this does nothing.)
+        if (NetworkManager.Singleton != null && clientId != NetworkManager.Singleton.LocalClientId)
+        {
+            ShowMatchEndedByDisconnect("VICTORY! (Opponent disconnected)");
+        }
+    }
+
+    private void HandleDisconnectedFromHost(ulong clientId)
+    {
+        ShowMatchEndedByDisconnect("DISCONNECTED (Host left the match)");
+    }
+
+    private void ShowMatchEndedByDisconnect(string message)
+    {
+        if (isMatchOver || leavingToLobby) return;
+
+        isMatchOver = true;
+        isResolvingCombat = false;
+        StopAllCoroutines();
+        ResetPauseState();
+
+        // GameEnded is server-write-only. This also locks the server against further turn submissions.
+        if (IsServer && IsSpawned) GameEnded.Value = true;
+
+        if (gameOverPanel != null) gameOverPanel.SetActive(true);
+        if (resultText != null)
+        {
+            resultText.gameObject.SetActive(true);
+            resultText.text = message;
+        }
+
+        if (endTurnButton != null) endTurnButton.gameObject.SetActive(false);
+        if (returnToLobbyButton != null) returnToLobbyButton.gameObject.SetActive(true);
     }
 
     private void Start()
@@ -1170,8 +1227,12 @@ public class EndTurnManager : NetworkBehaviour
     [ClientRpc]
     void GameOverDueToForfeitClientRpc(int winner, ulong forfeiterId)
     {
+        // If we are the one leaving, don't show a game-over screen or stop the coroutine that is taking us to the lobby.
+        if (leavingToLobby) return;
+
         isMatchOver = true;
         StopAllCoroutines();
+        ResetPauseState();
 
         bool isLocalPlayerWinner = (NetworkManager.LocalClientId != forfeiterId);
 
@@ -1185,24 +1246,85 @@ public class EndTurnManager : NetworkBehaviour
         if (returnToLobbyButton != null) returnToLobbyButton.gameObject.SetActive(true);
     }
 
-    public void OnGoToLobby()
+    // ============================ LEAVE TO LOBBY ============================
+
+    private bool IsMatchRunning => IsSpawned && !isMatchOver && !GameEnded.Value;
+
+    // The pause menu freezes time (Time.timeScale = 0) on BOTH players. Always un-freeze before leaving or showing
+    // a game-over screen, otherwise the lobby scene would load frozen.
+    private void ResetPauseState()
     {
-        StartCoroutine(ReturnToLobbyRoutine());
+        Time.timeScale = 1f;
+        if (pausePanel != null) pausePanel.SetActive(false);
+        if (leaveConfirmPanel != null) leaveConfirmPanel.SetActive(false);
     }
 
-    System.Collections.IEnumerator ReturnToLobbyRoutine()
+    /// <summary>
+    /// Hook this to a "Leave" button. Mid-match it asks for confirmation first (if a confirm panel is assigned),
+    /// because leaving counts as a forfeit. After the match it just leaves.
+    /// </summary>
+    public void OnLeaveClicked()
     {
-        StopAllCoroutines();
+        if (leavingToLobby) return;
 
-        if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening)
+        if (IsMatchRunning && leaveConfirmPanel != null)
         {
-            NetworkManager.Singleton.Shutdown();
+            leaveConfirmPanel.SetActive(true);
+            return;
         }
 
-        string lobbySceneName = "Lobby";
-        UnityEngine.SceneManagement.SceneManager.LoadScene(lobbySceneName);
+        OnGoToLobby();
+    }
 
-        yield return null;
+    public void OnCancelLeave()
+    {
+        if (leaveConfirmPanel != null) leaveConfirmPanel.SetActive(false);
+    }
+
+    /// <summary>
+    /// Leaves for the lobby right now. Works mid-match (counts as a forfeit, the opponent is told they won)
+    /// and after the match has ended (no forfeit needed).
+    /// </summary>
+    public void OnGoToLobby()
+    {
+        if (leavingToLobby) return;
+        leavingToLobby = true;
+
+        bool matchWasRunning = IsMatchRunning;
+
+        isMatchOver = true;
+        isResolvingCombat = false;
+
+        // Stop the combat animation etc. The leave routine is started AFTER this, so it isn't stopped too.
+        StopAllCoroutines();
+        ResetPauseState();
+
+        // Mid-match: tell the server so the opponent gets a proper VICTORY screen instead of a dead game.
+        if (matchWasRunning) SubmitForfeitServerRpc();
+
+        StartCoroutine(Routine_LeaveToLobby(matchWasRunning));
+    }
+
+    private IEnumerator Routine_LeaveToLobby(bool sentForfeit)
+    {
+        // Let the forfeit message actually leave before the connection closes (messages go out at the end of the frame).
+        if (sentForfeit) yield return new WaitForSecondsRealtime(0.35f);
+
+        NetworkManager nm = NetworkManager.Singleton;
+        if (nm != null && nm.IsListening)
+        {
+            nm.Shutdown();
+
+            // Wait (briefly) for the shutdown to finish before changing scene.
+            float waited = 0f;
+            while (nm != null && nm.IsListening && waited < 2f)
+            {
+                waited += Time.unscaledDeltaTime;
+                yield return null;
+            }
+        }
+
+        UnityEngine.SceneManagement.SceneManager.LoadScene(lobbySceneName);
     }
 
     public void RequestPause()
