@@ -13,7 +13,7 @@ public class DrawTimerManager : NetworkBehaviour
     [SerializeField] private float roundTextHoldDuration = 0.6f;
 
     [Header("Timer Settings")]
-    [SerializeField] private float drawWindowDuration = 10f; 
+    [SerializeField] private float drawWindowDuration = 10f; // Updated to 10s window
 
     [Header("Countdown Juice")]
     [SerializeField] private TextMeshProUGUI countdownText;
@@ -22,7 +22,6 @@ public class DrawTimerManager : NetworkBehaviour
     [SerializeField] private float shrinkSpeed = 10f;
 
     [Header("Countdown Audio")]
-    [Tooltip("No longer used (sounds now play through SfxPool so pitch changes can't bend other sounds). Kept so your Inspector reference isn't lost.")]
     [SerializeField] private AudioSource audioSource;
     [SerializeField] private AudioClip countdownBeepClip;
     [SerializeField] private AudioClip timerTickClip; // Optional distinct tick SFX (falls back to countdownBeepClip if null)
@@ -45,7 +44,7 @@ public class DrawTimerManager : NetworkBehaviour
     private int currentRound = 1;
     private bool isTimerRunning = false;
     private bool playerHasDrawn = false;
-    private float timeRemaining;
+    private double roundStartTime;
     private int lastTickIndex = -1;
 
     public bool IsDrawPhaseActive => isTimerRunning;
@@ -54,9 +53,11 @@ public class DrawTimerManager : NetworkBehaviour
 
     private void Awake()
     {
-        // Netcode needs this: an unfocused instance (e.g. the 2nd player window on the same PC) otherwise
-        // stops updating and looks like it is lagging / frozen.
-        Application.runInBackground = true;
+        // Auto-get AudioSource if not manually assigned
+        if (audioSource == null)
+        {
+            audioSource = GetComponent<AudioSource>();
+        }
 
         // Hide all UI elements initially
         if (countdownText != null) countdownText.gameObject.SetActive(false);
@@ -120,10 +121,7 @@ public class DrawTimerManager : NetworkBehaviour
                 roundDisplayCanvasGroup.alpha = Mathf.Lerp(1f, 0f, elapsed / roundTextFadeDuration);
                 yield return null;
             }
-
-            // Was "= 1f": the text faded out and then instantly popped back to full opacity.
-            // (alpha is set back to 1 at the START of the next round's sequence above.)
-            roundDisplayCanvasGroup.alpha = 0f;
+            roundDisplayCanvasGroup.alpha = 1f;
         }
 
         yield return StartCoroutine(Routine_ExecuteCountdown());
@@ -157,8 +155,7 @@ public class DrawTimerManager : NetworkBehaviour
         while (elapsedTime < wordDisplayDuration)
         {
             elapsedTime += Time.deltaTime;
-            float blend = 1f - Mathf.Exp(-shrinkSpeed * Time.deltaTime);
-            textRect.localScale = Vector3.Lerp(textRect.localScale, Vector3.one, blend);
+            textRect.localScale = Vector3.Lerp(textRect.localScale, Vector3.one, Time.deltaTime * shrinkSpeed);
             yield return null;
         }
         textRect.localScale = Vector3.one;
@@ -166,7 +163,11 @@ public class DrawTimerManager : NetworkBehaviour
 
     private void PlaySound(AudioClip clip, float pitch)
     {
-        SFXPool.Play(clip, pitch);
+        if (audioSource != null && clip != null)
+        {
+            audioSource.pitch = pitch;
+            audioSource.PlayOneShot(clip);
+        }
     }
 
     private void StartDrawPhase()
@@ -174,11 +175,19 @@ public class DrawTimerManager : NetworkBehaviour
         playerHasDrawn = false;
         isTimerRunning = true;
         lastTickIndex = -1;
-        timeRemaining = drawWindowDuration;
 
         if (timerText != null)
         {
             timerText.gameObject.SetActive(true);
+        }
+
+        if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening)
+        {
+            roundStartTime = NetworkManager.Singleton.LocalTime.Time;
+        }
+        else
+        {
+            roundStartTime = Time.time;
         }
 
         OnDrawPhaseChanged?.Invoke(true);
@@ -189,10 +198,14 @@ public class DrawTimerManager : NetworkBehaviour
     {
         if (!isTimerRunning) return;
 
-        // Plain local countdown. This used to read NetworkManager.LocalTime, which on a joining client is
-        // continuously re-synced by Netcode (and can hard-reset), so the timer could stutter or jump.
-        // It also now pauses properly when Time.timeScale = 0 (pause menu).
-        timeRemaining -= Time.deltaTime;
+        if (NetworkManager.Singleton == null) return;
+
+        double currentTime = NetworkManager.Singleton.IsListening
+            ? NetworkManager.Singleton.LocalTime.Time
+            : Time.time;
+
+        double elapsed = currentTime - roundStartTime;
+        float timeRemaining = (float)(drawWindowDuration - elapsed);
 
         if (timeRemaining <= 0f)
         {
@@ -201,17 +214,17 @@ public class DrawTimerManager : NetworkBehaviour
             return;
         }
 
-        float elapsed = drawWindowDuration - timeRemaining;
-        ProcessTimerAudioTicks(elapsed, timeRemaining);
+        // Handle Audio Ticks based on remaining time
+        ProcessTimerAudioTicks((float)elapsed, timeRemaining);
 
         float fillRatio = Mathf.Clamp01(timeRemaining / drawWindowDuration);
         UpdateTimerUI(fillRatio, timeRemaining);
     }
 
-    private void ProcessTimerAudioTicks(float elapsedSeconds, float remaining)
+    private void ProcessTimerAudioTicks(float elapsedSeconds, float timeRemaining)
     {
         // Calculate effective tick rate based on remaining time threshold
-        bool isUrgent = remaining <= urgentThreshold;
+        bool isUrgent = timeRemaining <= urgentThreshold;
         float interval = isUrgent ? urgentTickInterval : normalTickInterval;
         float currentPitch = isUrgent ? urgentTickPitch : normalPitch;
 
@@ -228,14 +241,23 @@ public class DrawTimerManager : NetworkBehaviour
 
     public void NotifyCardsDrawn()
     {
-        // Local flag only. Each player's timer decides for THEMSELVES whether they get the auto-draw penalty.
-        // (The old version also sent a ServerRpc that set this flag on the HOST's copy of this component, so
-        // whenever the client drew, the host was wrongly excused from the penalty.)
         if (isTimerRunning)
         {
             playerHasDrawn = true;
             Debug.Log("[DrawTimer] Local instance registered: Player drew cards!");
+
+            if (!IsServer && IsSpawned)
+            {
+                NotifyCardsDrawnServerRpc();
+            }
         }
+    }
+
+    [ServerRpc(RequireOwnership = false)]
+    private void NotifyCardsDrawnServerRpc()
+    {
+        playerHasDrawn = true;
+        Debug.Log("[DrawTimer] Server received draw notification from client!");
     }
 
     private void EndDrawPhase()
@@ -275,11 +297,11 @@ public class DrawTimerManager : NetworkBehaviour
         }
     }
 
-    private void UpdateTimerUI(float fillRatio, float remaining)
+    private void UpdateTimerUI(float fillRatio, float timeRemaining)
     {
         if (timerText != null)
         {
-            timerText.text = Mathf.CeilToInt(Mathf.Max(0f, remaining)).ToString();
+            timerText.text = Mathf.CeilToInt(Mathf.Max(0f, timeRemaining)).ToString();
         }
     }
 }

@@ -1,7 +1,6 @@
-﻿using System;
-using UnityEngine;
-using UnityEngine.EventSystems;
+﻿using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.EventSystems;
 
 public enum CardCategory { Attack, Defense, Support }
 
@@ -40,39 +39,17 @@ public class BalatroCardController : MonoBehaviour, IPointerClickHandler, IPoint
     private RectTransform rectTransform;
     private EndTurnManager endTurnManager;
 
-    public event Action<BalatroCardController> SelectionChanged;
-
-    public RectTransform Rect
-    {
-        get
-        {
-            if (rectTransform == null) rectTransform = GetComponent<RectTransform>();
-            return rectTransform;
-        }
-    }
-
-    // One lookup shared by every card instead of a FindFirstObjectByType in every card's Awake.
-    private static EndTurnManager sharedEndTurnManager;
-
-    private EndTurnManager EndTurn
-    {
-        get
-        {
-            if (endTurnManager == null)
-            {
-                if (sharedEndTurnManager == null) sharedEndTurnManager = FindFirstObjectByType<EndTurnManager>();
-                endTurnManager = sharedEndTurnManager;
-            }
-            return endTurnManager;
-        }
-    }
-
     private void Awake()
     {
         rectTransform = GetComponent<RectTransform>();
         if (cardButton == null) cardButton = GetComponent<Button>();
         if (cardImage == null) cardImage = GetComponent<Image>();
         if (cardJuice == null) cardJuice = GetComponent<CardJuice>();
+
+        if (endTurnManager == null)
+        {
+            endTurnManager = FindFirstObjectByType<EndTurnManager>();
+        }
     }
 
     public void SetEndTurnManager(EndTurnManager manager) => endTurnManager = manager;
@@ -86,12 +63,6 @@ public class BalatroCardController : MonoBehaviour, IPointerClickHandler, IPoint
         isInteractable = state;
         if (cardButton != null) cardButton.interactable = state;
         if (cardImage != null) cardImage.raycastTarget = state;
-    }
-
-    /// <summary>Stops the card from receiving hover/click events while it is flying across the screen.</summary>
-    public void LockForFlight()
-    {
-        if (cardImage != null) cardImage.raycastTarget = false;
     }
 
     public void OnPointerEnter(PointerEventData eventData)
@@ -127,30 +98,36 @@ public class BalatroCardController : MonoBehaviour, IPointerClickHandler, IPoint
     public void ToggleSelection()
     {
         if (!isInteractable) return;
-        SetSelected(!IsSelected);
-    }
 
-    public void ForceDeselect()
-    {
-        if (!IsSelected) return;
-        SetSelected(false);
-    }
-
-    private void SetSelected(bool selected)
-    {
-        IsSelected = selected;
+        IsSelected = !IsSelected;
+        UpdateSelectionVisuals(IsSelected);
 
         if (cardJuice != null)
         {
             cardJuice.SetSelectedState(IsSelected, isHovered);
         }
 
-        // Hand manager re-fans the hand (including this card's lift).
-        SelectionChanged?.Invoke(this);
-
-        if (EndTurn != null)
+        if (endTurnManager != null)
         {
-            EndTurn.UpdateEndTurnButtonVisibility();
+            endTurnManager.UpdateEndTurnButtonVisibility();
+        }
+    }
+
+    public void ForceDeselect()
+    {
+        if (!IsSelected) return;
+
+        IsSelected = false;
+        UpdateSelectionVisuals(false);
+
+        if (cardJuice != null)
+        {
+            cardJuice.SetSelectedState(false, isHovered);
+        }
+
+        if (endTurnManager != null)
+        {
+            endTurnManager.UpdateEndTurnButtonVisibility();
         }
     }
 
@@ -161,15 +138,15 @@ public class BalatroCardController : MonoBehaviour, IPointerClickHandler, IPoint
     {
         IsSelected = false;
         isHovered = false;
+        ResetHighlight();
 
         if (cardJuice != null)
         {
             cardJuice.ForceResetCardState();
         }
-        else
+        else if (rectTransform != null)
         {
-            ResetHighlight();
-            if (rectTransform != null) rectTransform.localScale = Vector3.one;
+            rectTransform.localScale = Vector3.one;
         }
 
         if (cardImage != null)
@@ -177,29 +154,19 @@ public class BalatroCardController : MonoBehaviour, IPointerClickHandler, IPoint
             cardImage.raycastTarget = true;
         }
 
-        if (EndTurn != null)
+        if (endTurnManager != null)
         {
-            EndTurn.UpdateEndTurnButtonVisibility();
+            endTurnManager.UpdateEndTurnButtonVisibility();
         }
     }
 
-    /// <summary>
-    /// Neutral look (not selected / not hovered / no highlight) WITHOUT touching interactability.
-    /// Used when a card is locked in for the turn so it looks the same as the opponent's revealed cards.
-    /// </summary>
-    public void ResetVisualsOnly()
+    private void UpdateSelectionVisuals(bool selected)
     {
-        IsSelected = false;
-        isHovered = false;
-
-        if (cardJuice != null)
+        if (rectTransform != null)
         {
-            cardJuice.ForceResetCardState();
-        }
-        else
-        {
-            ResetHighlight();
-            if (rectTransform != null) rectTransform.localScale = Vector3.one;
+            Vector2 currentPos = rectTransform.anchoredPosition;
+            float shift = selected ? selectYOffset : -selectYOffset;
+            rectTransform.anchoredPosition = new Vector2(currentPos.x, currentPos.y + shift);
         }
     }
 
@@ -215,13 +182,11 @@ public class BalatroCardController : MonoBehaviour, IPointerClickHandler, IPoint
             _ => highlightColor
         };
 
-        if (cardJuice != null) cardJuice.SetColorOverride(targetHighlight);
-        else if (cardImage != null) cardImage.color = targetHighlight;
+        if (cardImage != null) cardImage.color = targetHighlight;
     }
 
     public void ResetHighlight()
     {
-        if (cardJuice != null) cardJuice.ClearColorOverride();
-        else if (cardImage != null) cardImage.color = defaultColor;
+        if (cardImage != null) cardImage.color = defaultColor;
     }
 }

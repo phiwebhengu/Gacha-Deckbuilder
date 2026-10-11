@@ -43,19 +43,6 @@ public struct TurnResultData : INetworkSerializable
     }
 }
 
-/// <summary>
-/// Action and Support cards can share the same numeric Id (each CSV has its own numbering), so an Id on its own
-/// doesn't say which deck a card is from. Support cards are sent over the network with an offset so the receiver
-/// (server damage math + opponent card display) always looks in the right deck.
-/// </summary>
-public static class CardNetId
-{
-    public const int SupportOffset = 10000;
-    public static int Encode(int cardId, bool isSupport) => isSupport ? cardId + SupportOffset : cardId;
-    public static bool IsSupport(int netId) => netId >= SupportOffset;
-    public static int Decode(int netId) => netId >= SupportOffset ? netId - SupportOffset : netId;
-}
-
 public class EndTurnManager : NetworkBehaviour
 {
     [Header("Health & Points Settings")]
@@ -158,15 +145,6 @@ public class EndTurnManager : NetworkBehaviour
     private bool isPlayer1 = true;
 
     private bool isMatchOver = false;
-    private bool isResolvingCombat = false;
-
-    // Server-side: which clients have finished watching the combat animation and are ready for the next round.
-    private readonly HashSet<ulong> clientsReadyForNextRound = new HashSet<ulong>();
-
-    // Juice bookkeeping (one running pop per text, one camera shake, a fixed "home" position per shaken rect)
-    private readonly Dictionary<Transform, Coroutine> activePops = new Dictionary<Transform, Coroutine>();
-    private readonly Dictionary<RectTransform, Vector2> restPositions = new Dictionary<RectTransform, Vector2>();
-    private Coroutine activeCameraShake;
     private int currentRound = 1;
     private bool timerRunning = true;
     private float lastPauseRequestTime = 0f;
@@ -191,8 +169,9 @@ public class EndTurnManager : NetworkBehaviour
 
     public override void OnNetworkSpawn()
     {
-        // The host is always Player 1. (ConnectedClientsIds is a server-side list, so don't rely on it from a joining client.)
-        isPlayer1 = IsServer;
+        var allClients = new List<ulong>(NetworkManager.Singleton.ConnectedClientsIds);
+        allClients.Sort();
+        isPlayer1 = (NetworkManager.LocalClientId == allClients[0]);
 
         currentPlayerHP = isPlayer1 ? Player1_HP.Value : Player2_HP.Value;
         currentOpponentHP = isPlayer1 ? Player2_HP.Value : Player1_HP.Value;
@@ -218,10 +197,6 @@ public class EndTurnManager : NetworkBehaviour
     {
         if (newVal && !isMatchOver)
         {
-            // The host can finish its animations first and flip GameEnded while this client is still playing its
-            // own combat sequence. Let the local sequence finish; it will show the real VICTORY/DEFEAT/DRAW text.
-            if (isResolvingCombat) return;
-
             isMatchOver = true;
             StopAllCoroutines();
 
@@ -461,28 +436,21 @@ public class EndTurnManager : NetworkBehaviour
 
         void ProcessCards(int[] ids, ref int attack, ref int defense)
         {
-            foreach (int netId in ids)
+            foreach (int id in ids)
             {
-                int id = CardNetId.Decode(netId);
-
-                if (CardNetId.IsSupport(netId))
-                {
-                    // Support cards add no attack/defense here (a clashing Action Id used to be counted by mistake).
-                    var supportCard = deckMgr.loadedSupportCards?.Find(c => c.Id == id);
-                    if (supportCard == null)
-                        Debug.LogWarning($"[EndTurnManager] Support card ID {id} not found in Support list!");
-                    continue;
-                }
-
                 var actionCard = deckMgr.loadedActionCards?.Find(c => c.Id == id);
-                if (actionCard == null)
+                if (actionCard != null)
                 {
-                    Debug.LogWarning($"[EndTurnManager] Action card ID {id} not found in Action list!");
+                    if (actionCard.Role == "Attack") attack += actionCard.Value;
+                    else if (actionCard.Role == "Defense") defense += actionCard.Value;
                     continue;
                 }
 
-                if (actionCard.Role == "Attack") attack += actionCard.Value;
-                else if (actionCard.Role == "Defense") defense += actionCard.Value;
+                var supportCard = deckMgr.loadedSupportCards?.Find(c => c.Id == id);
+                if (supportCard == null)
+                {
+                    Debug.LogWarning($"[EndTurnManager] Card ID {id} not found in Action OR Support lists!");
+                }
             }
         }
 
@@ -507,7 +475,6 @@ public class EndTurnManager : NetworkBehaviour
 
     private IEnumerator Routine_ResolveCombatSequence(TurnResultData result)
     {
-        isResolvingCombat = true;
         yield return new WaitForSeconds(cardMovementWaitDelay);
 
         List<BalatroCardController> playerCards = GetControllersFromTransform(selectedHandTransform);
@@ -541,7 +508,7 @@ public class EndTurnManager : NetworkBehaviour
             for (int i = 1; i <= maxNetDamage; i++)
             {
                 centerDifferenceText.text = i.ToString();
-                PopText(centerDifferenceText.transform, originalCenterScale);
+                StartCoroutine(Routine_PopText(centerDifferenceText.transform, originalCenterScale));
                 yield return new WaitForSeconds(countStepInterval);
             }
         }
@@ -563,7 +530,7 @@ public class EndTurnManager : NetworkBehaviour
                 UpdateHPUI();
                 PlayFixedDamageSFX();
 
-                if (playerHPText != null) PopText(playerHPText.transform, originalPlayerHPScale);
+                if (playerHPText != null) StartCoroutine(Routine_PopText(playerHPText.transform, originalPlayerHPScale));
 
                 if (targetTargetRect != null)
                 {
@@ -575,7 +542,7 @@ public class EndTurnManager : NetworkBehaviour
                     activePlayerShakeCoroutine = StartCoroutine(Routine_UIRectShake(targetTargetRect, damageShakeDuration, damageShakeMagnitude, damageShakeRotation, () => activePlayerShakeCoroutine = null));
                 }
 
-                ShakeCamera();
+                StartCoroutine(Routine_CameraShake());
                 yield return new WaitForSeconds(countStepInterval);
             }
         }
@@ -593,7 +560,7 @@ public class EndTurnManager : NetworkBehaviour
                 UpdateHPUI();
                 PlayFixedDamageSFX();
 
-                if (opponentHPText != null) PopText(opponentHPText.transform, originalOpponentHPScale);
+                if (opponentHPText != null) StartCoroutine(Routine_PopText(opponentHPText.transform, originalOpponentHPScale));
 
                 if (targetTargetRect != null)
                 {
@@ -605,7 +572,7 @@ public class EndTurnManager : NetworkBehaviour
                     activeOpponentShakeCoroutine = StartCoroutine(Routine_UIRectShake(targetTargetRect, damageShakeDuration, damageShakeMagnitude, damageShakeRotation, () => activeOpponentShakeCoroutine = null));
                 }
 
-                ShakeCamera();
+                StartCoroutine(Routine_CameraShake());
                 yield return new WaitForSeconds(countStepInterval);
             }
         }
@@ -616,7 +583,6 @@ public class EndTurnManager : NetworkBehaviour
 
         yield return new WaitForSeconds(0.5f);
         yield return StartCoroutine(Routine_CheckNextRoundOrEndGame());
-        isResolvingCombat = false;
     }
 
     private void PlayHighlightSFX(CardCategory category)
@@ -629,12 +595,20 @@ public class EndTurnManager : NetworkBehaviour
             _ => null
         };
 
-        SFXPool.Play(clipToPlay, 1f);
+        if (clipToPlay != null && audioSource != null)
+        {
+            audioSource.pitch = 1.0f;
+            audioSource.PlayOneShot(clipToPlay);
+        }
     }
 
     private void PlayFixedDamageSFX()
     {
-        SFXPool.Play(damageSFX, 1f);
+        if (damageSFX != null && audioSource != null)
+        {
+            audioSource.pitch = 1.0f;
+            audioSource.PlayOneShot(damageSFX);
+        }
     }
 
     private void HighlightCardsByCategory(List<BalatroCardController> playerList, List<BalatroCardController> opponentList, CardCategory category)
@@ -669,11 +643,8 @@ public class EndTurnManager : NetworkBehaviour
             return opponentCards;
         }
 
-        foreach (int netCardId in opponentCardIds)
+        foreach (int cardId in opponentCardIds)
         {
-            bool isSupportCard = CardNetId.IsSupport(netCardId);
-            int cardId = CardNetId.Decode(netCardId);
-
             GameObject newCardObj = Instantiate(anyHandManager.cardPrefab, opponentSelectedHandTransform);
             BalatroCardController controller = newCardObj.GetComponent<BalatroCardController>();
             CardVisual visual = newCardObj.GetComponentInChildren<CardVisual>();
@@ -683,7 +654,7 @@ public class EndTurnManager : NetworkBehaviour
                 controller.SetCardId(cardId);
                 controller.SetInteractable(false);
 
-                var actionCard = isSupportCard ? null : deckMgr.loadedActionCards?.Find(c => c.Id == cardId);
+                var actionCard = deckMgr.loadedActionCards?.Find(c => c.Id == cardId);
                 if (actionCard != null)
                 {
                     Sprite sprite = GetCardSprite(cardId, true);
@@ -708,7 +679,9 @@ public class EndTurnManager : NetworkBehaviour
 
     private Sprite GetCardSprite(int cardId, bool isActionCard)
     {
-        return PlayerHandManager.GetCardSpriteCached(cardId, isActionCard);
+        string folder = isActionCard ? "CardSprites/Action/" : "CardSprites/Support/";
+        string path = $"{folder}{cardId}";
+        return Resources.Load<Sprite>(path);
     }
 
     private List<BalatroCardController> GetControllersFromTransform(RectTransform container)
@@ -733,18 +706,21 @@ public class EndTurnManager : NetworkBehaviour
             float t = maxSteps > 1 ? (float)(step - 1) / (maxSteps - 1) : 1f;
             float currentPitch = Mathf.Lerp(minPitch, maxPitch, t);
 
-            // Pooled so the rising pitch doesn't bend the previous step's sound that is still playing.
-            SFXPool.Play(pointCountSFX, currentPitch);
+            if (pointCountSFX != null && audioSource != null)
+            {
+                audioSource.pitch = currentPitch;
+                audioSource.PlayOneShot(pointCountSFX);
+            }
 
             if (step <= playerTargetVal && playerText != null)
             {
                 playerText.text = step.ToString();
-                PopText(playerText.transform, playerScale);
+                StartCoroutine(Routine_PopText(playerText.transform, playerScale));
             }
             if (step <= opponentTargetVal && opponentText != null)
             {
                 opponentText.text = step.ToString();
-                PopText(opponentText.transform, opponentScale);
+                StartCoroutine(Routine_PopText(opponentText.transform, opponentScale));
             }
 
             yield return new WaitForSeconds(countStepInterval);
@@ -793,26 +769,7 @@ public class EndTurnManager : NetworkBehaviour
             }
 
             currentRound++;
-
-            // Only the host could start rounds, and it did so as soon as *the host's* animations finished, which
-            // is earlier than the joining player's. The new round (and its countdown) then started on top of the
-            // joiner's unfinished combat animation. Now each player reports "ready" and the server starts the
-            // round when both have.
-            ReadyForNextRoundServerRpc(currentRound);
-        }
-    }
-
-    [ServerRpc(RequireOwnership = false)]
-    private void ReadyForNextRoundServerRpc(int nextRound, ServerRpcParams rpcParams = default)
-    {
-        if (GameEnded.Value) return;
-
-        clientsReadyForNextRound.Add(rpcParams.Receive.SenderClientId);
-
-        if (clientsReadyForNextRound.Count >= NetworkManager.Singleton.ConnectedClientsIds.Count)
-        {
-            clientsReadyForNextRound.Clear();
-            if (timerManager != null) timerManager.RequestStartRound(nextRound);
+            timerManager.RequestStartRound(currentRound);
         }
     }
 
@@ -838,12 +795,8 @@ public class EndTurnManager : NetworkBehaviour
     private void TriggerLocalGameOver(bool isPlayerWinner, bool isDraw)
     {
         isMatchOver = true;
-        isResolvingCombat = false;
-
-        // GameEnded is server-write-only. A joining client writing to it throws an exception, which skipped the
-        // rest of this method (so the client never saw its game-over screen). Clients ask the server instead.
-        if (IsServer) GameEnded.Value = true;
-        else NotifyServerGameOverServerRpc();
+        GameEnded.Value = true;
+        NotifyServerGameOverServerRpc();
 
         StopAllCoroutines();
 
@@ -890,21 +843,20 @@ public class EndTurnManager : NetworkBehaviour
     {
         if (selectedHandTransform != null)
         {
+            BalatroCardController[] submittedCards = selectedHandTransform.GetComponentsInChildren<BalatroCardController>();
+            foreach (var card in submittedCards)
+            {
+                if (card != null && card.Category == CardCategory.Support && !card.IsForever)
+                {
+                    Debug.Log($"[EndTurnManager] Discarding immediate support card: {card.gameObject.name}");
+                    Destroy(card.gameObject);
+                }
+            }
+
             PlayerHandManager localHandManager = GetLocalHandManager();
             if (localHandManager != null)
             {
-                // Removes spent "immediate" supports from the hand manager's lists AND destroys them, so the
-                // returning cards aren't fanned around a card that is about to disappear (that left a gap).
-                localHandManager.DiscardSubmittedImmediateSupports();
                 localHandManager.ReturnSubmittedCardsToHand(selectedHandTransform);
-            }
-            else
-            {
-                foreach (var card in selectedHandTransform.GetComponentsInChildren<BalatroCardController>())
-                {
-                    if (card != null && card.Category == CardCategory.Support && !card.IsForever)
-                        Destroy(card.gameObject);
-                }
             }
 
             yield return new WaitForSeconds(0.3f);
@@ -920,29 +872,6 @@ public class EndTurnManager : NetworkBehaviour
         }
 
         yield return null;
-    }
-
-    // Only ONE pop per text at a time. A pop lasts longer than the count interval, so overlapping pops used to
-    // write to the same scale at once and the older one snapped the newer one back to base size (flicker).
-    private void PopText(Transform textTransform, Vector3 baseScale)
-    {
-        if (textTransform == null) return;
-
-        if (activePops.TryGetValue(textTransform, out Coroutine running) && running != null)
-            StopCoroutine(running);
-
-        textTransform.localScale = baseScale;
-        activePops[textTransform] = StartCoroutine(Routine_PopText(textTransform, baseScale));
-    }
-
-    // Same idea for the camera: overlapping shakes used to reset the camera while another one was still running.
-    private void ShakeCamera()
-    {
-        if (mainCamera == null) return;
-
-        if (activeCameraShake != null) StopCoroutine(activeCameraShake);
-        mainCamera.transform.localPosition = originalCamPos;
-        activeCameraShake = StartCoroutine(Routine_CameraShake());
     }
 
     private IEnumerator Routine_PopText(Transform textTransform, Vector3 baseScale)
@@ -1002,14 +931,7 @@ public class EndTurnManager : NetworkBehaviour
     {
         if (targetRect == null) yield break;
 
-        // Always return to the SAME rest position. Reading the current position here meant that when a shake was
-        // interrupted mid-way (every damage tick), the next shake treated the displaced position as "home" and the
-        // HP text slowly drifted across the screen.
-        if (!restPositions.TryGetValue(targetRect, out Vector2 originalAnchoredPos))
-        {
-            originalAnchoredPos = targetRect.anchoredPosition;
-            restPositions[targetRect] = originalAnchoredPos;
-        }
+        Vector2 originalAnchoredPos = targetRect.anchoredPosition;
         float elapsed = 0f;
 
         try
@@ -1053,7 +975,6 @@ public class EndTurnManager : NetworkBehaviour
 
         mainCamera.transform.localPosition = originalCamPos;
         mainCamera.transform.localRotation = originalCamRot;
-        activeCameraShake = null;
     }
 
     private void UpdateHPUI()

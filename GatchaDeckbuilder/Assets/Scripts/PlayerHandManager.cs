@@ -24,14 +24,6 @@ public class PlayerHandManager : MonoBehaviour
     [Tooltip("Scale modifier when the card is presented in the center stage.")]
     [SerializeField] private float centerRevealScale = 1.25f;
 
-    [Header("Network Latency Handling")]
-    [Tooltip("OPTIONAL. Sprite shown while the card is flying to the center and the server hasn't answered yet. " +
-             "If empty, whatever sprite the card prefab has by default is shown.")]
-    [SerializeField] private Sprite cardBackSprite;
-
-    [Tooltip("How long to wait for the server's pull result before giving up on a card (seconds).")]
-    [SerializeField] private float pullTimeout = 8f;
-
     [Header("Fan Layout Settings")]
     [Tooltip("Horizontal spacing between cards along the X axis.")]
     [SerializeField] private float cardSpacing = 120f;
@@ -52,38 +44,14 @@ public class PlayerHandManager : MonoBehaviour
 
     private List<BalatroCardController> cardsInHand = new List<BalatroCardController>();
     private List<BalatroCardController> submittedCards = new List<BalatroCardController>();
-
-    // Results from the server, in the order they were requested. A null entry means "server refused this pull".
     private Queue<PullResult> pendingPulls = new Queue<PullResult>();
-    // If we stop waiting for a pull (timeout), its late answer must be dropped so the queue stays aligned.
-    private int abandonedRequests = 0;
 
     private Coroutine activeFanCoroutine;
-    private EndTurnManager cachedEndTurnManager;
-
-    // ---------- Sprite cache ----------
-    // Resources.Load is synchronous and hitches the frame the first time a big card texture is loaded.
-    // We warm this cache in the background at scene start, and everything else reads from it.
-    private static readonly Dictionary<string, Sprite> spriteCache = new Dictionary<string, Sprite>();
-
-    public static Sprite GetCardSpriteCached(int cardId, bool isActionCard)
-    {
-        string path = (isActionCard ? "CardSprites/Action/" : "CardSprites/Support/") + cardId;
-        if (!spriteCache.TryGetValue(path, out Sprite sprite) || sprite == null)
-        {
-            sprite = Resources.Load<Sprite>(path);
-            if (sprite != null) spriteCache[path] = sprite;
-        }
-        return sprite;
-    }
 
     private void OnEnable()
     {
         if (gachaManager != null)
-        {
             gachaManager.OnMyPullResolved += HandlePullResolved;
-            gachaManager.OnPullFailed += HandlePullFailed;
-        }
         if (timerManager != null)
         {
             timerManager.OnDrawPhaseChanged += HandleDrawPhaseChanged;
@@ -94,25 +62,12 @@ public class PlayerHandManager : MonoBehaviour
     private void OnDisable()
     {
         if (gachaManager != null)
-        {
             gachaManager.OnMyPullResolved -= HandlePullResolved;
-            gachaManager.OnPullFailed -= HandlePullFailed;
-        }
         if (timerManager != null)
             timerManager.OnDrawPhaseChanged -= HandleDrawPhaseChanged;
     }
 
-    private void HandlePullResolved(PullResult result)
-    {
-        if (abandonedRequests > 0) { abandonedRequests--; return; }
-        pendingPulls.Enqueue(result);
-    }
-
-    private void HandlePullFailed(string reason)
-    {
-        if (abandonedRequests > 0) { abandonedRequests--; return; }
-        pendingPulls.Enqueue(null);
-    }
+    private void HandlePullResolved(PullResult result) => pendingPulls.Enqueue(result);
 
     private void Awake()
     {
@@ -138,42 +93,6 @@ public class PlayerHandManager : MonoBehaviour
         DisableLayoutGroupsOnHand();
     }
 
-    private void Start()
-    {
-        StartCoroutine(Routine_PreloadSprites());
-    }
-
-    private IEnumerator Routine_PreloadSprites()
-    {
-        yield return null; // let DeckManager finish loading the CSVs
-        var deck = FindFirstObjectByType<DeckManager>();
-        if (deck == null) yield break;
-
-        if (deck.loadedActionCards != null)
-        {
-            var seen = new HashSet<int>();
-            foreach (var c in deck.loadedActionCards)
-                if (seen.Add(c.Id)) yield return StartCoroutine(PreloadOne(c.Id, true));
-        }
-
-        if (deck.loadedSupportCards != null)
-        {
-            var seen = new HashSet<int>();
-            foreach (var c in deck.loadedSupportCards)
-                if (seen.Add(c.Id)) yield return StartCoroutine(PreloadOne(c.Id, false));
-        }
-    }
-
-    private IEnumerator PreloadOne(int id, bool isAction)
-    {
-        string path = (isAction ? "CardSprites/Action/" : "CardSprites/Support/") + id;
-        if (spriteCache.ContainsKey(path)) yield break;
-
-        ResourceRequest request = Resources.LoadAsync<Sprite>(path);
-        yield return request;
-        if (request.asset is Sprite sprite) spriteCache[path] = sprite;
-    }
-
     private void DisableLayoutGroupsOnHand()
     {
         if (handTransform != null)
@@ -197,44 +116,86 @@ public class PlayerHandManager : MonoBehaviour
     {
         if (gachaManager == null) { Debug.LogError("[PlayerHandManager] gachaManager is null!"); yield break; }
 
-        // Validate the prefab BEFORE spending a token on the server.
-        if (cardPrefab == null ||
-            cardPrefab.GetComponent<BalatroCardController>() == null ||
-            cardPrefab.GetComponentInChildren<CardVisual>(true) == null)
-        {
-            Debug.LogError("[PlayerHandManager] cardPrefab is missing or lacks BalatroCardController / CardVisual! Cancelling deal.");
-            yield break;
-        }
-
-        if (cachedEndTurnManager == null) cachedEndTurnManager = FindFirstObjectByType<EndTurnManager>();
-
         for (int i = 0; i < count; i++)
         {
-            // ---- 1. ASK THE SERVER *IMMEDIATELY* ----
             if (deckToPull == DeckType.Support) gachaManager.RequestPullSupport();
             else gachaManager.RequestPullAction();
 
-            // ---- 2. SPAWN THE CARD *IMMEDIATELY* (hides the network round trip for the joining player) ----
+            PullResult result = null;
+            float timeout = 2f, elapsed = 0f;
+
+            while (pendingPulls.Count == 0 && elapsed < timeout)
+            {
+                yield return null;
+                elapsed += Time.deltaTime;
+            }
+
+            if (pendingPulls.Count > 0) result = pendingPulls.Dequeue();
+            else
+            {
+                Debug.LogError($"[PlayerHandManager] Pull {i + 1} timed out after {timeout}s!");
+                continue;
+            }
+
+            if (result == null)
+            {
+                Debug.LogError("[PlayerHandManager] Pull result is null after timeout!");
+                yield break;
+            }
+
             Transform spawnParent = targetCanvas != null ? targetCanvas.transform : handTransform;
             GameObject newCardObj = Instantiate(cardPrefab, spawnParent);
             RectTransform cardRect = newCardObj.GetComponent<RectTransform>();
+
             BalatroCardController controller = newCardObj.GetComponent<BalatroCardController>();
-            CardVisual visual = newCardObj.GetComponentInChildren<CardVisual>(true);
+            CardVisual visual = newCardObj.GetComponent<CardVisual>();
 
-            if (cachedEndTurnManager != null) controller.SetEndTurnManager(cachedEndTurnManager);
+            if (controller == null || visual == null)
+            {
+                Debug.LogError("[PlayerHandManager] Missing required components on card prefab! Destroying card and halting deal.");
+                Destroy(newCardObj);
+                yield break;
+            }
 
-            controller.LockForFlight(); // no hover/click events while flying (they fought the flight animation)
-            if (cardBackSprite != null && visual.cardImage != null) visual.cardImage.sprite = cardBackSprite;
+            EndTurnManager endTurnManager = FindFirstObjectByType<EndTurnManager>();
+            if (endTurnManager != null) controller.SetEndTurnManager(endTurnManager);
 
-            cardRect.position = sourceButton != null ? sourceButton.position : handTransform.position;
+            Sprite sprite = GetCardSprite(result.CardId, result.Deck == DeckType.Action);
+            if (result.Deck == DeckType.Action) visual.Setup(result.ActionData, sprite);
+            else visual.Setup(result.SupportData, sprite);
+
+            controller.SetCardId(result.CardId);
+            if (result.Deck == DeckType.Action && result.ActionData != null)
+                controller.SetCategory(result.ActionData.Role == "Attack" ? CardCategory.Attack : CardCategory.Defense);
+            else if (result.Deck == DeckType.Support && result.SupportData != null)
+            {
+                controller.SetCategory(CardCategory.Support);
+                controller.SetCardMetadata(result.SupportData.EffectType == "Forever");
+            }
+
+            if (timerManager != null)
+            {
+                controller.SetInteractable(!timerManager.IsDrawPhaseActive);
+            }
+
+            // PHASE 1: SPAWN AT BUTTON POSITION
+            if (sourceButton != null)
+            {
+                cardRect.position = sourceButton.position;
+            }
+            else
+            {
+                cardRect.position = handTransform.position;
+            }
+
             cardRect.localScale = Vector3.one * 0.3f;
             cardRect.rotation = Quaternion.identity;
 
-            // ---- 3. FLY TO SCREEN CENTER (while the server answers) ----
+            // PHASE 2: TRAVEL TO SCREEN CENTER & REVEAL
             Vector3 centerPosition = targetCanvas != null ? targetCanvas.transform.position : Vector3.zero;
             Vector3 targetCenterScale = Vector3.one * centerRevealScale;
 
-            float movePhaseDuration = Mathf.Max(0.01f, (totalDrawDuration - centerPauseDuration) * 0.5f);
+            float movePhaseDuration = (totalDrawDuration - centerPauseDuration) * 0.5f;
             float t = 0f;
 
             Vector3 startPos = cardRect.position;
@@ -253,50 +214,6 @@ public class PlayerHandManager : MonoBehaviour
             cardRect.position = centerPosition;
             cardRect.localScale = targetCenterScale;
 
-            // ---- 4. WAIT FOR THE RESULT (usually already here by now) ----
-            float waited = 0f;
-            while (pendingPulls.Count == 0 && waited < pullTimeout)
-            {
-                waited += Time.unscaledDeltaTime;
-                yield return null;
-            }
-
-            if (pendingPulls.Count == 0)
-            {
-                Debug.LogError($"[PlayerHandManager] Pull {i + 1} timed out after {pullTimeout}s!");
-                abandonedRequests++;
-                Destroy(newCardObj);
-                continue;
-            }
-
-            PullResult result = pendingPulls.Dequeue();
-            if (result == null)
-            {
-                // Server refused the pull (out of tokens / not ready). Remove the placeholder card.
-                Destroy(newCardObj);
-                continue;
-            }
-
-            // ---- 5. REVEAL ----
-            bool isAction = result.Deck == DeckType.Action;
-            Sprite sprite = GetCardSpriteCached(result.CardId, isAction);
-
-            if (isAction && result.ActionData != null) visual.Setup(result.ActionData, sprite);
-            else if (!isAction && result.SupportData != null) visual.Setup(result.SupportData, sprite);
-            else if (visual.cardImage != null && sprite != null) visual.cardImage.sprite = sprite;
-
-            controller.SetCardId(result.CardId);
-            if (isAction && result.ActionData != null)
-                controller.SetCategory(result.ActionData.Role == "Attack" ? CardCategory.Attack : CardCategory.Defense);
-            else if (!isAction)
-            {
-                // Always mark Support cards as Support, even if the CSV row wasn't found, because the deck type
-                // is what gets sent to the server / opponent.
-                controller.SetCategory(CardCategory.Support);
-                if (result.SupportData != null)
-                    controller.SetCardMetadata(result.SupportData.EffectType == "Forever");
-            }
-
             if (JuiceFXManager.Instance != null)
             {
                 JuiceFXManager.Instance.TriggerRarityJuice(result.Tier);
@@ -310,7 +227,7 @@ public class PlayerHandManager : MonoBehaviour
 
             yield return new WaitForSeconds(centerPauseDuration);
 
-            // ---- 6. MOVE TO HAND ----
+            // PHASE 3: MOVE TO HAND & RE-FAN HAND LAYOUT
             t = 0f;
             startPos = cardRect.position;
             startScale = cardRect.localScale;
@@ -325,23 +242,13 @@ public class PlayerHandManager : MonoBehaviour
                 yield return null;
             }
 
-            // Re-parent KEEPING the world position. (SetParent(..., false) kept the old canvas-space numbers,
-            // so the card teleported before sliding into the fan.)
-            Vector3 arrivalWorldPos = cardRect.position;
-            newCardObj.transform.SetParent(handTransform, true);
+            newCardObj.transform.SetParent(handTransform, false);
 
+            // Normalize card anchors & pivot to middle center when placed in hand
             cardRect.anchorMin = new Vector2(0.5f, 0.5f);
             cardRect.anchorMax = new Vector2(0.5f, 0.5f);
             cardRect.pivot = new Vector2(0.5f, 0.5f);
-            cardRect.position = arrivalWorldPos;
             cardRect.localScale = Vector3.one;
-
-            // Re-check interactability NOW. It used to be decided at spawn time, so a card still animating when
-            // the draw window closed stayed locked forever.
-            controller.SetInteractable(timerManager == null || !timerManager.IsDrawPhaseActive);
-
-            controller.SelectionChanged -= OnCardSelectionChanged;
-            controller.SelectionChanged += OnCardSelectionChanged;
 
             cardsInHand.Add(controller);
             UpdateHandLayout();
@@ -350,7 +257,11 @@ public class PlayerHandManager : MonoBehaviour
         }
     }
 
-    private void OnCardSelectionChanged(BalatroCardController card) => UpdateHandLayout();
+    private Sprite GetCardSprite(int cardId, bool isActionCard)
+    {
+        string folder = isActionCard ? "CardSprites/Action/" : "CardSprites/Support/";
+        return Resources.Load<Sprite>($"{folder}{cardId}");
+    }
 
     public void SetAllCardsInteractable(bool state)
     {
@@ -392,8 +303,7 @@ public class PlayerHandManager : MonoBehaviour
 
             if (controller.IsSelected)
             {
-                // Encode which deck the card is from (Action and Support Ids can overlap).
-                ids.Add(CardNetId.Encode(controller.CardId, controller.Category == CardCategory.Support));
+                ids.Add(controller.CardId);
             }
         }
         return ids;
@@ -409,36 +319,11 @@ public class PlayerHandManager : MonoBehaviour
             cardsInHand.Remove(controller);
             submittedCards.Add(controller);
 
-            // Locked-in cards get a neutral look (no leftover "selected" scale/green tint) so the combat
-            // highlights come back to the same look the opponent's revealed cards have.
-            controller.ResetVisualsOnly();
-
             controller.transform.SetParent(selectedHandTarget, true);
             controller.enabled = false;
         }
 
         UpdateHandLayout();
-    }
-
-    /// <summary>
-    /// Removes spent "immediate" support cards from the submitted list AND destroys them.
-    /// (Destroy() only takes effect at the end of the frame, so destroying them from outside left them
-    /// in our lists for one more layout pass, which put a gap in the fan.)
-    /// </summary>
-    public void DiscardSubmittedImmediateSupports()
-    {
-        for (int i = submittedCards.Count - 1; i >= 0; i--)
-        {
-            BalatroCardController c = submittedCards[i];
-            if (c == null) { submittedCards.RemoveAt(i); continue; }
-
-            if (c.Category == CardCategory.Support && !c.IsForever)
-            {
-                Debug.Log($"[PlayerHandManager] Discarding immediate support card: {c.gameObject.name}");
-                submittedCards.RemoveAt(i);
-                Destroy(c.gameObject);
-            }
-        }
     }
 
     public void ReturnSubmittedCardsToHand(RectTransform containerTransform)
@@ -458,11 +343,8 @@ public class PlayerHandManager : MonoBehaviour
                 cardsInHand.Add(controller);
             }
 
-            RectTransform cardRect = controller.GetComponent<RectTransform>();
-            Vector3 worldPos = cardRect != null ? cardRect.position : Vector3.zero;
-
-            // 1. Re-parent to hand transform (keep world position so the card visibly flies back into the fan)
-            controller.transform.SetParent(handTransform, true);
+            // 1. Re-parent to hand transform
+            controller.transform.SetParent(handTransform, false);
 
             // 2. Enable controller AND all attached UI components
             controller.enabled = true;
@@ -479,12 +361,12 @@ public class PlayerHandManager : MonoBehaviour
             controller.ResetCardState();
 
             // 5. Ensure scale and anchors are completely normalized
+            RectTransform cardRect = controller.GetComponent<RectTransform>();
             if (cardRect != null)
             {
                 cardRect.anchorMin = new Vector2(0.5f, 0.5f);
                 cardRect.anchorMax = new Vector2(0.5f, 0.5f);
                 cardRect.pivot = new Vector2(0.5f, 0.5f);
-                cardRect.position = worldPos;
                 cardRect.localScale = Vector3.one;
             }
         }
@@ -520,83 +402,87 @@ public class PlayerHandManager : MonoBehaviour
         SetAllCardsInteractable(shouldBeInteractable);
     }
 
-    // ============================ FAN LAYOUT ============================
-
     public void UpdateHandLayout()
     {
         CleanupHandList();
 
-        // Always stop the old animation first, even when the hand is now empty. Otherwise a running
-        // animation keeps dragging cards that were just moved to the "submitted" area.
-        if (activeFanCoroutine != null)
-        {
-            StopCoroutine(activeFanCoroutine);
-            activeFanCoroutine = null;
-        }
-
         if (cardsInHand.Count == 0) return;
+
+        if (activeFanCoroutine != null)
+            StopCoroutine(activeFanCoroutine);
 
         activeFanCoroutine = StartCoroutine(Routine_AnimateFanLayout());
     }
 
-    private bool IsInHand(BalatroCardController card)
-    {
-        return card != null && card.transform.parent == handTransform;
-    }
-
     private IEnumerator Routine_AnimateFanLayout()
     {
-        // Work on a snapshot. The live list can be modified mid-animation (cards destroyed / added),
-        // which used to shift indices and make cards jump to someone else's slot.
-        List<BalatroCardController> cards = new List<BalatroCardController>(cardsInHand);
-        int cardCount = cards.Count;
+        int cardCount = cardsInHand.Count;
 
-        Vector2[] targetPositions = new Vector2[cardCount];
+        Vector3[] targetPositions = new Vector3[cardCount];
         Quaternion[] targetRotations = new Quaternion[cardCount];
 
-        for (int i = 0; i < cardCount; i++)
+        if (cardCount == 1)
         {
-            float xPos = 0f, yPos = 0f, zAngle = 0f;
+            targetPositions[0] = Vector3.zero;
+            targetRotations[0] = Quaternion.identity;
+        }
+        else
+        {
+            float totalWidth = cardSpacing * (cardCount - 1);
+            float startX = -totalWidth * 0.5f;
 
-            if (cardCount > 1)
+            for (int i = 0; i < cardCount; i++)
             {
-                float totalWidth = cardSpacing * (cardCount - 1);
-                xPos = (-totalWidth * 0.5f) + (i * cardSpacing);
-
+                float xPos = startX + (i * cardSpacing);
                 float normalizedIndex = (2f * i / (cardCount - 1)) - 1f;
-                yPos = -(normalizedIndex * normalizedIndex) * arcHeight;
-                zAngle = -normalizedIndex * maxFanAngle;
-            }
+                float yPos = -Mathf.Pow(normalizedIndex, 2f) * arcHeight;
 
-            // Selected cards are lifted as part of the layout (this also covers a hand of exactly one card).
-            if (cards[i] != null && cards[i].IsSelected)
-            {
-                yPos += cards[i].SelectYOffset;
-            }
+                // Add selection offset dynamically if card happens to be selected
+                if (cardsInHand[i] != null && cardsInHand[i].IsSelected)
+                {
+                    yPos += cardsInHand[i].SelectYOffset;
+                }
 
-            targetPositions[i] = new Vector2(xPos, yPos);
-            targetRotations[i] = Quaternion.Euler(0f, 0f, zAngle);
+                float zAngle = -normalizedIndex * maxFanAngle;
+
+                targetPositions[i] = new Vector3(xPos, yPos, 0f);
+                targetRotations[i] = Quaternion.Euler(0f, 0f, zAngle);
+            }
         }
 
-        // NOTE: scale is intentionally NOT touched here any more. CardJuice owns hover/selected scale; the fan used to
-        // pull every card back to 1.0 each frame, which made hovered/selected cards jitter and kept this loop alive forever.
         bool isAnimating = true;
         while (isAnimating)
         {
             isAnimating = false;
-            float blend = 1f - Mathf.Exp(-fanLerpSpeed * Time.unscaledDeltaTime);
 
-            for (int i = 0; i < cardCount; i++)
+            for (int i = 0; i < cardsInHand.Count; i++)
             {
-                if (!IsInHand(cards[i])) continue;
+                if (cardsInHand[i] == null) continue;
 
-                RectTransform cardRect = cards[i].Rect;
+                RectTransform cardRect = cardsInHand[i].GetComponent<RectTransform>();
 
-                cardRect.anchoredPosition = Vector2.Lerp(cardRect.anchoredPosition, targetPositions[i], blend);
-                cardRect.localRotation = Quaternion.Slerp(cardRect.localRotation, targetRotations[i], blend);
+                cardRect.anchoredPosition = Vector2.Lerp(
+                    cardRect.anchoredPosition,
+                    targetPositions[i],
+                    Time.deltaTime * fanLerpSpeed
+                );
+
+                cardRect.localRotation = Quaternion.Slerp(
+                    cardRect.localRotation,
+                    targetRotations[i],
+                    Time.deltaTime * fanLerpSpeed
+                );
+
+                // Enforce scale lerp back to 1.0f in case external systems modified card scale
+                cardRect.localScale = Vector3.Lerp(
+                    cardRect.localScale,
+                    Vector3.one,
+                    Time.deltaTime * fanLerpSpeed
+                );
 
                 if (Vector2.Distance(cardRect.anchoredPosition, targetPositions[i]) > 0.05f ||
-                    Quaternion.Angle(cardRect.localRotation, targetRotations[i]) > 0.1f)
+                    Quaternion.Angle(cardRect.localRotation, targetRotations[i]) > 0.1f ||
+                    Vector3.Distance(cardRect.localScale, Vector3.one) > 0.01f)
                 {
                     isAnimating = true;
                 }
@@ -606,15 +492,14 @@ public class PlayerHandManager : MonoBehaviour
         }
 
         // Final snap
-        for (int i = 0; i < cardCount; i++)
+        for (int i = 0; i < cardsInHand.Count; i++)
         {
-            if (!IsInHand(cards[i])) continue;
+            if (cardsInHand[i] == null) continue;
 
-            RectTransform cardRect = cards[i].Rect;
+            RectTransform cardRect = cardsInHand[i].GetComponent<RectTransform>();
             cardRect.anchoredPosition = targetPositions[i];
             cardRect.localRotation = targetRotations[i];
+            cardRect.localScale = Vector3.one;
         }
-
-        activeFanCoroutine = null;
     }
 }
