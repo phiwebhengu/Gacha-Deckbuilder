@@ -1,4 +1,4 @@
-using System;
+ï»¿using System;
 using System.Collections.Generic;
 using System.Text;
 using UnityEngine;
@@ -24,6 +24,7 @@ public class SupportCardData
     public string Tier;         // Common / Rare / Legendary
     public string Effect;
     public string EffectType;  // Immediate / Forever
+    public string Category;    // Companion / Location / Item ... (optional "Category" column; empty if the CSV has none)
     public int Copies;
 }
 
@@ -38,7 +39,7 @@ public static class CardLoader
         var rows = ParseCsv(csvFile.text);
         var cards = new List<ActionCardData>(rows.Count);
 
-        // rows[0] is the header row — skip it
+        // rows[0] is the header row ï¿½ skip it
         for (int i = 1; i < rows.Count; i++)
         {
             var f = rows[i];
@@ -69,29 +70,61 @@ public static class CardLoader
     {
         var rows = ParseCsv(csvFile.text);
         var cards = new List<SupportCardData>(rows.Count);
+        if (rows.Count == 0) return cards;
+
+        // Columns are found by their header name, so the optional "Category" column can sit anywhere in the file.
+        // If a header isn't found, the old fixed order (ID, Name, Tier, Effect, EffectType, Copies) is used.
+        List<string> header = rows[0];
+        int colId = FindColumn(header, 0, "ID");
+        int colName = FindColumn(header, 1, "Name");
+        int colTier = FindColumn(header, 2, "Tier");
+        int colEffect = FindColumn(header, 3, "Effect");
+        int colEffectType = FindColumn(header, 4, "EffectType");
+        int colCopies = FindColumn(header, 5, "Copies");
+        int colCategory = FindColumn(header, -1, "Category", "SupportCategory", "Type", "Kind");
+
+        int maxCol = Math.Max(Math.Max(colId, colName), Math.Max(Math.Max(colTier, colEffect), Math.Max(colEffectType, colCopies)));
+
+        if (colCategory < 0)
+            Debug.LogWarning("[CardLoader] SupportDeck.csv has no 'Category' column. Companion/Location/Item will be guessed from the card ID.");
 
         for (int i = 1; i < rows.Count; i++)
         {
             var f = rows[i];
-            if (f.Count < 6) continue;
+            if (f.Count <= maxCol) continue;
 
-            int copies = int.Parse(f[5]);
+            int copies = int.Parse(f[colCopies].Trim());
+            string category = (colCategory >= 0 && colCategory < f.Count) ? f[colCategory].Trim() : "";
 
             // Add the card to the deck 'copies' number of times
             for (int c = 0; c < copies; c++)
             {
                 cards.Add(new SupportCardData
                 {
-                    Id = int.Parse(f[0]),
-                    Name = f[1],
-                    Tier = f[2],
-                    Effect = f[3],
-                    EffectType = f[4],
+                    Id = int.Parse(f[colId].Trim()),
+                    Name = f[colName],
+                    Tier = f[colTier],
+                    Effect = f[colEffect],
+                    EffectType = f[colEffectType],
+                    Category = category,
                     Copies = copies // Keeps the metadata intact
                 });
             }
         }
         return cards;
+    }
+
+    private static int FindColumn(List<string> header, int fallback, params string[] names)
+    {
+        for (int i = 0; i < header.Count; i++)
+        {
+            string h = header[i] == null ? "" : header[i].Trim().TrimStart('\uFEFF');
+            foreach (string n in names)
+            {
+                if (string.Equals(h, n, StringComparison.OrdinalIgnoreCase)) return i;
+            }
+        }
+        return fallback;
     }
 
     // ---------- CSV parsing ----------

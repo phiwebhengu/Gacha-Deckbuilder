@@ -329,4 +329,16 @@ public class CreateUsername : MonoBehaviour
 
         activeNotifications.Remove(targetObject);
     }
+    public void QuitGame()
+    {
+        Debug.Log("Quit button pressed");
+
+#if UNITY_EDITOR
+        UnityEditor.EditorApplication.isPlaying = false;
+#elif UNITY_WEBGL
+        Debug.LogWarning("Quit not supported on WebGL");
+#else
+        Application.Quit();
+#endif
+    }
 }

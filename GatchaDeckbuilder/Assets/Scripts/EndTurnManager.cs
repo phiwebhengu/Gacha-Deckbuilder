@@ -92,7 +92,7 @@ public class EndTurnManager : NetworkBehaviour
     [SerializeField] private TextMeshProUGUI playerDefenseText;
     [SerializeField] private TextMeshProUGUI opponentAttackText;
     [SerializeField] private TextMeshProUGUI opponentDefenseText;
-    //[SerializeField] private TextMeshProUGUI opponentText;
+    [SerializeField] private TextMeshProUGUI opponentText;
 
     [Header("Center Difference Display")]
     [SerializeField] private TextMeshProUGUI centerDifferenceText;
@@ -102,7 +102,7 @@ public class EndTurnManager : NetworkBehaviour
     [SerializeField] private float cardMovementWaitDelay = 0.5f;
     [SerializeField] private float phaseTransitionPause = 0.4f;
 
-    [Header("Audio Settings")]
+    [Header("✨ AUDIO SETTINGS ✨")]
     [SerializeField] private AudioSource audioSource;
     [Header("Incremental Points Sound")]
     [SerializeField] private AudioClip pointCountSFX;
@@ -117,14 +117,14 @@ public class EndTurnManager : NetworkBehaviour
     [SerializeField] private AudioClip defenseHighlightSFX;
     [SerializeField] private AudioClip supportHighlightSFX;
 
-    [Header("JUICE: Damage Flash UI")]
+    [Header("✨ JUICE: Damage Flash UI ✨")]
     [Tooltip("Full screen red overlay or vignette Image component for player taking damage.")]
     [SerializeField] private Image damageFlashImage;
     [SerializeField] private float flashInDuration = 0.05f;
     [SerializeField] private float flashOutDuration = 0.25f;
     [SerializeField][Range(0f, 1f)] private float maxFlashAlpha = 0.6f;
 
-    [Header("JUICE: Damage UI Shake Settings")]
+    [Header("✨ JUICE: Damage UI Shake Settings ✨")]
     [Tooltip("Optional parent panel or transform overrides for health shake. If null, defaults to playerHPText/opponentHPText RectTransforms.")]
     [SerializeField] private RectTransform playerHPRectTransformOverride;
     [SerializeField] private RectTransform opponentHPRectTransformOverride;
@@ -144,6 +144,7 @@ public class EndTurnManager : NetworkBehaviour
     [SerializeField] private RectTransform opponentSelectedHandTransform;
 
     [Header("Opponent Card Display")]
+    [Tooltip("Assign the Card Prefab here to ensure opponent cards can be instantiated reliably. Falls back to PlayerHandManager's prefab if left empty.")]
     [SerializeField] private GameObject opponentCardPrefab;
 
     [Header("System References")]
@@ -191,6 +192,10 @@ public class EndTurnManager : NetworkBehaviour
     // Server only: Support state that carries over between rounds (e.g. Stormterror's Lair), per player.
     private readonly Dictionary<ulong, SupportMatchState> supportStates = new Dictionary<ulong, SupportMatchState>();
     private GachaManager cachedGachaManager;
+
+    // What each player played in the round that was just resolved. The gacha side of the Support effects (free pulls,
+    // Seymour, Frostmoon Enclave...) is applied from this when both players are ready for the next round.
+    private readonly List<GachaManager.RoundEndInfo> pendingRoundEnd = new List<GachaManager.RoundEndInfo>();
 
     // Server-side: which clients have finished watching the combat animation and are ready for the next round.
     private readonly HashSet<ulong> clientsReadyForNextRound = new HashSet<ulong>();
@@ -575,6 +580,10 @@ public class EndTurnManager : NetworkBehaviour
         GrantTokens(idA, outA.TokenReward);
         GrantTokens(idB, outB.TokenReward);
 
+        pendingRoundEnd.Clear();
+        pendingRoundEnd.Add(new GachaManager.RoundEndInfo { ClientId = idA, Outcome = outA });
+        pendingRoundEnd.Add(new GachaManager.RoundEndInfo { ClientId = idB, Outcome = outB });
+
         pendingTurns.Clear();
     }
 
@@ -594,6 +603,16 @@ public class EndTurnManager : NetworkBehaviour
 
         if (cachedGachaManager == null) cachedGachaManager = FindFirstObjectByType<GachaManager>();
         if (cachedGachaManager != null) cachedGachaManager.AddTokens(clientId, amount);
+    }
+
+    private void ApplyGachaRoundEnd()
+    {
+        if (pendingRoundEnd.Count == 0) return;
+
+        if (cachedGachaManager == null) cachedGachaManager = FindFirstObjectByType<GachaManager>();
+        if (cachedGachaManager != null) cachedGachaManager.ApplyRoundEnd(pendingRoundEnd);
+
+        pendingRoundEnd.Clear();
     }
 
     private void LogSupportNotes(ulong clientId, SideOutcome outcome)
@@ -965,6 +984,11 @@ public class EndTurnManager : NetworkBehaviour
         if (clientsReadyForNextRound.Count >= NetworkManager.Singleton.ConnectedClientsIds.Count)
         {
             clientsReadyForNextRound.Clear();
+
+            // Both players finished the resolution animation: hand out the pull/economy Support effects
+            // (free cards, Seymour, Frostmoon Enclave...) BEFORE the next draw window opens.
+            ApplyGachaRoundEnd();
+
             if (timerManager != null) timerManager.RequestStartRound(nextRound);
         }
     }

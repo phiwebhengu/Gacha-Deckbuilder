@@ -68,6 +68,16 @@ public class PlayerHandManager : MonoBehaviour
     private Coroutine activeFanCoroutine;
     private Coroutine activePlayedRowCoroutine;
 
+    // Cards a Support effect gives the player (free pulls, Seymour's copy...). They are shown one at a time.
+    private class BonusCard
+    {
+        public PullResult Result;
+        public string Reason;
+    }
+    private readonly Queue<BonusCard> bonusQueue = new Queue<BonusCard>();
+    private Coroutine bonusRoutine;
+    private int dealsInProgress = 0; // how many pull animations are running (bonus cards wait for them)
+
     // Read-only access so the opponent's card-back fan (GachaUI) can use exactly the same layout numbers.
     public float CardSpacing => cardSpacing;
     public float MaxFanAngle => maxFanAngle;
@@ -97,6 +107,8 @@ public class PlayerHandManager : MonoBehaviour
         {
             gachaManager.OnMyPullResolved += HandlePullResolved;
             gachaManager.OnPullFailed += HandlePullFailed;
+            gachaManager.OnMyBonusCardGranted += HandleBonusCardGranted;
+            gachaManager.OnMyHandCardsRemoved += HandleHandCardsRemoved;
         }
         if (timerManager != null)
         {
@@ -111,6 +123,8 @@ public class PlayerHandManager : MonoBehaviour
         {
             gachaManager.OnMyPullResolved -= HandlePullResolved;
             gachaManager.OnPullFailed -= HandlePullFailed;
+            gachaManager.OnMyBonusCardGranted -= HandleBonusCardGranted;
+            gachaManager.OnMyHandCardsRemoved -= HandleHandCardsRemoved;
         }
         if (timerManager != null)
             timerManager.OnDrawPhaseChanged -= HandleDrawPhaseChanged;
@@ -204,7 +218,21 @@ public class PlayerHandManager : MonoBehaviour
     public void DealCardsFromTokens(int count, DeckType deckToPull, RectTransform sourceButton = null)
     {
         timerManager?.NotifyCardsDrawn();
-        StartCoroutine(Routine_DealCards(count, deckToPull, sourceButton));
+        StartCoroutine(Routine_DealCardsTracked(count, deckToPull, sourceButton));
+    }
+
+    // Counts running pull animations so a bonus card (from a Support effect) doesn't fly over the same spot at the same time.
+    private IEnumerator Routine_DealCardsTracked(int count, DeckType deckToPull, RectTransform sourceButton)
+    {
+        dealsInProgress++;
+        try
+        {
+            yield return StartCoroutine(Routine_DealCards(count, deckToPull, sourceButton));
+        }
+        finally
+        {
+            dealsInProgress = Mathf.Max(0, dealsInProgress - 1);
+        }
     }
 
     private IEnumerator Routine_DealCards(int count, DeckType deckToPull, RectTransform sourceButton)
@@ -324,6 +352,13 @@ public class PlayerHandManager : MonoBehaviour
 
             yield return new WaitForSeconds(centerPauseDuration);
 
+            // Knights of Favonius Library: "discard this pull and pull again". The card is shown, then thrown away.
+            if (result.AutoDiscard)
+            {
+                yield return StartCoroutine(Routine_ShrinkAndDestroy(newCardObj));
+                continue;
+            }
+
             // ---- 6. MOVE TO HAND ----
             t = 0f;
             startPos = cardRect.position;
@@ -365,6 +400,211 @@ public class PlayerHandManager : MonoBehaviour
     }
 
     private void OnCardSelectionChanged(BalatroCardController card) => UpdateHandLayout();
+
+    // ============================ SUPPORT EFFECT CARDS ============================
+
+    private void HandleBonusCardGranted(PullResult result, string reason)
+    {
+        if (result == null) return;
+
+        bonusQueue.Enqueue(new BonusCard { Result = result, Reason = reason });
+
+        if (bonusRoutine == null) bonusRoutine = StartCoroutine(Routine_ProcessBonusQueue());
+    }
+
+    private IEnumerator Routine_ProcessBonusQueue()
+    {
+        while (bonusQueue.Count > 0)
+        {
+            // Let a pull the player just made finish its animation first (but never wait forever).
+            float waited = 0f;
+            while (dealsInProgress > 0 && waited < 4f)
+            {
+                waited += Time.unscaledDeltaTime;
+                yield return null;
+            }
+
+            BonusCard next = bonusQueue.Dequeue();
+            yield return StartCoroutine(Routine_ReceiveBonusCard(next.Result, next.Reason));
+        }
+
+        bonusRoutine = null;
+    }
+
+    // Same look as a normal pull (fly to the centre, reveal, fly to the hand) but there is nothing to wait for:
+    // the server already told us what the card is.
+    private IEnumerator Routine_ReceiveBonusCard(PullResult result, string reason)
+    {
+        if (cardPrefab == null ||
+            cardPrefab.GetComponent<BalatroCardController>() == null ||
+            cardPrefab.GetComponentInChildren<CardVisual>(true) == null)
+        {
+            Debug.LogError("[PlayerHandManager] cardPrefab is missing or lacks BalatroCardController / CardVisual! Can't show a bonus card.");
+            yield break;
+        }
+
+        if (cachedEndTurnManager == null) cachedEndTurnManager = FindFirstObjectByType<EndTurnManager>();
+
+        Debug.Log($"[PlayerHandManager] Bonus card: {result.CardName} ({reason})");
+
+        Transform spawnParent = targetCanvas != null ? targetCanvas.transform : handTransform;
+        GameObject newCardObj = Instantiate(cardPrefab, spawnParent);
+        RectTransform cardRect = newCardObj.GetComponent<RectTransform>();
+        BalatroCardController controller = newCardObj.GetComponent<BalatroCardController>();
+        CardVisual visual = newCardObj.GetComponentInChildren<CardVisual>(true);
+
+        if (cachedEndTurnManager != null) controller.SetEndTurnManager(cachedEndTurnManager);
+        controller.LockForFlight();
+
+        cardRect.position = handTransform.position;
+        cardRect.localScale = Vector3.one * 0.3f;
+        cardRect.rotation = Quaternion.identity;
+
+        // ---- fly to the centre ----
+        Vector3 centerPosition = targetCanvas != null ? targetCanvas.transform.position : Vector3.zero;
+        Vector3 targetCenterScale = Vector3.one * centerRevealScale;
+        float movePhaseDuration = Mathf.Max(0.01f, (totalDrawDuration - centerPauseDuration) * 0.5f);
+
+        float t = 0f;
+        Vector3 startPos = cardRect.position;
+        Vector3 startScale = cardRect.localScale;
+
+        while (t < movePhaseDuration)
+        {
+            if (newCardObj == null) yield break;
+            t += Time.deltaTime;
+            float progress = Mathf.SmoothStep(0f, 1f, t / movePhaseDuration);
+            cardRect.position = Vector3.Lerp(startPos, centerPosition, progress);
+            cardRect.localScale = Vector3.Lerp(startScale, targetCenterScale, progress);
+            yield return null;
+        }
+
+        cardRect.position = centerPosition;
+        cardRect.localScale = targetCenterScale;
+
+        // ---- reveal ----
+        bool isAction = result.Deck == DeckType.Action;
+        Sprite sprite = GetCardSpriteCached(result.CardId, isAction);
+
+        if (isAction && result.ActionData != null) visual.Setup(result.ActionData, sprite);
+        else if (!isAction && result.SupportData != null) visual.Setup(result.SupportData, sprite);
+        else if (visual.cardImage != null && sprite != null) visual.cardImage.sprite = sprite;
+
+        controller.SetCardId(result.CardId);
+        if (isAction && result.ActionData != null)
+            controller.SetCategory(result.ActionData.Role == "Attack" ? CardCategory.Attack : CardCategory.Defense);
+        else if (!isAction)
+        {
+            controller.SetCategory(CardCategory.Support);
+            if (result.SupportData != null)
+                controller.SetCardMetadata(result.SupportData.EffectType == "Forever");
+        }
+
+        if (JuiceFXManager.Instance != null) JuiceFXManager.Instance.TriggerRarityJuice(result.Tier);
+        else if (juiceFXManager != null) juiceFXManager.TriggerRarityJuice(result.Tier);
+
+        visual.PlayReveal(result.Tier);
+
+        yield return new WaitForSeconds(centerPauseDuration);
+
+        if (newCardObj == null) yield break;
+
+        if (result.AutoDiscard)
+        {
+            yield return StartCoroutine(Routine_ShrinkAndDestroy(newCardObj));
+            yield break;
+        }
+
+        // ---- fly into the hand ----
+        t = 0f;
+        startPos = cardRect.position;
+        startScale = cardRect.localScale;
+
+        while (t < movePhaseDuration)
+        {
+            if (newCardObj == null) yield break;
+            t += Time.deltaTime;
+            float progress = Mathf.SmoothStep(0f, 1f, t / movePhaseDuration);
+            cardRect.position = Vector3.Lerp(startPos, handTransform.position, progress);
+            cardRect.localScale = Vector3.Lerp(startScale, Vector3.one, progress);
+            yield return null;
+        }
+
+        Vector3 arrivalWorldPos = cardRect.position;
+        newCardObj.transform.SetParent(handTransform, true);
+
+        cardRect.anchorMin = new Vector2(0.5f, 0.5f);
+        cardRect.anchorMax = new Vector2(0.5f, 0.5f);
+        cardRect.pivot = new Vector2(0.5f, 0.5f);
+        cardRect.position = arrivalWorldPos;
+        cardRect.localScale = Vector3.one;
+
+        controller.SetInteractable(timerManager == null || !timerManager.IsDrawPhaseActive);
+
+        controller.SelectionChanged -= OnCardSelectionChanged;
+        controller.SelectionChanged += OnCardSelectionChanged;
+
+        cardsInHand.Add(controller);
+        UpdateHandLayout();
+
+        yield return new WaitForSeconds(dealDelay);
+    }
+
+    // The card is thrown away: it shrinks to nothing, then is destroyed.
+    private IEnumerator Routine_ShrinkAndDestroy(GameObject cardObj)
+    {
+        if (cardObj == null) yield break;
+
+        Transform tr = cardObj.transform;
+        Vector3 startScale = tr.localScale;
+        float t = 0f;
+        const float duration = 0.25f;
+
+        while (t < duration)
+        {
+            if (cardObj == null) yield break;
+            t += Time.unscaledDeltaTime;
+            tr.localScale = Vector3.Lerp(startScale, Vector3.zero, Mathf.Clamp01(t / duration));
+            yield return null;
+        }
+
+        if (cardObj != null) Destroy(cardObj);
+    }
+
+    // A Support effect (Frostmoon Enclave) took cards out of the hand. Ids are network ids (see CardNetId).
+    private void HandleHandCardsRemoved(int[] netIds)
+    {
+        DiscardHandCardsByNetId(netIds);
+    }
+
+    public void DiscardHandCardsByNetId(int[] netIds)
+    {
+        if (netIds == null || netIds.Length == 0) return;
+
+        CleanupHandList();
+        bool removedAny = false;
+
+        foreach (int netId in netIds)
+        {
+            for (int i = 0; i < cardsInHand.Count; i++)
+            {
+                BalatroCardController card = cardsInHand[i];
+                if (card == null) continue;
+
+                if (CardNetId.Encode(card.CardId, card.Category == CardCategory.Support) == netId)
+                {
+                    // Out of the list first, so the fan closes the gap while the card shrinks away.
+                    cardsInHand.RemoveAt(i);
+                    card.SetInteractable(false);
+                    StartCoroutine(Routine_ShrinkAndDestroy(card.gameObject));
+                    removedAny = true;
+                    break;
+                }
+            }
+        }
+
+        if (removedAny) UpdateHandLayout();
+    }
 
     public void SetAllCardsInteractable(bool state)
     {

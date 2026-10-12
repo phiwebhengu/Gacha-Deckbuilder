@@ -23,6 +23,12 @@ public class GachaUI : MonoBehaviour
     public Button pullActionButton;
     public Button pullSupportButton;
 
+    [Header("Free Pulls (Xudong / Atea) - optional")]
+    [Tooltip("Optional. Shows the free pulls / Support discount you have left. Hidden when you have none.")]
+    public TMP_Text freePullsText;
+    public string freePullsFormat = "Free pulls: {0}";
+    public string supportDiscountFormat = "Support pull -{0} token";
+
     [Header("Opponent Visuals")]
     public GameObject cardBackPrefab;
     public Transform OpponentCardContainer;
@@ -59,7 +65,12 @@ public class GachaUI : MonoBehaviour
     // instead of waiting a full network round trip (that wait is what made the joining player's buttons feel dead).
     private int serverTokens = 0;
     private int pullsInFlight = 0;
-    private int DisplayedTokens => Mathf.Max(0, serverTokens - pullsInFlight);
+    private int inFlightCost = 0; // tokens the in-flight pull will cost (0 when it is a free pull)
+    private int DisplayedTokens => Mathf.Max(0, serverTokens - inFlightCost);
+
+    // Xudong / Atea, as last reported by the server. Used to work out what the next pull costs.
+    private int freePullCredits = 0;
+    private int supportPullDiscount = 0;
 
     private int actionPityCount = 0;
     private int supportPityCount = 0;
@@ -76,6 +87,8 @@ public class GachaUI : MonoBehaviour
             mgr.OnPullFailed -= HandlePullFailed;
             mgr.OnOpponentDrewCard -= HandleOpponentDrewCard;
             mgr.OnPityUpdated -= HandlePityUpdated;
+            mgr.OnMyPullBenefitsChanged -= HandleBenefitsChanged;
+            mgr.OnOpponentLostCards -= HandleOpponentLostCards;
         }
         if (drawTimerManager != null)
         {
@@ -95,10 +108,16 @@ public class GachaUI : MonoBehaviour
         mgr.OnPullFailed += HandlePullFailed;
         mgr.OnOpponentDrewCard += HandleOpponentDrewCard;
         mgr.OnPityUpdated += HandlePityUpdated;
+        mgr.OnMyPullBenefitsChanged += HandleBenefitsChanged;
+        mgr.OnOpponentLostCards += HandleOpponentLostCards;
 
         serverTokens = mgr.GetLocalPlayerTokens();
         pullsInFlight = 0;
+        inFlightCost = 0;
+        freePullCredits = 0;
+        supportPullDiscount = 0;
         RefreshTokenText();
+        RefreshFreePullsText();
 
         var actionPity = mgr.GetLocalPlayerPity(true);
         actionPityCount = actionPity.pulls;
@@ -136,6 +155,7 @@ public class GachaUI : MonoBehaviour
     {
         serverTokens = tokens;
         pullsInFlight = Mathf.Max(0, pullsInFlight - 1);
+        if (pullsInFlight == 0) inFlightCost = 0;
         RefreshTokenText();
         UpdateButtonInteractability(isDrawPhaseActive);
     }
@@ -144,10 +164,45 @@ public class GachaUI : MonoBehaviour
     {
         isDrawPhaseActive = phaseActive;
         bool timerAllowsPull = (drawTimerManager == null) || isDrawPhaseActive;
-        bool canPull = DisplayedTokens > 0 && pullsInFlight == 0 && timerAllowsPull;
+        bool canPull = pullsInFlight == 0 && timerAllowsPull;
 
-        if (pullActionButton != null) pullActionButton.interactable = canPull;
-        if (pullSupportButton != null) pullSupportButton.interactable = canPull;
+        // Each button checks its own price: Atea makes Support pulls cheaper, Xudong makes every pull free.
+        if (pullActionButton != null) pullActionButton.interactable = canPull && DisplayedTokens >= CostFor(DeckType.Action);
+        if (pullSupportButton != null) pullSupportButton.interactable = canPull && DisplayedTokens >= CostFor(DeckType.Support);
+    }
+
+    private int CostFor(DeckType deck)
+    {
+        int baseCost = mgr != null ? mgr.PullCost : 1;
+        return GachaManager.CostOfPull(baseCost, deck == DeckType.Support, freePullCredits, supportPullDiscount);
+    }
+
+    // Xudong / Atea numbers changed (a free pull was used, or a support card gave new ones).
+    private void HandleBenefitsChanged(int freePulls, int supportDiscount)
+    {
+        freePullCredits = freePulls;
+        supportPullDiscount = supportDiscount;
+        RefreshFreePullsText();
+        RefreshTokenText();
+        UpdateButtonInteractability(isDrawPhaseActive);
+    }
+
+    private void RefreshFreePullsText()
+    {
+        if (freePullsText == null) return;
+
+        var parts = new List<string>();
+        if (freePullCredits > 0) parts.Add(string.Format(freePullsFormat, freePullCredits));
+        if (supportPullDiscount > 0) parts.Add(string.Format(supportDiscountFormat, supportPullDiscount));
+
+        freePullsText.text = string.Join("\n", parts);
+        freePullsText.gameObject.SetActive(parts.Count > 0);
+    }
+
+    // A Support effect (Frostmoon Enclave) removed cards from the opponent's hand.
+    private void HandleOpponentLostCards(int count)
+    {
+        RemoveOpponentCardBacks(count);
     }
 
     private void HandlePullFailed(string reason)
@@ -156,6 +211,7 @@ public class GachaUI : MonoBehaviour
 
         // The server refused, so no token was spent: give back the optimistic deduction.
         pullsInFlight = Mathf.Max(0, pullsInFlight - 1);
+        if (pullsInFlight == 0) inFlightCost = 0;
         RefreshTokenText();
         UpdateButtonInteractability(isDrawPhaseActive);
     }
@@ -355,10 +411,12 @@ public class GachaUI : MonoBehaviour
     private void PullFromDeck(DeckType deck)
     {
         bool timerAllowsPull = (drawTimerManager == null) || drawTimerManager.IsDrawPhaseActive;
-        if (DisplayedTokens <= 0 || pullsInFlight > 0 || !timerAllowsPull) return;
+        int cost = CostFor(deck);
+        if (DisplayedTokens < cost || pullsInFlight > 0 || !timerAllowsPull) return;
 
         // Must happen BEFORE the request: on the host the server answers synchronously inside this call.
         pullsInFlight++;
+        inFlightCost = cost;
         RefreshTokenText();
         UpdateButtonInteractability(isDrawPhaseActive);
 

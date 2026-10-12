@@ -120,9 +120,6 @@ public class DrawTimerManager : NetworkBehaviour
                 roundDisplayCanvasGroup.alpha = Mathf.Lerp(1f, 1f, elapsed / roundTextFadeDuration);
                 yield return null;
             }
-
-            // Was "= 1f": the text faded out and then instantly popped back to full opacity.
-            // (alpha is set back to 1 at the START of the next round's sequence above.)
             roundDisplayCanvasGroup.alpha = 1f;
         }
 

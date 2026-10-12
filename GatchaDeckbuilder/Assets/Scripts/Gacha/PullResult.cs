@@ -11,6 +11,10 @@ public class PullResult
     public bool PityTriggered;
     public bool Was5050Roll;
     public bool Won5050;
+
+    // Set by the server when a Support effect throws this card away the moment it is pulled
+    // (Knights of Favonius Library: "discard this pull and pull again"). The card is shown, then removed.
+    public bool AutoDiscard;
 }
 public enum DeckType
 {

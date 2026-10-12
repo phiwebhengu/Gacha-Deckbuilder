@@ -1746,6 +1746,9 @@ MonoBehaviour:
   highPityColor: {r: 1, g: 0.6470588, b: 0, a: 1}
   pullActionButton: {fileID: 850129759}
   pullSupportButton: {fileID: 1059806172}
+  freePullsText: {fileID: 0}
+  freePullsFormat: 'Free pulls: {0}'
+  supportDiscountFormat: Support pull -{0} token
   cardBackPrefab: {fileID: 2682837092641137224, guid: 376ca7ad8e442ba41b967c79d759df7d, type: 3}
   OpponentCardContainer: {fileID: 1667410413}
   matchPlayerHandFan: 1
@@ -4005,8 +4008,8 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 1, y: 0}
   m_AnchorMax: {x: 1, y: 0}
-  m_AnchoredPosition: {x: -225, y: 65}
-  m_SizeDelta: {x: 400, y: 100}
+  m_AnchoredPosition: {x: -235, y: 65}
+  m_SizeDelta: {x: 450, y: 100}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &807381251
 MonoBehaviour:
@@ -4028,7 +4031,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: 'Token: 10'
+  m_text: 'Tokens: 10'
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 56108573b0d7ce34bbb779ce6706fa51, type: 2}
   m_sharedMaterial: {fileID: -1622077581811666490, guid: 56108573b0d7ce34bbb779ce6706fa51, type: 2}
@@ -4195,8 +4198,8 @@ MonoBehaviour:
   m_fontMaterials: []
   m_fontColor32:
     serializedVersion: 2
-    rgba: 4278190080
-  m_fontColor: {r: 0, g: 0, b: 0, a: 1}
+    rgba: 4284440575
+  m_fontColor: {r: 1, g: 0.3726415, b: 0.3726415, a: 1}
   m_enableVertexGradient: 0
   m_colorMode: 3
   m_fontColorGradient:
@@ -5218,8 +5221,8 @@ MonoBehaviour:
   m_fontMaterials: []
   m_fontColor32:
     serializedVersion: 2
-    rgba: 4278190080
-  m_fontColor: {r: 0, g: 0, b: 0, a: 1}
+    rgba: 4283387727
+  m_fontColor: {r: 0.31132078, g: 0.31132078, b: 0.31132078, a: 1}
   m_enableVertexGradient: 0
   m_colorMode: 3
   m_fontColorGradient:
@@ -6007,8 +6010,8 @@ MonoBehaviour:
   m_fontMaterials: []
   m_fontColor32:
     serializedVersion: 2
-    rgba: 4294908672
-  m_fontColor: {r: 0, g: 0.105882354, b: 1, a: 1}
+    rgba: 4278845695
+  m_fontColor: {r: 1, g: 0, b: 0.039973497, a: 1}
   m_enableVertexGradient: 0
   m_colorMode: 3
   m_fontColorGradient:
@@ -6257,7 +6260,7 @@ MonoBehaviour:
   roundDisplayCanvasGroup: {fileID: 1595749862}
   roundTextFadeDuration: 0.8
   roundTextHoldDuration: 0.6
-  drawWindowDuration: 10
+  drawWindowDuration: 5
   countdownText: {fileID: 985480673}
   wordDisplayDuration: 0.6
   popStartScaleMultiplier: 1.8
@@ -7529,7 +7532,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &1521650237
 RectTransform:
   m_ObjectHideFlags: 0
@@ -8576,8 +8579,8 @@ MonoBehaviour:
   m_fontMaterials: []
   m_fontColor32:
     serializedVersion: 2
-    rgba: 4294908672
-  m_fontColor: {r: 0, g: 0.10449946, b: 1, a: 1}
+    rgba: 4278190080
+  m_fontColor: {r: 0, g: 0, b: 0, a: 1}
   m_enableVertexGradient: 0
   m_colorMode: 3
   m_fontColorGradient:
@@ -8767,7 +8770,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 0, y: -125}
+  m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 350, y: 125}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &1739437496
@@ -9523,8 +9526,8 @@ MonoBehaviour:
   m_fontMaterials: []
   m_fontColor32:
     serializedVersion: 2
-    rgba: 4278190080
-  m_fontColor: {r: 0, g: 0, b: 0, a: 1}
+    rgba: 4294930795
+  m_fontColor: {r: 0.4198113, g: 0.4430173, b: 1, a: 1}
   m_enableVertexGradient: 0
   m_colorMode: 3
   m_fontColorGradient:

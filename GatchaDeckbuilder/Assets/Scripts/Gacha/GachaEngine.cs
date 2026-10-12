@@ -4,14 +4,18 @@ using System.Linq;
 
 public static class GachaEngine
 {
-    private static (Rarity tier, bool pityTriggered) RollTier(PullConfig config, PityState state, Random rng)
+    private static (Rarity tier, bool pityTriggered) RollTier(PullConfig config, PityState state, Random rng, int legendaryBonus = 0, Rarity? forcedTier = null)
     {
         // Check Pity First
         if (config.pityThreshold > 0 && state.PullsSinceLegendary >= config.pityThreshold)
             return (Rarity.Legendary, true);
 
-        // Normal Roll
-        var tier = config.RollRarity(rng);
+        // A Support effect can force the tier (Golden House: "trigger a gold pull" = a Legendary pull)
+        if (forcedTier.HasValue)
+            return (forcedTier.Value, false);
+
+        // Normal Roll (legendaryBonus = Jade Chamber luck, in percentage points)
+        var tier = config.RollRarity(rng, legendaryBonus);
 
         // Optional: Soft pity boost could be added here if needed
 
@@ -35,7 +39,8 @@ public static class GachaEngine
 
     public static PullResult PullAction(
         PullConfig config, PityState state, Random rng,
-        List<ActionCardData> pool, int featuredCardId)
+        List<ActionCardData> pool, int featuredCardId,
+        int legendaryBonus = 0, Rarity? forcedTier = null)
     {
         if (pool == null || pool.Count == 0)
         {
@@ -43,7 +48,7 @@ public static class GachaEngine
             return new PullResult { Deck = DeckType.Action, CardName = "Error", Tier = Rarity.Common };
         }
 
-        var (tier, pityTriggered) = RollTier(config, state, rng);
+        var (tier, pityTriggered) = RollTier(config, state, rng, legendaryBonus, forcedTier);
         string tierStr = tier.ToString();
 
         ActionCardData chosen;
@@ -107,14 +112,15 @@ public static class GachaEngine
     // Repeat similar safety checks for PullSupport...
     public static PullResult PullSupport(
         PullConfig config, PityState state, Random rng,
-        List<SupportCardData> pool, int featuredCardId)
+        List<SupportCardData> pool, int featuredCardId,
+        int legendaryBonus = 0, Rarity? forcedTier = null)
     {
         if (pool == null || pool.Count == 0)
         {
             return new PullResult { Deck = DeckType.Support, CardName = "Error", Tier = Rarity.Common };
         }
 
-        var (tier, pityTriggered) = RollTier(config, state, rng);
+        var (tier, pityTriggered) = RollTier(config, state, rng, legendaryBonus, forcedTier);
         string tierStr = tier.ToString();
 
         SupportCardData chosen;

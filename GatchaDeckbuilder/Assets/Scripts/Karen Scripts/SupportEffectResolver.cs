@@ -9,6 +9,8 @@ using UnityEngine;
 /// 1. Totals come from the played ACTION cards: Attack cards add to attack, Defense cards add to defense.
 /// 2. "Doubling" supports are worked out (Dawn Winery, Tubby, Stormterror's Lair). Each played support gets a
 ///    multiplier (x1 normally, x2 when doubled). Every number below is scaled by that multiplier.
+///    The multiplier is also handed to the gacha side (see SideOutcome.PlayedSupports), so doubled effects such as
+///    Liyue Harbor Wharf give double the cards.
 /// 3. Each player's own modifiers, in this order:
 ///      a) flat bonuses/penalties  (Favonius Cathedral, Central Laboratory Ruins, Grand Narukami Shrine, Mamere)
 ///      b) conversion               (Parametric Transformer: defense -> attack)
@@ -26,19 +28,36 @@ using UnityEngine;
 /// - "Own N cards" / "have defense cards" use the cards you PLAYED this round (the server doesn't track hands).
 /// - "Win the round" (Katheryne) = you dealt more damage than you took.
 /// - A doubled effect: flat numbers are multiplied by 2; "double X" effects become x4.
+/// - Companion / Location / Item comes from the "Category" column of SupportDeck.csv (SupportCardData.Category).
+///   If the CSV has no such column, a best-guess table by card ID is used instead (KindOfById).
 /// - Dawn Winery doubles ALL Companion supports played alongside it; Tubby doubles ALL Location supports.
-/// - Stormterror's Lair doubles the NEXT support played after it (later in the same round, or next round).
+/// - Stormterror's Lair doubles the NEXT support played with it, THE SAME ROUND ONLY (nothing carries over to later
+///   rounds). "Next" = the first other support in the played order; two Lairs double two different supports.
 /// - Ellin's +damage applies even if the attack was fully blocked; Memento Lens still cancels it.
 ///
 /// Supports that are NOT match-result effects (pulls, draws, pity, luck, discarding from the collection) are not
-/// handled here: see <see cref="AffectsMatchResult"/>.
+/// handled here: see <see cref="AffectsMatchResult"/>. They are applied by GachaManager.ApplyRoundEnd, which gets the
+/// played supports (and their multipliers) from <see cref="SideOutcome.PlayedSupports"/>.
 /// </summary>
 
-/// <summary>Per-player support state that has to survive from one round to the next.</summary>
+/// <summary>
+/// Per-player support state that has to survive from one round to the next.
+/// Nothing needs to survive any more (Stormterror's Lair now only works in the round it is played), the class is
+/// kept so the Resolve() signature and EndTurnManager don't have to change.
+/// </summary>
 public class SupportMatchState
 {
-    /// <summary>Stormterror's Lair was played and its "next support effect is doubled" has not been used yet.</summary>
-    public bool DoubleNextSupportEffect;
+}
+
+/// <summary>One support card a player played this round, as the gacha side needs to see it.</summary>
+public class PlayedSupportInfo
+{
+    public int SupportId;
+    public int NetId;
+    /// <summary>1 normally, 2 when the effect was doubled (Dawn Winery / Tubby / Stormterror's Lair), 4 when doubled twice.</summary>
+    public int Mult = 1;
+    /// <summary>True for "Immediate" cards: they are used up and leave the hand after the round.</summary>
+    public bool Spent;
 }
 
 /// <summary>Everything the match needs to know about one player after support effects are applied.</summary>
@@ -61,6 +80,15 @@ public class SideOutcome
 
     /// <summary>Human-readable log of the effects that fired (for Debug.Log / future on-screen popups).</summary>
     public readonly List<string> Notes = new List<string>();
+
+    /// <summary>Every support this player played, in play order, with its multiplier. The gacha side reads this.</summary>
+    public readonly List<PlayedSupportInfo> PlayedSupports = new List<PlayedSupportInfo>();
+
+    /// <summary>How many cards (actions + supports) this player played this round.</summary>
+    public int PlayedCardCount;
+
+    /// <summary>How many of the played cards leave the hand for good (spent Immediate supports + discarded cards).</summary>
+    public int RemovedFromHandCount;
 }
 
 public static class SupportEffectResolver
@@ -97,11 +125,33 @@ public static class SupportEffectResolver
     public const int CentralLaboratoryRuins = 29;
     public const int Mamere = 30;
 
-    // Dawn Winery doubles Companions, Tubby doubles Locations. The CSV has no "type" column, so the kind of each
-    // support is listed here (best guess from the Genshin TCG card types). Edit KindOf if one is wrong.
-    private enum SupportKind { Location, Companion, Item }
+    // Dawn Winery doubles Companions, Tubby doubles Locations. The kind comes from the CSV "Category" column.
+    private enum SupportKind { Location, Companion, Item, Other }
 
-    private static SupportKind KindOf(int supportId)
+    private static bool warnedMissingCategory;
+
+    private static SupportKind KindOf(SupportCardData data)
+    {
+        string category = data != null && data.Category != null ? data.Category.Trim() : "";
+
+        if (category.Length > 0)
+        {
+            if (category.IndexOf("compan", System.StringComparison.OrdinalIgnoreCase) >= 0) return SupportKind.Companion;
+            if (category.IndexOf("locat", System.StringComparison.OrdinalIgnoreCase) >= 0) return SupportKind.Location;
+            if (category.IndexOf("item", System.StringComparison.OrdinalIgnoreCase) >= 0) return SupportKind.Item;
+            return SupportKind.Other; // some other category (e.g. Event): neither Dawn Winery nor Tubby doubles it
+        }
+
+        if (!warnedMissingCategory)
+        {
+            warnedMissingCategory = true;
+            Debug.LogWarning("[SupportEffectResolver] Support cards have no Category (add a 'Category' column to SupportDeck.csv). Guessing Companion/Location/Item by card ID.");
+        }
+        return data != null ? KindOfById(data.Id) : SupportKind.Other;
+    }
+
+    // Fallback used only when the CSV has no Category column (best guess from the Genshin TCG card types).
+    private static SupportKind KindOfById(int supportId)
     {
         switch (supportId)
         {
@@ -199,8 +249,8 @@ public static class SupportEffectResolver
         Side b = BuildSide(cardsB, deck);
 
         // 2. who gets doubled
-        BuildMultipliers(a, stateA);
-        BuildMultipliers(b, stateB);
+        BuildMultipliers(a);
+        BuildMultipliers(b);
 
         // 3. each player's own modifiers
         ApplyOwnModifiers(a, b);
@@ -217,6 +267,9 @@ public static class SupportEffectResolver
         // 6. after the round
         ApplyAfterRound(a, b, damageByA > damageByB);
         ApplyAfterRound(b, a, damageByB > damageByA);
+
+        FillGachaInfo(a);
+        FillGachaInfo(b);
 
         a.Outcome.Attack = a.Attack;
         a.Outcome.Defense = a.Defense;
@@ -286,39 +339,41 @@ public static class SupportEffectResolver
 
     // ===================== step 2: doubling =====================
 
-    private static void BuildMultipliers(Side side, SupportMatchState state)
+    private static void BuildMultipliers(Side side)
     {
         bool hasDawnWinery = Has(side, DawnWinery);
         bool hasTubby = Has(side, Tubby);
+
+        // Each Stormterror's Lair doubles one OTHER support played this round (the next one in the played order).
+        int lairsToSpend = 0;
+        foreach (SupportEntry s in side.Supports)
+        {
+            if (s.Data.Id == StormterrorsLair) lairsToSpend++;
+        }
 
         foreach (SupportEntry s in side.Supports)
         {
             int id = s.Data.Id;
 
-            // Stormterror's Lair: the next support played after it is doubled (this round or a later one).
-            if (id != StormterrorsLair && state != null && state.DoubleNextSupportEffect)
+            if (id != StormterrorsLair && lairsToSpend > 0)
             {
                 s.Mult *= 2;
-                state.DoubleNextSupportEffect = false;
+                lairsToSpend--;
                 Note(side, s, "doubled by Stormterror's Lair");
             }
 
             // Dawn Winery doubles Companions played with it, Tubby doubles Locations played with it.
-            if (hasDawnWinery && id != DawnWinery && KindOf(id) == SupportKind.Companion)
+            SupportKind kind = KindOf(s.Data);
+
+            if (hasDawnWinery && id != DawnWinery && kind == SupportKind.Companion)
             {
                 s.Mult *= 2;
                 Note(side, s, "doubled by Dawn Winery");
             }
-            if (hasTubby && id != Tubby && KindOf(id) == SupportKind.Location)
+            if (hasTubby && id != Tubby && kind == SupportKind.Location)
             {
                 s.Mult *= 2;
                 Note(side, s, "doubled by Tubby");
-            }
-
-            // Arm the Lair AFTER the check above, so it doesn't double itself.
-            if (id == StormterrorsLair && state != null)
-            {
-                state.DoubleNextSupportEffect = true;
             }
         }
     }
@@ -503,11 +558,38 @@ public static class SupportEffectResolver
                 default:
                     if (!AffectsMatchResult(s.Data.Id))
                     {
-                        Note(me, s, "no match-result effect (pull/economy effect, not applied here)");
+                        Note(me, s, "pull/economy effect (applied by the gacha side at the end of the round)");
                     }
                     break;
             }
         }
+    }
+
+    // ===================== hand-over to the gacha side =====================
+
+    private static void FillGachaInfo(Side side)
+    {
+        SideOutcome outcome = side.Outcome;
+        outcome.PlayedCardCount = side.TotalCards;
+
+        int removed = outcome.DiscardedNetIds.Count; // e.g. Kid Kujirai
+
+        foreach (SupportEntry s in side.Supports)
+        {
+            bool spent = !Is(s.Data.EffectType, "Forever"); // Immediate supports are used up
+
+            outcome.PlayedSupports.Add(new PlayedSupportInfo
+            {
+                SupportId = s.Data.Id,
+                NetId = s.NetId,
+                Mult = s.Mult,
+                Spent = spent
+            });
+
+            if (spent) removed++;
+        }
+
+        outcome.RemovedFromHandCount = removed;
     }
 
     // ===================== helpers =====================

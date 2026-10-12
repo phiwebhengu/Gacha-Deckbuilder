@@ -21,13 +21,24 @@ public class PullConfig : ScriptableObject
             Debug.LogWarning($"[PullConfig] Weights sum to {total}, not 100 — odds will be normalized at runtime but this should be fixed.");
     }
 
-    public Rarity RollRarity(System.Random rng)
+    /// <param name="legendaryBonus">Extra Legendary chance in percentage points (Jade Chamber). It is taken from Common first, then Rare.</param>
+    public Rarity RollRarity(System.Random rng, int legendaryBonus = 0)
     {
         int total = Mathf.Max(1, commonWeight + rareWeight + legendaryWeight);
+
+        int extra = Mathf.Clamp(Mathf.Max(0, legendaryBonus), 0, Mathf.Max(0, total - legendaryWeight));
+        int common = commonWeight;
+        int rare = rareWeight;
+
+        int fromCommon = Mathf.Min(extra, common);
+        common -= fromCommon;
+        extra -= fromCommon;
+        rare -= Mathf.Min(extra, rare);
+
         int roll = rng.Next(0, total);
 
-        if (roll < commonWeight) return Rarity.Common;
-        if (roll < commonWeight + rareWeight) return Rarity.Rare;
+        if (roll < common) return Rarity.Common;
+        if (roll < common + rare) return Rarity.Rare;
         return Rarity.Legendary;
     }
 }
