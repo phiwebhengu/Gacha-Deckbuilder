@@ -86,6 +86,16 @@ public class GachaManager : NetworkBehaviour
 
     private void UnregisterPlayer(ulong clientId) => playerStates.Remove(clientId);
 
+    /// <summary>Server only. Gives a player tokens (used by Support card effects such as Paimon / Katheryne / Vanarana).</summary>
+    public void AddTokens(ulong clientId, int amount)
+    {
+        if (!IsServer || amount == 0) return;
+        if (!playerStates.TryGetValue(clientId, out var state)) return;
+
+        state.Tokens = Mathf.Max(0, state.Tokens + amount);
+        SendTokensClientRpc(state.Tokens, ToTarget(clientId));
+    }
+
     public void SetFeaturedCards(int actionId, int supportId)
     {
         if (!IsServer) return;

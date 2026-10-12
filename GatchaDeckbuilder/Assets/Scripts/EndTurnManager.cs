@@ -20,6 +20,10 @@ public struct TurnResultData : INetworkSerializable
     public int finalPlayerHP;
     public int finalOpponentHP;
 
+    // Played cards that a Support effect removes from the hand after the round (e.g. Kid Kujirai). Network ids.
+    public int[] playerDiscardedCardIds;
+    public int[] opponentDiscardedCardIds;
+
     public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
     {
         int playerIdsLength = playerCardIds != null ? playerCardIds.Length : 0;
@@ -40,6 +44,16 @@ public struct TurnResultData : INetworkSerializable
         serializer.SerializeValue(ref netDamageToOpponent);
         serializer.SerializeValue(ref finalPlayerHP);
         serializer.SerializeValue(ref finalOpponentHP);
+
+        int playerDiscardLength = playerDiscardedCardIds != null ? playerDiscardedCardIds.Length : 0;
+        serializer.SerializeValue(ref playerDiscardLength);
+        if (serializer.IsReader && playerDiscardLength > 0) playerDiscardedCardIds = new int[playerDiscardLength];
+        for (int i = 0; i < playerDiscardLength; i++) serializer.SerializeValue(ref playerDiscardedCardIds[i]);
+
+        int oppDiscardLength = opponentDiscardedCardIds != null ? opponentDiscardedCardIds.Length : 0;
+        serializer.SerializeValue(ref oppDiscardLength);
+        if (serializer.IsReader && oppDiscardLength > 0) opponentDiscardedCardIds = new int[oppDiscardLength];
+        for (int i = 0; i < oppDiscardLength; i++) serializer.SerializeValue(ref opponentDiscardedCardIds[i]);
     }
 }
 
@@ -78,7 +92,7 @@ public class EndTurnManager : NetworkBehaviour
     [SerializeField] private TextMeshProUGUI playerDefenseText;
     [SerializeField] private TextMeshProUGUI opponentAttackText;
     [SerializeField] private TextMeshProUGUI opponentDefenseText;
-    [SerializeField] private TextMeshProUGUI opponentText;
+    //[SerializeField] private TextMeshProUGUI opponentText;
 
     [Header("Center Difference Display")]
     [SerializeField] private TextMeshProUGUI centerDifferenceText;
@@ -88,7 +102,7 @@ public class EndTurnManager : NetworkBehaviour
     [SerializeField] private float cardMovementWaitDelay = 0.5f;
     [SerializeField] private float phaseTransitionPause = 0.4f;
 
-    [Header("✨ AUDIO SETTINGS ✨")]
+    [Header("Audio Settings")]
     [SerializeField] private AudioSource audioSource;
     [Header("Incremental Points Sound")]
     [SerializeField] private AudioClip pointCountSFX;
@@ -103,14 +117,14 @@ public class EndTurnManager : NetworkBehaviour
     [SerializeField] private AudioClip defenseHighlightSFX;
     [SerializeField] private AudioClip supportHighlightSFX;
 
-    [Header("✨ JUICE: Damage Flash UI ✨")]
+    [Header("JUICE: Damage Flash UI")]
     [Tooltip("Full screen red overlay or vignette Image component for player taking damage.")]
     [SerializeField] private Image damageFlashImage;
     [SerializeField] private float flashInDuration = 0.05f;
     [SerializeField] private float flashOutDuration = 0.25f;
     [SerializeField][Range(0f, 1f)] private float maxFlashAlpha = 0.6f;
 
-    [Header("✨ JUICE: Damage UI Shake Settings ✨")]
+    [Header("JUICE: Damage UI Shake Settings")]
     [Tooltip("Optional parent panel or transform overrides for health shake. If null, defaults to playerHPText/opponentHPText RectTransforms.")]
     [SerializeField] private RectTransform playerHPRectTransformOverride;
     [SerializeField] private RectTransform opponentHPRectTransformOverride;
@@ -130,7 +144,6 @@ public class EndTurnManager : NetworkBehaviour
     [SerializeField] private RectTransform opponentSelectedHandTransform;
 
     [Header("Opponent Card Display")]
-    [Tooltip("Assign the Card Prefab here to ensure opponent cards can be instantiated reliably. Falls back to PlayerHandManager's prefab if left empty.")]
     [SerializeField] private GameObject opponentCardPrefab;
 
     [Header("System References")]
@@ -146,13 +159,8 @@ public class EndTurnManager : NetworkBehaviour
     [SerializeField] private Button forfeitButton;
     [SerializeField] private Button pauseButton;
 
-    [Header("Leave To Lobby (mid-match or after it ends)")]
-    [Tooltip("OPTIONAL. A button you can put anywhere (e.g. in the pause menu or a screen corner) that leaves the match and goes back to the lobby. It is wired up automatically.")]
-    [SerializeField] private Button leaveToLobbyButton;
-    [Tooltip("OPTIONAL. An 'Are you sure?' panel shown when leaving MID-match, because leaving counts as a forfeit. Leave empty to skip the confirmation.")]
+    [Header("Leave To Lobby")]
     [SerializeField] private GameObject leaveConfirmPanel;
-    [SerializeField] private Button confirmLeaveButton;
-    [SerializeField] private Button cancelLeaveButton;
 
     [Header("Scene Settings")]
     [SerializeField] private string gameType = "Game";
@@ -176,6 +184,13 @@ public class EndTurnManager : NetworkBehaviour
 
     // How many of the opponent's played cards return to their hand after this round's resolution.
     private int opponentCardsReturningToHand = 0;
+
+    // This player's played cards that a Support effect removes after the round (set when the result arrives).
+    private int[] pendingOwnDiscardNetIds = null;
+
+    // Server only: Support state that carries over between rounds (e.g. Stormterror's Lair), per player.
+    private readonly Dictionary<ulong, SupportMatchState> supportStates = new Dictionary<ulong, SupportMatchState>();
+    private GachaManager cachedGachaManager;
 
     // Server-side: which clients have finished watching the combat animation and are ready for the next round.
     private readonly HashSet<ulong> clientsReadyForNextRound = new HashSet<ulong>();
@@ -340,14 +355,6 @@ public class EndTurnManager : NetworkBehaviour
             damageFlashImage.gameObject.SetActive(true);
         }
 
-        // Leave-to-lobby buttons. OnGoToLobby ignores repeat calls, so it is safe if the same button is also
-        // wired in the Inspector.
-        if (returnToLobbyButton != null) returnToLobbyButton.onClick.AddListener(OnGoToLobby);
-        if (leaveToLobbyButton != null) leaveToLobbyButton.onClick.AddListener(OnLeaveClicked);
-        if (confirmLeaveButton != null) confirmLeaveButton.onClick.AddListener(OnGoToLobby);
-        if (cancelLeaveButton != null) cancelLeaveButton.onClick.AddListener(OnCancelLeave);
-        if (leaveConfirmPanel != null) leaveConfirmPanel.SetActive(false);
-
         CacheAndResetUI();
         UpdateEndTurnButtonVisibility();
         ClearOpponentPanel();
@@ -496,37 +503,105 @@ public class EndTurnManager : NetworkBehaviour
 
         bool aIsPlayer1 = IsPlayer1Id(idA);
 
-        var resultA = CalculateTurnResultFromIds(cardsA, cardsB);
-        resultA.playerCardIds = cardsA;
-        resultA.opponentCardIds = cardsB;
+        var deckMgr = FindFirstObjectByType<DeckManager>();
+        if (deckMgr == null)
+        {
+            Debug.LogError("[EndTurnManager] DeckManager not found on Server! Damage calculation will fail.");
+        }
+
+        // One calculation for BOTH players, so the two clients always agree. Attack/defense totals and damage already
+        // include every Support effect (see SupportEffectResolver for the rules).
+        SupportEffectResolver.Resolve(
+            cardsA, cardsB, deckMgr,
+            GetSupportState(idA), GetSupportState(idB),
+            out SideOutcome outA, out SideOutcome outB);
+
+        LogSupportNotes(idA, outA);
+        LogSupportNotes(idB, outB);
 
         int currentHpA = aIsPlayer1 ? Player1_HP.Value : Player2_HP.Value;
         int currentHpB = aIsPlayer1 ? Player2_HP.Value : Player1_HP.Value;
 
-        resultA.finalPlayerHP = Mathf.Max(0, currentHpA - resultA.netDamageToPlayer);
-        resultA.finalOpponentHP = Mathf.Max(0, currentHpB - resultA.netDamageToOpponent);
+        int finalHpA = Mathf.Max(0, currentHpA - outB.DamageDealt);
+        int finalHpB = Mathf.Max(0, currentHpB - outA.DamageDealt);
 
         if (aIsPlayer1)
         {
-            Player1_HP.Value = resultA.finalPlayerHP;
-            Player2_HP.Value = resultA.finalOpponentHP;
+            Player1_HP.Value = finalHpA;
+            Player2_HP.Value = finalHpB;
         }
         else
         {
-            Player2_HP.Value = resultA.finalPlayerHP;
-            Player1_HP.Value = resultA.finalOpponentHP;
+            Player2_HP.Value = finalHpA;
+            Player1_HP.Value = finalHpB;
         }
 
-        SendResultToClient(idA, resultA);
+        var resultA = new TurnResultData
+        {
+            playerCardIds = cardsA,
+            opponentCardIds = cardsB,
+            playerAttack = outA.Attack,
+            playerDefense = outA.Defense,
+            opponentAttack = outB.Attack,
+            opponentDefense = outB.Defense,
+            netDamageToPlayer = outB.DamageDealt,
+            netDamageToOpponent = outA.DamageDealt,
+            finalPlayerHP = finalHpA,
+            finalOpponentHP = finalHpB,
+            playerDiscardedCardIds = outA.DiscardedNetIds.ToArray(),
+            opponentDiscardedCardIds = outB.DiscardedNetIds.ToArray()
+        };
 
-        var resultB = CalculateTurnResultFromIds(cardsB, cardsA);
-        resultB.playerCardIds = cardsB;
-        resultB.opponentCardIds = cardsA;
-        resultB.finalPlayerHP = resultA.finalOpponentHP;
-        resultB.finalOpponentHP = resultA.finalPlayerHP;
+        var resultB = new TurnResultData
+        {
+            playerCardIds = cardsB,
+            opponentCardIds = cardsA,
+            playerAttack = outB.Attack,
+            playerDefense = outB.Defense,
+            opponentAttack = outA.Attack,
+            opponentDefense = outA.Defense,
+            netDamageToPlayer = outA.DamageDealt,
+            netDamageToOpponent = outB.DamageDealt,
+            finalPlayerHP = finalHpB,
+            finalOpponentHP = finalHpA,
+            playerDiscardedCardIds = outB.DiscardedNetIds.ToArray(),
+            opponentDiscardedCardIds = outA.DiscardedNetIds.ToArray()
+        };
+
+        SendResultToClient(idA, resultA);
         SendResultToClient(idB, resultB);
 
+        // Token rewards from Support effects (Paimon, Vanarana, Katheryne).
+        GrantTokens(idA, outA.TokenReward);
+        GrantTokens(idB, outB.TokenReward);
+
         pendingTurns.Clear();
+    }
+
+    private SupportMatchState GetSupportState(ulong clientId)
+    {
+        if (!supportStates.TryGetValue(clientId, out SupportMatchState state))
+        {
+            state = new SupportMatchState();
+            supportStates[clientId] = state;
+        }
+        return state;
+    }
+
+    private void GrantTokens(ulong clientId, int amount)
+    {
+        if (amount <= 0) return;
+
+        if (cachedGachaManager == null) cachedGachaManager = FindFirstObjectByType<GachaManager>();
+        if (cachedGachaManager != null) cachedGachaManager.AddTokens(clientId, amount);
+    }
+
+    private void LogSupportNotes(ulong clientId, SideOutcome outcome)
+    {
+        foreach (string note in outcome.Notes)
+        {
+            Debug.Log($"[Support] Client {clientId}: {note}");
+        }
     }
 
     private bool IsPlayer1Id(ulong clientId)
@@ -551,68 +626,11 @@ public class EndTurnManager : NetworkBehaviour
         StartCoroutine(Routine_ResolveCombatSequence(result));
     }
 
-    private TurnResultData CalculateTurnResultFromIds(int[] myCardIds, int[] opponentCardIds)
-    {
-        var deckMgr = FindFirstObjectByType<DeckManager>();
-        if (deckMgr == null)
-        {
-            Debug.LogError("[EndTurnManager] DeckManager not found on Server! Damage calculation will fail.");
-            return new TurnResultData();
-        }
-
-        int myAttack = 0, myDefense = 0;
-        int oppAttack = 0, oppDefense = 0;
-
-        void ProcessCards(int[] ids, ref int attack, ref int defense)
-        {
-            foreach (int netId in ids)
-            {
-                int id = CardNetId.Decode(netId);
-
-                if (CardNetId.IsSupport(netId))
-                {
-                    // Support cards add no attack/defense here (a clashing Action Id used to be counted by mistake).
-                    var supportCard = deckMgr.loadedSupportCards?.Find(c => c.Id == id);
-                    if (supportCard == null)
-                        Debug.LogWarning($"[EndTurnManager] Support card ID {id} not found in Support list!");
-                    continue;
-                }
-
-                var actionCard = deckMgr.loadedActionCards?.Find(c => c.Id == id);
-                if (actionCard == null)
-                {
-                    Debug.LogWarning($"[EndTurnManager] Action card ID {id} not found in Action list!");
-                    continue;
-                }
-
-                if (actionCard.Role == "Attack") attack += actionCard.Value;
-                else if (actionCard.Role == "Defense") defense += actionCard.Value;
-            }
-        }
-
-        ProcessCards(myCardIds, ref myAttack, ref myDefense);
-        ProcessCards(opponentCardIds, ref oppAttack, ref oppDefense);
-
-        int damageToOpponent = Mathf.Max(0, myAttack - oppDefense);
-        int damageToMe = Mathf.Max(0, oppAttack - myDefense);
-
-        return new TurnResultData
-        {
-            playerAttack = myAttack,
-            playerDefense = myDefense,
-            opponentAttack = oppAttack,
-            opponentDefense = oppDefense,
-            netDamageToPlayer = damageToMe,
-            netDamageToOpponent = damageToOpponent,
-            finalPlayerHP = 0,
-            finalOpponentHP = 0
-        };
-    }
-
     private IEnumerator Routine_ResolveCombatSequence(TurnResultData result)
     {
         isResolvingCombat = true;
-        opponentCardsReturningToHand = CountOpponentCardsReturningToHand(result.opponentCardIds);
+        pendingOwnDiscardNetIds = result.playerDiscardedCardIds;
+        opponentCardsReturningToHand = CountOpponentCardsReturningToHand(result.opponentCardIds, result.opponentDiscardedCardIds);
         yield return new WaitForSeconds(cardMovementWaitDelay);
 
         List<BalatroCardController> playerCards = GetControllersFromTransform(selectedHandTransform);
@@ -756,7 +774,7 @@ public class EndTurnManager : NetworkBehaviour
 
     // Same rule the local player's hand uses: Action cards and "Forever" Support cards go back to the hand,
     // "Immediate" Support cards are spent and gone.
-    private int CountOpponentCardsReturningToHand(int[] opponentCardIds)
+    private int CountOpponentCardsReturningToHand(int[] opponentCardIds, int[] opponentDiscardedIds)
     {
         if (opponentCardIds == null) return 0;
 
@@ -775,6 +793,10 @@ public class EndTurnManager : NetworkBehaviour
             var supportCard = deckMgr != null ? deckMgr.loadedSupportCards?.Find(c => c.Id == id) : null;
             if (supportCard != null && supportCard.EffectType == "Forever") returning++;
         }
+
+        // Cards a Support effect removes after the round (e.g. Kid Kujirai) don't go back to the hand either.
+        if (opponentDiscardedIds != null) returning = Mathf.Max(0, returning - opponentDiscardedIds.Length);
+
         return returning;
     }
 
@@ -1027,6 +1049,11 @@ public class EndTurnManager : NetworkBehaviour
                 // Removes spent "immediate" supports from the hand manager's lists AND destroys them, so the
                 // returning cards aren't fanned around a card that is about to disappear (that left a gap).
                 localHandManager.DiscardSubmittedImmediateSupports();
+
+                // Cards a Support effect removes this round (e.g. Kid Kujirai) are destroyed instead of returning.
+                localHandManager.DiscardSubmittedCardsByNetId(pendingOwnDiscardNetIds);
+                pendingOwnDiscardNetIds = null;
+
                 localHandManager.ReturnSubmittedCardsToHand(selectedHandTransform);
             }
             else

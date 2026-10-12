@@ -25,7 +25,7 @@ public class DrawTimerManager : NetworkBehaviour
     [Tooltip("No longer used (sounds now play through SfxPool so pitch changes can't bend other sounds). Kept so your Inspector reference isn't lost.")]
     [SerializeField] private AudioSource audioSource;
     [SerializeField] private AudioClip countdownBeepClip;
-    [SerializeField] private AudioClip timerTickClip; // Optional distinct tick SFX (falls back to countdownBeepClip if null)
+    [SerializeField] private AudioClip timerTickClip; 
     [SerializeField] private float normalPitch = 1.0f;
     [SerializeField] private float drawPitch = 1.4f;
     [SerializeField] private float urgentTickPitch = 1.2f;
@@ -117,13 +117,13 @@ public class DrawTimerManager : NetworkBehaviour
             while (elapsed < roundTextFadeDuration)
             {
                 elapsed += Time.deltaTime;
-                roundDisplayCanvasGroup.alpha = Mathf.Lerp(1f, 0f, elapsed / roundTextFadeDuration);
+                roundDisplayCanvasGroup.alpha = Mathf.Lerp(1f, 1f, elapsed / roundTextFadeDuration);
                 yield return null;
             }
 
             // Was "= 1f": the text faded out and then instantly popped back to full opacity.
             // (alpha is set back to 1 at the START of the next round's sequence above.)
-            roundDisplayCanvasGroup.alpha = 0f;
+            roundDisplayCanvasGroup.alpha = 1f;
         }
 
         yield return StartCoroutine(Routine_ExecuteCountdown());

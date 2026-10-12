@@ -14,7 +14,7 @@ ID,Name,Tier,Effect,EffectType,Copies
 13,Favonius Cathedral,Common,+2 defense if you have defense cards,Immediate,2
 14,Knights of Favonius Library,Common,Discard this pull and pull again for free,Immediate,2
 15,Dawn Winery,Common,"If a companion card is played, the effect is doubled",Immediate,2
-16,Stormterror's Lair,Common,The next Support effect you play this match is doubled,Immediate,2
+16,Stormterror's Lair,Common,The next Support effect you play this round is doubled,Immediate,2
 17,Vanarana,Common,Reclaim a token that was used to draw,Immediate,2
 18,Weeping Willow of the Lake,Common,"If the player pulled less than 2 cards this round, draw 2 cards",Immediate,2
 19,Frostmoon Enclave,Common,"Discard 2 cards from your collection, then pull 2 new ones for free",Immediate,2

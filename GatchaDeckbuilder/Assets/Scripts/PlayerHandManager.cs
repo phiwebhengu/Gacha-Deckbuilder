@@ -529,6 +529,32 @@ public class PlayerHandManager : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Destroys specific played cards instead of returning them to the hand, one card per entry.
+    /// Ids are network ids (Support ids are offset, see CardNetId). Used by Support effects that remove a card
+    /// after the round, e.g. Kid Kujirai.
+    /// </summary>
+    public void DiscardSubmittedCardsByNetId(int[] netIds)
+    {
+        if (netIds == null || netIds.Length == 0) return;
+
+        foreach (int netId in netIds)
+        {
+            for (int i = submittedCards.Count - 1; i >= 0; i--)
+            {
+                BalatroCardController c = submittedCards[i];
+                if (c == null) { submittedCards.RemoveAt(i); continue; }
+
+                if (CardNetId.Encode(c.CardId, c.Category == CardCategory.Support) == netId)
+                {
+                    submittedCards.RemoveAt(i);
+                    Destroy(c.gameObject);
+                    break;
+                }
+            }
+        }
+    }
+
     public void ReturnSubmittedCardsToHand(RectTransform containerTransform)
     {
         if (activePlayedRowCoroutine != null)
