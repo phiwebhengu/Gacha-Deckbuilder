@@ -456,6 +456,11 @@ public class PlayerHandManager : MonoBehaviour
         if (cachedEndTurnManager != null) controller.SetEndTurnManager(cachedEndTurnManager);
         controller.LockForFlight();
 
+        if (cardBackSprite != null && visual.cardImage != null)
+        {
+            visual.cardImage.sprite = cardBackSprite;
+        }
+
         cardRect.position = handTransform.position;
         cardRect.localScale = Vector3.one * 0.3f;
         cardRect.rotation = Quaternion.identity;
