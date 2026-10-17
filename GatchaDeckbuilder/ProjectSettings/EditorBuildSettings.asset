@@ -7,6 +7,9 @@ EditorBuildSettings:
   m_Scenes:
   - enabled: 1
     path: Assets/Scenes/Menu.unity
+    guid: 0ec22b1a4877c294a9fb3989774e725d
+  - enabled: 1
+    path: Assets/Scenes/Login.unity
     guid: 58341c9e20bf3f64aa062f1fe62cc573
   - enabled: 1
     path: Assets/Scenes/Lobby.unity
@@ -14,5 +17,11 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Scenes/Game.unity
     guid: 8e7dce8aee4f761478a10cff19d326d7
+  - enabled: 1
+    path: Assets/Scenes/Tutorial.unity
+    guid: d090a3a4686f8ff46b63671332aaf243
+  - enabled: 1
+    path: Assets/Scenes/AIMode.unity
+    guid: b2fd21a6db8df0040b8e3afa241df28e
   m_configObjects:
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 2bcd2660ca9b64942af0de543d8d7100, type: 3}
