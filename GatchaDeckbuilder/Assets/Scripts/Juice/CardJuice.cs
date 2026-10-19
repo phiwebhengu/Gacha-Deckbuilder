@@ -10,8 +10,13 @@ public class CardJuice : MonoBehaviour, IPointerEnterHandler, IPointerExitHandle
     [Header("Scale Parameters")]
     [SerializeField] private Vector3 normalScale = Vector3.one;
     [SerializeField] private Vector3 hoveredScale = new Vector3(1.08f, 1.08f, 1f);
-    [SerializeField] private Vector3 selectedScale = new Vector3(1.12f, 1.12f, 1f);
+    [Tooltip("Size of a SELECTED card (the 'pop'). 1.35 = 35% bigger than normal.")]
+    [SerializeField] private Vector3 selectedPopScale = new Vector3(1.35f, 1.35f, 1f);
     [SerializeField] private float transitionSpeed = 15f;
+
+    [Header("Draw Order")]
+    [Tooltip("Hovered and selected cards are drawn in front of the rest of the hand.")]
+    [SerializeField] private bool bringToFront = true;
 
     [Header("Color Parameters")]
     [SerializeField] private Color normalColor = Color.white;
@@ -73,6 +78,7 @@ public class CardJuice : MonoBehaviour, IPointerEnterHandler, IPointerExitHandle
             ApplyColor(highlightColor);
             PlaySFX(hoverSFX);
         }
+        UpdateDrawOrder();
     }
 
     public void OnPointerExit(PointerEventData eventData)
@@ -86,6 +92,7 @@ public class CardJuice : MonoBehaviour, IPointerEnterHandler, IPointerExitHandle
             ApplyScale(normalScale);
             ApplyColor(normalColor);
         }
+        UpdateDrawOrder();
     }
 
     // --- SELECTION CONTROL FROM CONTROLLER ---
@@ -97,7 +104,7 @@ public class CardJuice : MonoBehaviour, IPointerEnterHandler, IPointerExitHandle
 
         if (isSelected)
         {
-            ApplyScale(selectedScale);
+            ApplyScale(selectedPopScale);
             ApplyColor(selectedColor);
             PlaySFX(selectSFX);
         }
@@ -107,6 +114,49 @@ public class CardJuice : MonoBehaviour, IPointerEnterHandler, IPointerExitHandle
             ApplyColor(StateColor());
             PlaySFX(deselectSFX);
         }
+        UpdateDrawOrder();
+    }
+
+    // --- DRAW ORDER (UI draws later siblings on top) ---
+
+    private Transform raisedParent;
+    private int originalSiblingIndex;
+    private bool isRaised;
+
+    /// <summary>Selected or hovered cards go in front of the hand; everyone else returns to their slot.</summary>
+    private void UpdateDrawOrder()
+    {
+        if (!bringToFront) return;
+
+        bool shouldBeOnTop = isSelected || isHovered;
+
+        if (shouldBeOnTop && !isRaised)
+        {
+            raisedParent = transform.parent;
+            originalSiblingIndex = transform.GetSiblingIndex();
+            transform.SetAsLastSibling();
+            isRaised = true;
+        }
+        else if (shouldBeOnTop && isRaised)
+        {
+            // Already raised, but another card may have been raised after us: stay on top.
+            transform.SetAsLastSibling();
+        }
+        else if (!shouldBeOnTop && isRaised)
+        {
+            RestoreDrawOrder();
+        }
+    }
+
+    private void RestoreDrawOrder()
+    {
+        if (isRaised && raisedParent != null && transform.parent == raisedParent)
+        {
+            int idx = Mathf.Clamp(originalSiblingIndex, 0, raisedParent.childCount - 1);
+            transform.SetSiblingIndex(idx);
+        }
+        isRaised = false;
+        raisedParent = null;
     }
 
     // --- COMBAT HIGHLIGHT OVERRIDE (used by BalatroCardController) ---
@@ -202,6 +252,7 @@ public class CardJuice : MonoBehaviour, IPointerEnterHandler, IPointerExitHandle
         isSelected = false;
         isHovered = false;
         hasColorOverride = false;
+        RestoreDrawOrder();
 
         if (activeScaleCoroutine != null) StopCoroutine(activeScaleCoroutine);
         if (activeColorCoroutine != null) StopCoroutine(activeColorCoroutine);
