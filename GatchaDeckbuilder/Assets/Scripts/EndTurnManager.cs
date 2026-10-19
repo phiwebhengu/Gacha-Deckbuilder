@@ -160,15 +160,20 @@ public class EndTurnManager : NetworkBehaviour
     [SerializeField] private Button forfeitButton;
     [SerializeField] private Button pauseButton;
 
-    [Header("Leave To Lobby")]
+    [Header("Leave To Lobby (mid-match or after it ends)")]
+    [Tooltip("OPTIONAL. A button you can put anywhere (e.g. in the pause menu or a screen corner) that leaves the match and goes back to the lobby. It is wired up automatically.")]
+    [SerializeField] private Button leaveToLobbyButton;
+    [Tooltip("OPTIONAL. An 'Are you sure?' panel shown when leaving MID-match, because leaving counts as a forfeit. Leave empty to skip the confirmation.")]
     [SerializeField] private GameObject leaveConfirmPanel;
+    [SerializeField] private Button confirmLeaveButton;
+    [SerializeField] private Button cancelLeaveButton;
 
     [Header("Scene Settings")]
     [SerializeField] private string gameType = "Game";
     [SerializeField] private string lobbySceneName = "Lobby";
 
     [Header("Match Settings")]
-    [SerializeField] private int maxRounds = 4;
+    [SerializeField] private int maxRounds = 10;
 
     private int currentPlayerHP;
     private int currentOpponentHP;
@@ -359,6 +364,14 @@ public class EndTurnManager : NetworkBehaviour
             damageFlashImage.color = c;
             damageFlashImage.gameObject.SetActive(true);
         }
+
+        // Leave-to-lobby buttons. OnGoToLobby ignores repeat calls, so it is safe if the same button is also
+        // wired in the Inspector.
+        if (returnToLobbyButton != null) returnToLobbyButton.onClick.AddListener(OnGoToLobby);
+        if (leaveToLobbyButton != null) leaveToLobbyButton.onClick.AddListener(OnLeaveClicked);
+        if (confirmLeaveButton != null) confirmLeaveButton.onClick.AddListener(OnGoToLobby);
+        if (cancelLeaveButton != null) cancelLeaveButton.onClick.AddListener(OnCancelLeave);
+        if (leaveConfirmPanel != null) leaveConfirmPanel.SetActive(false);
 
         CacheAndResetUI();
         UpdateEndTurnButtonVisibility();
@@ -755,6 +768,9 @@ public class EndTurnManager : NetworkBehaviour
         currentPlayerHP = result.finalPlayerHP;
         currentOpponentHP = result.finalOpponentHP;
         UpdateHPUI();
+
+        // Numbers for the Outcome page (this player's point of view).
+        MatchStats.RecordRound(result.netDamageToOpponent, result.netDamageToPlayer);
 
         yield return new WaitForSeconds(0.5f);
         yield return StartCoroutine(Routine_CheckNextRoundOrEndGame());

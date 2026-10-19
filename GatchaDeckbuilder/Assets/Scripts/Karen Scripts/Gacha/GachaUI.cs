@@ -50,6 +50,7 @@ public class GachaUI : MonoBehaviour
     [Header("System References")]
     public DrawTimerManager drawTimerManager;
     public PlayerHandManager playerHandManager;
+    public GameObject cardPanel;
 
     private GachaManager mgr;
     private bool isDrawPhaseActive = true;
@@ -469,5 +470,13 @@ public class GachaUI : MonoBehaviour
         {
             text.color = normalPityColor;
         }
+    }
+    public void OpenCardPanel()
+    {
+        cardPanel.SetActive(true);
+    }
+    public void CloseCardPanel()
+    {
+        cardPanel.SetActive(false);
     }
 }

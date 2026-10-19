@@ -22,7 +22,7 @@ public class PlayerHandManager : MonoBehaviour
     [SerializeField] private float centerPauseDuration = 0.6f;
 
     [Tooltip("Scale modifier when the card is presented in the center stage.")]
-    [SerializeField] private float centerRevealScale = 1.25f;
+    [SerializeField] private float revealScale = 2.2f;
 
     [Header("Network Latency Handling")]
     [Tooltip("OPTIONAL. Sprite shown while the card is flying to the center and the server hasn't answered yet. " +
@@ -274,7 +274,7 @@ public class PlayerHandManager : MonoBehaviour
 
             // ---- 3. FLY TO SCREEN CENTER (while the server answers) ----
             Vector3 centerPosition = targetCanvas != null ? targetCanvas.transform.position : Vector3.zero;
-            Vector3 targetCenterScale = Vector3.one * centerRevealScale;
+            Vector3 targetCenterScale = Vector3.one * revealScale;
 
             float movePhaseDuration = Mathf.Max(0.01f, (totalDrawDuration - centerPauseDuration) * 0.5f);
             float t = 0f;
@@ -456,18 +456,13 @@ public class PlayerHandManager : MonoBehaviour
         if (cachedEndTurnManager != null) controller.SetEndTurnManager(cachedEndTurnManager);
         controller.LockForFlight();
 
-        if (cardBackSprite != null && visual.cardImage != null)
-        {
-            visual.cardImage.sprite = cardBackSprite;
-        }
-
         cardRect.position = handTransform.position;
         cardRect.localScale = Vector3.one * 0.3f;
         cardRect.rotation = Quaternion.identity;
 
         // ---- fly to the centre ----
         Vector3 centerPosition = targetCanvas != null ? targetCanvas.transform.position : Vector3.zero;
-        Vector3 targetCenterScale = Vector3.one * centerRevealScale;
+        Vector3 targetCenterScale = Vector3.one * revealScale;
         float movePhaseDuration = Mathf.Max(0.01f, (totalDrawDuration - centerPauseDuration) * 0.5f);
 
         float t = 0f;

@@ -99,6 +99,9 @@ public class GachaManager : NetworkBehaviour
 
     public override void OnNetworkSpawn()
     {
+        // New match: clear the numbers shown on the Outcome page (every client keeps its own stats).
+        if (IsClient) MatchStats.Reset(startingTokens);
+
         if (!IsServer) return;
 
         var deckMgr = FindFirstObjectByType<DeckManager>();
@@ -583,7 +586,12 @@ public class GachaManager : NetworkBehaviour
         if (loserClientId != NetworkManager.Singleton.LocalClientId) OnOpponentLostCards?.Invoke(count);
     }
 
-    [ClientRpc] private void SendTokensClientRpc(int tokens, ClientRpcParams rpcParams = default) => OnMyTokensChanged?.Invoke(tokens);
+    [ClientRpc]
+    private void SendTokensClientRpc(int tokens, ClientRpcParams rpcParams = default)
+    {
+        MatchStats.RecordTokens(tokens);
+        OnMyTokensChanged?.Invoke(tokens);
+    }
     [ClientRpc] private void SendPullFailedClientRpc(string reason, ClientRpcParams rpcParams = default) => OnPullFailed?.Invoke(reason);
     [ClientRpc] private void SendBenefitsClientRpc(int freePulls, int supportDiscount, ClientRpcParams rpcParams = default) => OnMyPullBenefitsChanged?.Invoke(freePulls, supportDiscount);
     [ClientRpc] private void SendHandCardsRemovedClientRpc(int[] netIds, ClientRpcParams rpcParams = default) => OnMyHandCardsRemoved?.Invoke(netIds);
@@ -602,6 +610,7 @@ public class GachaManager : NetworkBehaviour
         OnPityUpdated?.Invoke(pullsSinceLegendary, pullConfig.pityThreshold, deckType == 0);
 
         PullResult result = BuildClientResult(deckType, tier, cardId, cardName, pityTriggered, was5050Roll, won5050, autoDiscard);
+        MatchStats.RecordPull(result, true);
         OnMyPullResolved?.Invoke(result);
     }
 
@@ -611,6 +620,7 @@ public class GachaManager : NetworkBehaviour
         OnPityUpdated?.Invoke(pullsSinceLegendary, pullConfig.pityThreshold, deckType == 0);
 
         PullResult result = BuildClientResult(deckType, tier, cardId, cardName, pityTriggered, was5050Roll, won5050, autoDiscard);
+        MatchStats.RecordPull(result, false);
         OnMyBonusCardGranted?.Invoke(result, reason);
     }
 
