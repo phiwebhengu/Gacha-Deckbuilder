@@ -155,6 +155,7 @@ public static class SupportEffectResolver
     {
         switch (supportId)
         {
+            case Hanachirusato:
             case Liben:
             case Paimon:
             case Ellin:
@@ -248,6 +249,10 @@ public static class SupportEffectResolver
         Side a = BuildSide(cardsA, deck);
         Side b = BuildSide(cardsB, deck);
 
+        // 1b. elemental reactions between the played Action cards (see ElementalReactions)
+        ApplyReactions(a);
+        ApplyReactions(b);
+
         // 2. who gets doubled
         BuildMultipliers(a);
         BuildMultipliers(b);
@@ -330,6 +335,25 @@ public static class SupportEffectResolver
         }
 
         return side;
+    }
+
+    /// <summary>Adds +1 attack / +1 defense for every elemental reaction among this player's played Action cards.</summary>
+    private static void ApplyReactions(Side side)
+    {
+        var elements = new HashSet<string>();
+        foreach (ActionCardData card in side.Actions)
+        {
+            string e = CardRules.ElementOf(card.Id);
+            if (e != null) elements.Add(e);
+        }
+
+        foreach (ElementalReactions.Reaction r in ElementalReactions.Find(elements))
+        {
+            side.Attack += r.Attack;
+            side.Defense += r.Defense;
+            string gain = r.Attack > 0 ? "+" + r.Attack + " attack" : "+" + r.Defense + " defense";
+            side.Outcome.Notes.Add("Reaction " + r.Name + ": " + gain);
+        }
     }
 
     private static bool Is(string value, string expected)

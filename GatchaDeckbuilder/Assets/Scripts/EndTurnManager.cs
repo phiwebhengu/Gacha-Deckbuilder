@@ -456,6 +456,14 @@ public class EndTurnManager : NetworkBehaviour
             return;
         }
 
+        // Weapons need a Character, Artefacts need a card of the same element (see CardRules).
+        DeckManager rulesDeck = FindFirstObjectByType<DeckManager>();
+        if (rulesDeck != null && !CardRules.IsPlayAllowed(selectedIds, rulesDeck.loadedActionCards, out string invalidReason))
+        {
+            ShowInvalidPlayMessage(invalidReason);
+            return; // nothing is submitted; the player keeps their selection and can change it
+        }
+
         localTurnSubmitted = true;
         localHandManager.SetAllCardsInteractable(false);
         localHandManager.SubmitSelectedCardsToHand(selectedHandTransform);
@@ -463,6 +471,52 @@ public class EndTurnManager : NetworkBehaviour
         if (endTurnButton != null) endTurnButton.gameObject.SetActive(false);
 
         SubmitTurnServerRpc(selectedIds);
+    }
+
+    // ---------- "you can't play that" message ----------
+    [Header("Invalid Play Message (optional)")]
+    [Tooltip("Shows why a selection can't be played. Leave empty and a simple text is created above the End Turn button.")]
+    [SerializeField] private TextMeshProUGUI invalidPlayText;
+    [SerializeField] private float invalidPlayMessageSeconds = 3f;
+    private Coroutine invalidPlayRoutine;
+
+    private void ShowInvalidPlayMessage(string message)
+    {
+        if (invalidPlayText == null)
+        {
+            if (endTurnButton == null) { Debug.LogWarning("[EndTurnManager] " + message); return; }
+
+            var go = new GameObject("InvalidPlayText", typeof(RectTransform));
+            go.transform.SetParent(endTurnButton.transform.parent, false);
+            invalidPlayText = go.AddComponent<TextMeshProUGUI>();
+            invalidPlayText.alignment = TextAlignmentOptions.Center;
+            invalidPlayText.fontSize = 34f;
+            invalidPlayText.fontStyle = FontStyles.Bold;
+            invalidPlayText.color = new Color(1f, 0.35f, 0.3f, 1f);
+            invalidPlayText.raycastTarget = false;
+
+            var rt = invalidPlayText.rectTransform;
+            RectTransform buttonRt = endTurnButton.GetComponent<RectTransform>();
+            rt.anchorMin = buttonRt.anchorMin;
+            rt.anchorMax = buttonRt.anchorMax;
+            rt.pivot = new Vector2(0.5f, 0f);
+            rt.sizeDelta = new Vector2(900f, 90f);
+            rt.anchoredPosition = buttonRt.anchoredPosition + new Vector2(0f, buttonRt.sizeDelta.y * 0.5f + 20f);
+        }
+
+        invalidPlayText.text = message;
+        invalidPlayText.gameObject.SetActive(true);
+        invalidPlayText.transform.SetAsLastSibling();
+
+        if (invalidPlayRoutine != null) StopCoroutine(invalidPlayRoutine);
+        invalidPlayRoutine = StartCoroutine(Routine_HideInvalidPlayMessage());
+    }
+
+    private IEnumerator Routine_HideInvalidPlayMessage()
+    {
+        yield return new WaitForSecondsRealtime(invalidPlayMessageSeconds);
+        if (invalidPlayText != null) invalidPlayText.gameObject.SetActive(false);
+        invalidPlayRoutine = null;
     }
 
     [ServerRpc(RequireOwnership = false)]
