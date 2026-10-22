@@ -161,12 +161,7 @@ public class EndTurnManager : NetworkBehaviour
     [SerializeField] private Button pauseButton;
 
     [Header("Leave To Lobby (mid-match or after it ends)")]
-    [Tooltip("OPTIONAL. A button you can put anywhere (e.g. in the pause menu or a screen corner) that leaves the match and goes back to the lobby. It is wired up automatically.")]
-    [SerializeField] private Button leaveToLobbyButton;
-    [Tooltip("OPTIONAL. An 'Are you sure?' panel shown when leaving MID-match, because leaving counts as a forfeit. Leave empty to skip the confirmation.")]
     [SerializeField] private GameObject leaveConfirmPanel;
-    [SerializeField] private Button confirmLeaveButton;
-    [SerializeField] private Button cancelLeaveButton;
 
     [Header("Scene Settings")]
     [SerializeField] private string gameType = "Game";
@@ -174,6 +169,19 @@ public class EndTurnManager : NetworkBehaviour
 
     [Header("Match Settings")]
     [SerializeField] private int maxRounds = 10;
+
+    [Header("Pop-up Font (Futura)")]
+    [Tooltip("TMP Font Asset used for the reaction pop-ups and the 'can't play that' message.")]
+    [SerializeField] private TMP_FontAsset popupFont;
+    [SerializeField] private float reactionPopupFontSize = 40f;
+    [Tooltip("Optional. A TMP text you styled yourself (font, size). Each reaction pop-up is a copy of it. Leave it in the scene (inactive); drag it here.")]
+    [SerializeField] private TextMeshProUGUI reactionPopupTemplate;
+
+    [Header("Skip Turn (shown when the hand has only Weapon / Artefact cards)")]
+    [Tooltip("Optional. Leave empty and a copy of the End Turn button is created next to it.")]
+    [SerializeField] private Button skipTurnButton;
+    private bool drawPhaseSeen = false;   // true once this round's draw window has been and gone
+    private float nextSkipCheck = 0f;
 
     private int currentPlayerHP;
     private int currentOpponentHP;
@@ -365,19 +373,13 @@ public class EndTurnManager : NetworkBehaviour
             damageFlashImage.gameObject.SetActive(true);
         }
 
-        // Leave-to-lobby buttons. OnGoToLobby ignores repeat calls, so it is safe if the same button is also
-        // wired in the Inspector.
-        if (returnToLobbyButton != null) returnToLobbyButton.onClick.AddListener(OnGoToLobby);
-        if (leaveToLobbyButton != null) leaveToLobbyButton.onClick.AddListener(OnLeaveClicked);
-        if (confirmLeaveButton != null) confirmLeaveButton.onClick.AddListener(OnGoToLobby);
-        if (cancelLeaveButton != null) cancelLeaveButton.onClick.AddListener(OnCancelLeave);
-        if (leaveConfirmPanel != null) leaveConfirmPanel.SetActive(false);
-
         CacheAndResetUI();
         UpdateEndTurnButtonVisibility();
         ClearOpponentPanel();
 
         currentRound = 1;
+
+        SetupSkipButton();
     }
 
     private void CacheAndResetUI()
@@ -435,6 +437,9 @@ public class EndTurnManager : NetworkBehaviour
         return _cachedLocalHandManager;
     }
 
+    /// <summary>True once the match has ended (locally or on the server).</summary>
+    public bool IsMatchOver => isMatchOver || (IsSpawned && GameEnded.Value);
+
     public void UpdateEndTurnButtonVisibility()
     {
         PlayerHandManager localHandManager = GetLocalHandManager();
@@ -442,6 +447,94 @@ public class EndTurnManager : NetworkBehaviour
 
         int selectedCount = localHandManager.GetSelectedCards().Count;
         endTurnButton.gameObject.SetActive(selectedCount > 0);
+    }
+
+    // ============================ SKIP TURN ============================
+
+    private void SetupSkipButton()
+    {
+        if (skipTurnButton == null && endTurnButton != null)
+        {
+            // No button assigned: make one by copying the End Turn button, so it already matches your style (and font).
+            skipTurnButton = Instantiate(endTurnButton, endTurnButton.transform.parent);
+            skipTurnButton.name = "SkipTurnButton";
+            skipTurnButton.onClick = new Button.ButtonClickedEvent(); // drop the copied End Turn click
+
+            TMP_Text label = skipTurnButton.GetComponentInChildren<TMP_Text>(true);
+            if (label != null) label.text = "Skip Turn";
+
+            RectTransform rt = skipTurnButton.GetComponent<RectTransform>();
+            rt.anchoredPosition += new Vector2(-(rt.sizeDelta.x + 30f), 0f); // next to End Turn
+        }
+
+        if (skipTurnButton != null)
+        {
+            skipTurnButton.onClick.RemoveListener(OnSkipTurnClicked);
+            skipTurnButton.onClick.AddListener(OnSkipTurnClicked);
+            skipTurnButton.gameObject.SetActive(false);
+        }
+    }
+
+    private void Update()
+    {
+        if (skipTurnButton == null) return;
+
+        // The skip button is only for the play phase, i.e. after this round's draw window has finished.
+        if (timerManager != null && timerManager.IsDrawPhaseActive) drawPhaseSeen = true;
+
+        if (Time.unscaledTime < nextSkipCheck) return;
+        nextSkipCheck = Time.unscaledTime + 0.25f;
+
+        bool show = IsSpawned && !isMatchOver && !localTurnSubmitted && !isResolvingCombat
+                    && drawPhaseSeen && timerManager != null && !timerManager.IsDrawPhaseActive
+                    && LocalPlayerHasNoPlayableCard();
+
+        if (skipTurnButton.gameObject.activeSelf != show) skipTurnButton.gameObject.SetActive(show);
+    }
+
+    /// <summary>True when every card in the player's hand is a Weapon or Artefact (or the hand is empty).</summary>
+    private bool LocalPlayerHasNoPlayableCard()
+    {
+        DeckManager deck = FindFirstObjectByType<DeckManager>();
+        if (deck == null || deck.loadedActionCards == null) return false;
+
+        foreach (BalatroCardController card in FindObjectsByType<BalatroCardController>(FindObjectsSortMode.None))
+        {
+            if (card == null || !card.IsInteractable) continue;
+            if (selectedHandTransform != null && card.transform.IsChildOf(selectedHandTransform)) continue;
+            if (opponentSelectedHandTransform != null && card.transform.IsChildOf(opponentSelectedHandTransform)) continue;
+
+            if (card.Category == CardCategory.Support) return false;          // Support cards can always be played
+
+            ActionCardData data = deck.loadedActionCards.Find(c => c.Id == card.CardId);
+            if (data == null) return false;                                    // unknown card: don't offer a skip
+
+            string cat = (data.Category ?? "").Trim();
+            bool needsPartner = cat.Equals("Weapon", StringComparison.OrdinalIgnoreCase)
+                             || cat.Equals("Artefact", StringComparison.OrdinalIgnoreCase);
+            if (!needsPartner) return false;                                   // a Character or Monster is playable
+        }
+        return true;
+    }
+
+    public void OnSkipTurnClicked()
+    {
+        if (localTurnSubmitted || isMatchOver) return;
+
+        PlayerHandManager localHandManager = GetLocalHandManager();
+        if (localHandManager == null || !LocalPlayerHasNoPlayableCard()) return;
+
+        // Put back any card the player had selected, then lock the hand like a normal End Turn.
+        foreach (BalatroCardController c in localHandManager.GetSelectedCards()) c.ForceDeselect();
+
+        localTurnSubmitted = true;
+        drawPhaseSeen = false;
+        localHandManager.SetAllCardsInteractable(false);
+
+        if (endTurnButton != null) endTurnButton.gameObject.SetActive(false);
+        if (skipTurnButton != null) skipTurnButton.gameObject.SetActive(false);
+
+        SubmitTurnServerRpc(Array.Empty<int>());   // an empty turn: no cards played this round
     }
 
     public void OnEndTurnClicked()
@@ -465,6 +558,8 @@ public class EndTurnManager : NetworkBehaviour
         }
 
         localTurnSubmitted = true;
+        drawPhaseSeen = false;
+        if (skipTurnButton != null) skipTurnButton.gameObject.SetActive(false);
         localHandManager.SetAllCardsInteractable(false);
         localHandManager.SubmitSelectedCardsToHand(selectedHandTransform);
 
@@ -504,6 +599,7 @@ public class EndTurnManager : NetworkBehaviour
             rt.anchoredPosition = buttonRt.anchoredPosition + new Vector2(0f, buttonRt.sizeDelta.y * 0.5f + 20f);
         }
 
+        if (popupFont != null) invalidPlayText.font = popupFont;
         invalidPlayText.text = message;
         invalidPlayText.gameObject.SetActive(true);
         invalidPlayText.transform.SetAsLastSibling();
@@ -725,6 +821,7 @@ public class EndTurnManager : NetworkBehaviour
         // --- ATTACK PHASE ---
         HighlightCardsByCategory(playerCards, opponentCards, CardCategory.Attack);
         PlayHighlightSFX(CardCategory.Attack);
+        ShowReactionPopups(result, true);
         yield return StartCoroutine(Routine_CountUpPair(
             result.playerAttack, playerAttackText, originalPlayerAttackScale,
             result.opponentAttack, opponentAttackText, originalOpponentAttackScale
@@ -735,6 +832,7 @@ public class EndTurnManager : NetworkBehaviour
         // --- DEFENSE PHASE ---
         HighlightCardsByCategory(playerCards, opponentCards, CardCategory.Defense);
         PlayHighlightSFX(CardCategory.Defense);
+        ShowReactionPopups(result, false);
         yield return StartCoroutine(Routine_CountUpPair(
             result.playerDefense, playerDefenseText, originalPlayerDefenseScale,
             result.opponentDefense, opponentDefenseText, originalOpponentDefenseScale
@@ -830,7 +928,65 @@ public class EndTurnManager : NetworkBehaviour
         yield return StartCoroutine(Routine_CheckNextRoundOrEndGame());
         isResolvingCombat = false;
     }
+    // ---------- elemental reaction pop-ups ("Overload +1 ATK") ----------
+    private void ShowReactionPopups(TurnResultData result, bool attackPhase)
+    {
+        DeckManager deck = FindFirstObjectByType<DeckManager>();
+        if (deck == null) return;
 
+        SpawnReactionPopups(result.playerCardIds, false, attackPhase, playerAttackText, playerDefenseText);
+        SpawnReactionPopups(result.opponentCardIds, true, attackPhase, opponentAttackText, opponentDefenseText);
+    }
+
+    // With a Reaction Popup Template the text stays exactly where the template is and reactions are shown one after the
+    // other (the opponent's are marked "Opponent:"). Without a template they float above the Attack / Defense numbers.
+    private float reactionPopupFreeAt = 0f;
+
+    private void SpawnReactionPopups(int[] netIds, bool isOpponent, bool attackPhase, TextMeshProUGUI attackText, TextMeshProUGUI defenseText)
+    {
+        if (netIds == null) return;
+
+        // Same rule as the server (SupportEffectResolver): elements of the played Action cards -> reactions.
+        var elements = new HashSet<string>();
+        foreach (int netId in netIds)
+        {
+            if (CardNetId.IsSupport(netId)) continue;
+            string e = CardRules.ElementOf(CardNetId.Decode(netId));
+            if (e != null) elements.Add(e);
+        }
+
+        int shown = 0;
+        foreach (ElementalReactions.Reaction r in ElementalReactions.Find(elements))
+        {
+            int amount = attackPhase ? r.Attack : r.Defense;
+            if (amount <= 0) continue;
+
+            string who = (reactionPopupTemplate != null && isOpponent) ? "Opponent: " : "";
+            string label = who + r.Name + " +" + amount + (attackPhase ? " ATK" : " DEF");
+            Color color = attackPhase ? new Color(1f, 0.4f, 0.5f, 1f) : new Color(0.4f, 0.65f, 1f, 1f);
+
+            float delay;
+            float lifetime;
+            if (reactionPopupTemplate != null)
+            {
+                // one fixed spot: wait until the previous pop-up is gone
+                float start = Mathf.Max(Time.time, reactionPopupFreeAt);
+                delay = start - Time.time;
+                reactionPopupFreeAt = start + 1.1f;
+                lifetime = 1.0f;
+            }
+            else
+            {
+                delay = shown * 0.35f;
+                lifetime = 1.3f;
+            }
+
+            StartCoroutine(ReactionPopup.Routine(attackPhase ? attackText : defenseText, label, color,
+                                                 popupFont, delay, reactionPopupFontSize,
+                                                 lifetime: lifetime, template: reactionPopupTemplate));
+            shown++;
+        }
+    }
     private void PlayHighlightSFX(CardCategory category)
     {
         AudioClip clipToPlay = category switch
@@ -1131,6 +1287,10 @@ public class EndTurnManager : NetworkBehaviour
         if (opponentAttackText != null) opponentAttackText.text = "0";
         if (opponentDefenseText != null) opponentDefenseText.text = "0";
         if (centerDifferenceText != null) centerDifferenceText.text = "";
+
+        // New round: the skip button waits for this round's draw window again.
+        drawPhaseSeen = false;
+        if (skipTurnButton != null) skipTurnButton.gameObject.SetActive(false);
     }
 
     private IEnumerator Routine_ClearAllSubmittedCards()
@@ -1583,6 +1743,7 @@ public class EndTurnManager : NetworkBehaviour
         {
             endTurnButton.interactable = enabled;
         }
+        if (skipTurnButton != null) skipTurnButton.interactable = enabled;
 
         PlayerHandManager localHandManager = GetLocalHandManager();
         if (localHandManager != null)

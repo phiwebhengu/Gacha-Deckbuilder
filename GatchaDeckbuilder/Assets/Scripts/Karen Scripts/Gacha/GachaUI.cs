@@ -50,7 +50,6 @@ public class GachaUI : MonoBehaviour
     [Header("System References")]
     public DrawTimerManager drawTimerManager;
     public PlayerHandManager playerHandManager;
-    public GameObject cardPanel;
 
     private GachaManager mgr;
     private bool isDrawPhaseActive = true;
@@ -176,6 +175,18 @@ public class GachaUI : MonoBehaviour
     {
         int baseCost = mgr != null ? mgr.PullCost : 1;
         return GachaManager.CostOfPull(baseCost, deck == DeckType.Support, freePullCredits, supportPullDiscount);
+    }
+
+    /// <summary>True when the player can pay for one pull from this deck right now (tokens, free pulls, discounts).</summary>
+    public bool CanAffordPull(DeckType deck)
+    {
+        return mgr == null || DisplayedTokens >= CostFor(deck);
+    }
+
+    /// <summary>Balance check against the last server-confirmed tokens (ignores the pull that is being sent right now).</summary>
+    public bool CanPayForPull(DeckType deck)
+    {
+        return mgr == null || serverTokens >= CostFor(deck);
     }
 
     // Xudong / Atea numbers changed (a free pull was used, or a support card gave new ones).
@@ -470,13 +481,5 @@ public class GachaUI : MonoBehaviour
         {
             text.color = normalPityColor;
         }
-    }
-    public void OpenCardPanel()
-    {
-        cardPanel.SetActive(true);
-    }
-    public void CloseCardPanel()
-    {
-        cardPanel.SetActive(false);
     }
 }

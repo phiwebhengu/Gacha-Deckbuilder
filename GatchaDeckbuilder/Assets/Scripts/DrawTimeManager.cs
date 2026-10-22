@@ -13,7 +13,7 @@ public class DrawTimerManager : NetworkBehaviour
     [SerializeField] private float roundTextHoldDuration = 0.6f;
 
     [Header("Timer Settings")]
-    [SerializeField] private float drawWindowDuration = 10f; 
+    [SerializeField] private float drawWindowDuration = 10f; // Updated to 10s window
 
     [Header("Countdown Juice")]
     [SerializeField] private TextMeshProUGUI countdownText;
@@ -22,10 +22,10 @@ public class DrawTimerManager : NetworkBehaviour
     [SerializeField] private float shrinkSpeed = 10f;
 
     [Header("Countdown Audio")]
-    [Tooltip("No longer used (sounds now play through SfxPool so pitch changes can't bend other sounds). Kept so your Inspector reference isn't lost.")]
+    [Tooltip("No longer used (sounds now play through SFXPool so pitch changes can't bend other sounds). Kept so your Inspector reference isn't lost.")]
     [SerializeField] private AudioSource audioSource;
     [SerializeField] private AudioClip countdownBeepClip;
-    [SerializeField] private AudioClip timerTickClip; 
+    [SerializeField] private AudioClip timerTickClip; // Optional distinct tick SFX (falls back to countdownBeepClip if null)
     [SerializeField] private float normalPitch = 1.0f;
     [SerializeField] private float drawPitch = 1.4f;
     [SerializeField] private float urgentTickPitch = 1.2f;
@@ -117,10 +117,13 @@ public class DrawTimerManager : NetworkBehaviour
             while (elapsed < roundTextFadeDuration)
             {
                 elapsed += Time.deltaTime;
-                roundDisplayCanvasGroup.alpha = Mathf.Lerp(1f, 1f, elapsed / roundTextFadeDuration);
+                roundDisplayCanvasGroup.alpha = Mathf.Lerp(1f, 0f, elapsed / roundTextFadeDuration);
                 yield return null;
             }
-            roundDisplayCanvasGroup.alpha = 1f;
+
+            // Was "= 1f": the text faded out and then instantly popped back to full opacity.
+            // (alpha is set back to 1 at the START of the next round's sequence above.)
+            roundDisplayCanvasGroup.alpha = 0f;
         }
 
         yield return StartCoroutine(Routine_ExecuteCountdown());
@@ -255,8 +258,27 @@ public class DrawTimerManager : NetworkBehaviour
 
     private void ExecuteAutoDrawPenalty()
     {
-        bool isAction = UnityEngine.Random.value > 0.5f;
-        DeckType deckToPull = isAction ? DeckType.Action : DeckType.Support;
+        // No free card once the match is over.
+        EndTurnManager endTurn = FindFirstObjectByType<EndTurnManager>();
+        if (endTurn != null && endTurn.IsMatchOver)
+        {
+            Debug.Log("[DrawTimer] Match is over: no auto-draw.");
+            return;
+        }
+
+        // Only draw from a deck the player can still pay for. No tokens left = no auto-draw at all.
+        GachaUI ui = FindFirstObjectByType<GachaUI>();
+        bool canAction = ui == null || ui.CanAffordPull(DeckType.Action);
+        bool canSupport = ui == null || ui.CanAffordPull(DeckType.Support);
+        if (!canAction && !canSupport)
+        {
+            Debug.Log("[DrawTimer] No tokens left: no auto-draw.");
+            return;
+        }
+
+        DeckType deckToPull = (canAction && canSupport)
+            ? (UnityEngine.Random.value > 0.5f ? DeckType.Action : DeckType.Support)
+            : (canAction ? DeckType.Action : DeckType.Support);
 
         PlayerHandManager handManager = FindFirstObjectByType<PlayerHandManager>();
 

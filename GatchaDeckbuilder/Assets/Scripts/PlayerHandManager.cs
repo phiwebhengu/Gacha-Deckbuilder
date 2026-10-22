@@ -250,6 +250,16 @@ public class PlayerHandManager : MonoBehaviour
 
         if (cachedEndTurnManager == null) cachedEndTurnManager = FindFirstObjectByType<EndTurnManager>();
 
+        // Nothing to deal when the match is over or the player can't pay: no card back should fly out.
+        if (cachedEndTurnManager != null && cachedEndTurnManager.IsMatchOver) yield break;
+
+        GachaUI gachaUi = FindFirstObjectByType<GachaUI>();
+        if (gachaUi != null && !gachaUi.CanPayForPull(deckToPull))
+        {
+            Debug.Log("[PlayerHandManager] Not enough tokens (or match over): no card dealt.");
+            yield break;
+        }
+
         for (int i = 0; i < count; i++)
         {
             // ---- 1. ASK THE SERVER *IMMEDIATELY* ----
@@ -455,6 +465,7 @@ public class PlayerHandManager : MonoBehaviour
 
         if (cachedEndTurnManager != null) controller.SetEndTurnManager(cachedEndTurnManager);
         controller.LockForFlight();
+        if (cardBackSprite != null && visual.cardImage != null) visual.cardImage.sprite = cardBackSprite;
 
         cardRect.position = handTransform.position;
         cardRect.localScale = Vector3.one * 0.3f;
@@ -651,6 +662,27 @@ public class PlayerHandManager : MonoBehaviour
             }
         }
         return ids;
+    }
+
+    /// <summary>
+    /// True if the hand holds at least one card that can be played on its own: a Character, a Monster or a Support.
+    /// Weapons and Artefacts can't be played alone (see CardRules), so a hand of only those (or an empty hand) is "stuck".
+    /// </summary>
+    public bool HasPlayableCard(List<ActionCardData> actionCards)
+    {
+        CleanupHandList();
+        foreach (BalatroCardController c in cardsInHand)
+        {
+            if (c == null) continue;
+            if (c.Category == CardCategory.Support) return true;
+
+            ActionCardData data = actionCards != null ? actionCards.Find(a => a.Id == c.CardId) : null;
+            if (data == null) return true; // unknown card: don't lock the player out
+            string cat = (data.Category ?? "").Trim();
+            if (!cat.Equals("Weapon", System.StringComparison.OrdinalIgnoreCase) &&
+                !cat.Equals("Artefact", System.StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
     }
 
     public void SubmitSelectedCardsToHand(RectTransform selectedHandTarget)

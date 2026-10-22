@@ -341,13 +341,29 @@ public static class SupportEffectResolver
     private static void ApplyReactions(Side side)
     {
         var elements = new HashSet<string>();
+        var seen = new List<string>();
+
         foreach (ActionCardData card in side.Actions)
         {
             string e = CardRules.ElementOf(card.Id);
-            if (e != null) elements.Add(e);
+            if (e != null)
+            {
+                elements.Add(e);
+                seen.Add(card.Name + "=" + e);
+            }
+            else if (Is(card.Category, "Character") || Is(card.Category, "Monster"))
+            {
+                // Most likely the card ID in ActionDeck.csv doesn't match the table in CardRules.ElementById.
+                Debug.LogWarning($"[Reaction] No element known for {card.Category} '{card.Name}' (ID {card.Id}). Add it to CardRules.ElementById.");
+            }
         }
 
-        foreach (ElementalReactions.Reaction r in ElementalReactions.Find(elements))
+        List<ElementalReactions.Reaction> reactions = ElementalReactions.Find(elements);
+
+        // Always logged (host Console) so you can see what was checked, even when nothing reacted.
+        Debug.Log($"[Reaction] Elements played: {(seen.Count == 0 ? "none" : string.Join(", ", seen))} -> {reactions.Count} reaction(s)");
+
+        foreach (ElementalReactions.Reaction r in reactions)
         {
             side.Attack += r.Attack;
             side.Defense += r.Defense;
