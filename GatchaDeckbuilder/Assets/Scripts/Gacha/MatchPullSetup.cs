@@ -7,7 +7,7 @@ using Unity.Netcode;
 public class MatchPullSetup : NetworkBehaviour
 {
     [SerializeField] private DeckManager deckManager;
-    [SerializeField] private DrawTimerManager drawTimerManager; // ADD THIS
+    [SerializeField] private DrawTimerManager drawTimerManager;
 
     private IEnumerator Start()
     {
@@ -22,8 +22,8 @@ public class MatchPullSetup : NetworkBehaviour
         var rng = new System.Random();
 
         // 2. Find all Legendary cards
-        var legendaryActions = deckManager.loadedActionCards.Where(c => c.Tier == "Legendary").ToList();
-        var legendarySupports = deckManager.loadedSupportCards.Where(c => c.Tier == "Legendary").ToList();
+        var legendaryActions = deckManager.loadedActionCards.Where(c => c.Tier.ToString().Equals("Legendary", System.StringComparison.OrdinalIgnoreCase)).ToList();
+        var legendarySupports = deckManager.loadedSupportCards.Where(c => c.Tier.ToString().Equals("Legendary", System.StringComparison.OrdinalIgnoreCase)).ToList();
 
         if (legendaryActions.Count == 0 || legendarySupports.Count == 0)
         {

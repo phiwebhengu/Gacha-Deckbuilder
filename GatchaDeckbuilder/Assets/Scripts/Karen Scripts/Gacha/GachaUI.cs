@@ -6,6 +6,9 @@ using System.Collections.Generic;
 
 public class GachaUI : MonoBehaviour
 {
+    [Header("Game Mode Settings")]
+    [SerializeField] public bool isOfflineAIRival = false;
+
     [Header("Token Display")]
     public TMP_Text tokenText;
     public string tokenFormat = "Tokens: {0}";
@@ -54,27 +57,21 @@ public class GachaUI : MonoBehaviour
     private GachaManager mgr;
     private bool isDrawPhaseActive = true;
 
-    // One card back per card the opponent really holds in their hand (oldest first).
     private readonly List<GameObject> opponentCardBacks = new List<GameObject>();
     private Coroutine opponentFanCoroutine;
     private bool opponentContainerPrepared = false;
 
-    // Token bookkeeping.
-    // serverTokens = last value the server told us. pullsInFlight = pulls we've asked for but the server hasn't
-    // answered yet. The displayed number is serverTokens - pullsInFlight, so the UI reacts instantly on click
-    // instead of waiting a full network round trip (that wait is what made the joining player's buttons feel dead).
     private int serverTokens = 0;
     private int pullsInFlight = 0;
-    private int inFlightCost = 0; // tokens the in-flight pull will cost (0 when it is a free pull)
-    private int DisplayedTokens => Mathf.Max(0, serverTokens - inFlightCost);
+    private int totalInFlightCost = 0;
+    private int DisplayedTokens => Mathf.Max(0, serverTokens - totalInFlightCost);
 
-    // Xudong / Atea, as last reported by the server. Used to work out what the next pull costs.
     private int freePullCredits = 0;
     private int supportPullDiscount = 0;
 
     private int actionPityCount = 0;
     private int supportPityCount = 0;
-    private int pityThreshold = 90;
+    private int pityThreshold = 4;
 
     private void OnEnable() => StartCoroutine(SubscribeWhenReady());
 
@@ -98,6 +95,36 @@ public class GachaUI : MonoBehaviour
 
     private IEnumerator SubscribeWhenReady()
     {
+        if (isOfflineAIRival)
+        {
+            var gachaMgr = FindFirstObjectByType<GachaManager>();
+            serverTokens = gachaMgr != null ? gachaMgr.startingTokens : 10;
+            pullsInFlight = 0;
+            totalInFlightCost = 0;
+            freePullCredits = 0;
+            supportPullDiscount = 0;
+            RefreshTokenText();
+            RefreshFreePullsText();
+
+            if (gachaMgr != null)
+            {
+                gachaMgr.OnPityUpdated += HandlePityUpdated;
+                var offlineActionPity = gachaMgr.GetLocalPlayerPity(true);
+                HandlePityUpdated(offlineActionPity.pulls, offlineActionPity.threshold, true);
+
+                var offlineSupportPity = gachaMgr.GetLocalPlayerPity(false);
+                HandlePityUpdated(offlineSupportPity.pulls, offlineSupportPity.threshold, false);
+            }
+
+            if (drawTimerManager != null)
+            {
+                drawTimerManager.OnDrawPhaseChanged += UpdateButtonInteractability;
+                isDrawPhaseActive = drawTimerManager.IsDrawPhaseActive;
+            }
+            UpdateButtonInteractability(isDrawPhaseActive);
+            yield break;
+        }
+
         while (mgr == null || !mgr.IsSpawned)
         {
             mgr = FindFirstObjectByType<GachaManager>();
@@ -113,7 +140,7 @@ public class GachaUI : MonoBehaviour
 
         serverTokens = mgr.GetLocalPlayerTokens();
         pullsInFlight = 0;
-        inFlightCost = 0;
+        totalInFlightCost = 0;
         freePullCredits = 0;
         supportPullDiscount = 0;
         RefreshTokenText();
@@ -150,12 +177,16 @@ public class GachaUI : MonoBehaviour
         if (tokenText != null) tokenText.text = string.Format(tokenFormat, DisplayedTokens);
     }
 
-    // Authoritative token count from the server (one arrives for every pull that succeeded).
     private void UpdateTokens(int tokens)
     {
         serverTokens = tokens;
         pullsInFlight = Mathf.Max(0, pullsInFlight - 1);
-        if (pullsInFlight == 0) inFlightCost = 0;
+
+        if (pullsInFlight == 0)
+        {
+            totalInFlightCost = 0;
+        }
+
         RefreshTokenText();
         UpdateButtonInteractability(isDrawPhaseActive);
     }
@@ -164,9 +195,8 @@ public class GachaUI : MonoBehaviour
     {
         isDrawPhaseActive = phaseActive;
         bool timerAllowsPull = (drawTimerManager == null) || isDrawPhaseActive;
-        bool canPull = pullsInFlight == 0 && timerAllowsPull;
+        bool canPull = timerAllowsPull;
 
-        // Each button checks its own price: Atea makes Support pulls cheaper, Xudong makes every pull free.
         if (pullActionButton != null) pullActionButton.interactable = canPull && DisplayedTokens >= CostFor(DeckType.Action);
         if (pullSupportButton != null) pullSupportButton.interactable = canPull && DisplayedTokens >= CostFor(DeckType.Support);
     }
@@ -177,19 +207,16 @@ public class GachaUI : MonoBehaviour
         return GachaManager.CostOfPull(baseCost, deck == DeckType.Support, freePullCredits, supportPullDiscount);
     }
 
-    /// <summary>True when the player can pay for one pull from this deck right now (tokens, free pulls, discounts).</summary>
     public bool CanAffordPull(DeckType deck)
     {
         return mgr == null || DisplayedTokens >= CostFor(deck);
     }
 
-    /// <summary>Balance check against the last server-confirmed tokens (ignores the pull that is being sent right now).</summary>
     public bool CanPayForPull(DeckType deck)
     {
         return mgr == null || serverTokens >= CostFor(deck);
     }
 
-    // Xudong / Atea numbers changed (a free pull was used, or a support card gave new ones).
     private void HandleBenefitsChanged(int freePulls, int supportDiscount)
     {
         freePullCredits = freePulls;
@@ -211,7 +238,6 @@ public class GachaUI : MonoBehaviour
         freePullsText.gameObject.SetActive(parts.Count > 0);
     }
 
-    // A Support effect (Frostmoon Enclave) removed cards from the opponent's hand.
     private void HandleOpponentLostCards(int count)
     {
         RemoveOpponentCardBacks(count);
@@ -221,9 +247,9 @@ public class GachaUI : MonoBehaviour
     {
         Debug.LogWarning($"Pull failed: {reason}");
 
-        // The server refused, so no token was spent: give back the optimistic deduction.
         pullsInFlight = Mathf.Max(0, pullsInFlight - 1);
-        if (pullsInFlight == 0) inFlightCost = 0;
+        if (pullsInFlight == 0) totalInFlightCost = 0;
+
         RefreshTokenText();
         UpdateButtonInteractability(isDrawPhaseActive);
     }
@@ -233,7 +259,6 @@ public class GachaUI : MonoBehaviour
         AddOpponentCardBacks(1);
     }
 
-    /// <summary>Opponent gained cards in hand (they pulled one, or their non-spent cards came back after a round).</summary>
     public void AddOpponentCardBacks(int count)
     {
         if (cardBackPrefab == null || OpponentCardContainer == null) return;
@@ -250,7 +275,6 @@ public class GachaUI : MonoBehaviour
         RefreshOpponentFan();
     }
 
-    // A layout group would fight the manual fan positions, exactly like it would on the player's hand.
     private void PrepareOpponentContainer()
     {
         if (opponentContainerPrepared) return;
@@ -259,7 +283,6 @@ public class GachaUI : MonoBehaviour
         LayoutGroup layoutGroup = OpponentCardContainer.GetComponent<LayoutGroup>();
         if (layoutGroup != null)
         {
-            Debug.LogWarning("[GachaUI] Disabling LayoutGroup on OpponentCardContainer so the card backs can be fanned.");
             layoutGroup.enabled = false;
         }
 
@@ -267,7 +290,6 @@ public class GachaUI : MonoBehaviour
         if (fitter != null) fitter.enabled = false;
     }
 
-    // Same setup the player's cards get in the hand: centred anchors/pivot, so (0,0) is the middle of the container.
     private void PrepareCardBack(GameObject back)
     {
         RectTransform rt = back.transform as RectTransform;
@@ -279,7 +301,6 @@ public class GachaUI : MonoBehaviour
         rt.pivot = new Vector2(0.5f, 0.5f);
         rt.sizeDelta = size;
 
-        // New cards start in the middle of the fan and slide out to their slot.
         rt.anchoredPosition = Vector2.zero;
         rt.localRotation = Quaternion.identity;
     }
@@ -319,13 +340,10 @@ public class GachaUI : MonoBehaviour
         opponentFanCoroutine = StartCoroutine(Routine_AnimateOpponentFan());
     }
 
-    // Same arc maths as PlayerHandManager.Routine_AnimateFanLayout (spacing along X, quadratic drop along Y,
-    // rotation fanning out from the centre), so the opponent's card backs form the same fan as the player's hand.
     private IEnumerator Routine_AnimateOpponentFan()
     {
         GetFanSettings(out float spacing, out float maxAngle, out float arc, out float speed);
 
-        // Snapshot, so cards added/removed mid-animation can't shift indices (a new animation is started for those).
         List<RectTransform> backs = new List<RectTransform>();
         foreach (GameObject b in opponentCardBacks)
         {
@@ -394,7 +412,6 @@ public class GachaUI : MonoBehaviour
         opponentFanCoroutine = null;
     }
 
-    /// <summary>Opponent lost cards from their hand (they played them this turn).</summary>
     public void RemoveOpponentCardBacks(int count)
     {
         opponentCardBacks.RemoveAll(b => b == null);
@@ -405,7 +422,6 @@ public class GachaUI : MonoBehaviour
             GameObject back = opponentCardBacks[last];
             opponentCardBacks.RemoveAt(last);
 
-            // Deactivate first: Destroy() only happens at the end of the frame, so this makes it vanish at once.
             if (back != null)
             {
                 back.SetActive(false);
@@ -413,7 +429,6 @@ public class GachaUI : MonoBehaviour
             }
         }
 
-        // Re-fan the remaining backs to close the gap.
         RefreshOpponentFan();
     }
 
@@ -424,17 +439,17 @@ public class GachaUI : MonoBehaviour
     {
         bool timerAllowsPull = (drawTimerManager == null) || drawTimerManager.IsDrawPhaseActive;
         int cost = CostFor(deck);
-        if (DisplayedTokens < cost || pullsInFlight > 0 || !timerAllowsPull) return;
 
-        // Must happen BEFORE the request: on the host the server answers synchronously inside this call.
+        if (DisplayedTokens < cost || !timerAllowsPull) return;
+
         pullsInFlight++;
-        inFlightCost = cost;
+        totalInFlightCost += cost;
+
         RefreshTokenText();
         UpdateButtonInteractability(isDrawPhaseActive);
 
         if (playerHandManager != null)
         {
-            // PlayerHandManager notifies the draw timer and sends the pull request itself.
             Button sourceButton = deck == DeckType.Action ? pullActionButton : pullSupportButton;
             RectTransform sourceBtnRect = sourceButton != null ? sourceButton.GetComponent<RectTransform>() : null;
             playerHandManager.DealCardsFromTokens(1, deck, sourceBtnRect);

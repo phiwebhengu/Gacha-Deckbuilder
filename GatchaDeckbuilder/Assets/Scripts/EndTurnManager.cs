@@ -20,7 +20,6 @@ public struct TurnResultData : INetworkSerializable
     public int finalPlayerHP;
     public int finalOpponentHP;
 
-    // Played cards that a Support effect removes from the hand after the round (e.g. Kid Kujirai). Network ids.
     public int[] playerDiscardedCardIds;
     public int[] opponentDiscardedCardIds;
 
@@ -57,11 +56,6 @@ public struct TurnResultData : INetworkSerializable
     }
 }
 
-/// <summary>
-/// Action and Support cards can share the same numeric Id (each CSV has its own numbering), so an Id on its own
-/// doesn't say which deck a card is from. Support cards are sent over the network with an offset so the receiver
-/// (server damage math + opponent card display) always looks in the right deck.
-/// </summary>
 public static class CardNetId
 {
     public const int SupportOffset = 10000;
@@ -72,6 +66,9 @@ public static class CardNetId
 
 public class EndTurnManager : NetworkBehaviour
 {
+    [Header("Game Mode Settings")]
+    [SerializeField] public bool isOfflineAIRival = false;
+
     [Header("Health & Points Settings")]
     [SerializeField] private int startingHP = 20;
 
@@ -104,31 +101,23 @@ public class EndTurnManager : NetworkBehaviour
 
     [Header("✨ AUDIO SETTINGS ✨")]
     [SerializeField] private AudioSource audioSource;
-    [Header("Incremental Points Sound")]
     [SerializeField] private AudioClip pointCountSFX;
     [SerializeField] private float minPitch = 0.9f;
     [SerializeField] private float maxPitch = 1.8f;
-
-    [Header("Combat Damage Sound")]
     [SerializeField] private AudioClip damageSFX;
-
-    [Header("Card Highlight Sounds")]
     [SerializeField] private AudioClip attackHighlightSFX;
     [SerializeField] private AudioClip defenseHighlightSFX;
     [SerializeField] private AudioClip supportHighlightSFX;
 
     [Header("✨ JUICE: Damage Flash UI ✨")]
-    [Tooltip("Full screen red overlay or vignette Image component for player taking damage.")]
     [SerializeField] private Image damageFlashImage;
     [SerializeField] private float flashInDuration = 0.05f;
     [SerializeField] private float flashOutDuration = 0.25f;
     [SerializeField][Range(0f, 1f)] private float maxFlashAlpha = 0.6f;
 
     [Header("✨ JUICE: Damage UI Shake Settings ✨")]
-    [Tooltip("Optional parent panel or transform overrides for health shake. If null, defaults to playerHPText/opponentHPText RectTransforms.")]
     [SerializeField] private RectTransform playerHPRectTransformOverride;
     [SerializeField] private RectTransform opponentHPRectTransformOverride;
-
     [SerializeField] private float damageShakeDuration = 0.15f;
     [SerializeField] private float damageShakeMagnitude = 12f;
     [SerializeField] private float damageShakeRotation = 1.5f;
@@ -144,7 +133,6 @@ public class EndTurnManager : NetworkBehaviour
     [SerializeField] private RectTransform opponentSelectedHandTransform;
 
     [Header("Opponent Card Display")]
-    [Tooltip("Assign the Card Prefab here to ensure opponent cards can be instantiated reliably. Falls back to PlayerHandManager's prefab if left empty.")]
     [SerializeField] private GameObject opponentCardPrefab;
 
     [Header("System References")]
@@ -160,7 +148,7 @@ public class EndTurnManager : NetworkBehaviour
     [SerializeField] private Button forfeitButton;
     [SerializeField] private Button pauseButton;
 
-    [Header("Leave To Lobby (mid-match or after it ends)")]
+    [Header("Leave To Lobby")]
     [SerializeField] private GameObject leaveConfirmPanel;
 
     [Header("Scene Settings")]
@@ -171,16 +159,13 @@ public class EndTurnManager : NetworkBehaviour
     [SerializeField] private int maxRounds = 10;
 
     [Header("Pop-up Font (Futura)")]
-    [Tooltip("TMP Font Asset used for the reaction pop-ups and the 'can't play that' message.")]
     [SerializeField] private TMP_FontAsset popupFont;
     [SerializeField] private float reactionPopupFontSize = 40f;
-    [Tooltip("Optional. A TMP text you styled yourself (font, size). Each reaction pop-up is a copy of it. Leave it in the scene (inactive); drag it here.")]
     [SerializeField] private TextMeshProUGUI reactionPopupTemplate;
 
-    [Header("Skip Turn (shown when the hand has only Weapon / Artefact cards)")]
-    [Tooltip("Optional. Leave empty and a copy of the End Turn button is created next to it.")]
+    [Header("Skip Turn")]
     [SerializeField] private Button skipTurnButton;
-    private bool drawPhaseSeen = false;   // true once this round's draw window has been and gone
+    private bool drawPhaseSeen = false;
     private float nextSkipCheck = 0f;
 
     private int currentPlayerHP;
@@ -192,28 +177,15 @@ public class EndTurnManager : NetworkBehaviour
     private bool isResolvingCombat = false;
     private bool leavingToLobby = false;
 
-    // True from the moment this player ends their turn until the next round starts. Used so that un-pausing
-    // doesn't re-enable cards that are supposed to stay locked.
     private bool localTurnSubmitted = false;
-
-    // How many of the opponent's played cards return to their hand after this round's resolution.
     private int opponentCardsReturningToHand = 0;
-
-    // This player's played cards that a Support effect removes after the round (set when the result arrives).
     private int[] pendingOwnDiscardNetIds = null;
 
-    // Server only: Support state that carries over between rounds (e.g. Stormterror's Lair), per player.
     private readonly Dictionary<ulong, SupportMatchState> supportStates = new Dictionary<ulong, SupportMatchState>();
     private GachaManager cachedGachaManager;
-
-    // What each player played in the round that was just resolved. The gacha side of the Support effects (free pulls,
-    // Seymour, Frostmoon Enclave...) is applied from this when both players are ready for the next round.
     private readonly List<GachaManager.RoundEndInfo> pendingRoundEnd = new List<GachaManager.RoundEndInfo>();
-
-    // Server-side: which clients have finished watching the combat animation and are ready for the next round.
     private readonly HashSet<ulong> clientsReadyForNextRound = new HashSet<ulong>();
 
-    // Juice bookkeeping (one running pop per text, one camera shake, a fixed "home" position per shaken rect)
     private readonly Dictionary<Transform, Coroutine> activePops = new Dictionary<Transform, Coroutine>();
     private readonly Dictionary<RectTransform, Vector2> restPositions = new Dictionary<RectTransform, Vector2>();
     private Coroutine activeCameraShake;
@@ -241,11 +213,18 @@ public class EndTurnManager : NetworkBehaviour
 
     public override void OnNetworkSpawn()
     {
-        // The host is always Player 1. (ConnectedClientsIds is a server-side list, so don't rely on it from a joining client.)
         isPlayer1 = IsServer;
 
-        currentPlayerHP = isPlayer1 ? Player1_HP.Value : Player2_HP.Value;
-        currentOpponentHP = isPlayer1 ? Player2_HP.Value : Player1_HP.Value;
+        if (isOfflineAIRival)
+        {
+            currentPlayerHP = startingHP;
+            currentOpponentHP = startingHP;
+        }
+        else
+        {
+            currentPlayerHP = isPlayer1 ? Player1_HP.Value : Player2_HP.Value;
+            currentOpponentHP = isPlayer1 ? Player2_HP.Value : Player1_HP.Value;
+        }
 
         if (IsServer)
         {
@@ -253,11 +232,11 @@ public class EndTurnManager : NetworkBehaviour
         }
         else
         {
-            // Joining player: notice when the host disappears (they left, closed the game, or the connection dropped).
             NetworkManager.Singleton.OnClientDisconnectCallback += HandleDisconnectedFromHost;
         }
 
         GameEnded.OnValueChanged += OnGameEndedChanged;
+        UpdateHPUI();
     }
 
     public override void OnNetworkDespawn()
@@ -272,9 +251,6 @@ public class EndTurnManager : NetworkBehaviour
         }
         GameEnded.OnValueChanged -= OnGameEndedChanged;
 
-        // On a joining player the networked scene objects despawn when the host goes away. Depending on the order
-        // Netcode runs things in, this can happen before the disconnect callback, so handle it here too.
-        // (Ignored when we are leaving ourselves, or the match has already ended.)
         if (!IsServer) ShowMatchEndedByDisconnect("DISCONNECTED (Host left the match)");
     }
 
@@ -282,8 +258,6 @@ public class EndTurnManager : NetworkBehaviour
     {
         if (newVal && !isMatchOver)
         {
-            // The host can finish its animations first and flip GameEnded while this client is still playing its
-            // own combat sequence. Let the local sequence finish; it will show the real VICTORY/DEFEAT/DRAW text.
             if (isResolvingCombat) return;
 
             isMatchOver = true;
@@ -305,13 +279,9 @@ public class EndTurnManager : NetworkBehaviour
         if (pendingTurns.ContainsKey(clientId))
         {
             pendingTurns.Remove(clientId);
-            Debug.Log($"[Server] Client {clientId} disconnected during turn. Clearing pending state.");
         }
-
         clientsReadyForNextRound.Remove(clientId);
 
-        // The other player disconnected mid-match (closed the game / lost connection): the remaining player wins.
-        // (A player who leaves on purpose forfeits first, so the match is already over and this does nothing.)
         if (NetworkManager.Singleton != null && clientId != NetworkManager.Singleton.LocalClientId)
         {
             ShowMatchEndedByDisconnect("VICTORY! (Opponent disconnected)");
@@ -332,7 +302,6 @@ public class EndTurnManager : NetworkBehaviour
         StopAllCoroutines();
         ResetPauseState();
 
-        // GameEnded is server-write-only. This also locks the server against further turn submissions.
         if (IsServer && IsSpawned) GameEnded.Value = true;
 
         if (gameOverPanel != null) gameOverPanel.SetActive(true);
@@ -348,6 +317,12 @@ public class EndTurnManager : NetworkBehaviour
 
     private void Start()
     {
+        if (isOfflineAIRival || !IsSpawned)
+        {
+            currentPlayerHP = startingHP;
+            currentOpponentHP = startingHP;
+        }
+
         if (audioSource == null)
         {
             audioSource = GetComponent<AudioSource>();
@@ -378,7 +353,6 @@ public class EndTurnManager : NetworkBehaviour
         ClearOpponentPanel();
 
         currentRound = 1;
-
         SetupSkipButton();
     }
 
@@ -431,13 +405,11 @@ public class EndTurnManager : NetworkBehaviour
                 }
             }
         }
-        Debug.LogWarning("[EndTurnManager] Could not find matching slot, using first available PlayerHandManager.");
         _cachedLocalHandManager = FindFirstObjectByType<PlayerHandManager>();
         _hasCachedHandManager = true;
         return _cachedLocalHandManager;
     }
 
-    /// <summary>True once the match has ended (locally or on the server).</summary>
     public bool IsMatchOver => isMatchOver || (IsSpawned && GameEnded.Value);
 
     public void UpdateEndTurnButtonVisibility()
@@ -449,22 +421,19 @@ public class EndTurnManager : NetworkBehaviour
         endTurnButton.gameObject.SetActive(selectedCount > 0);
     }
 
-    // ============================ SKIP TURN ============================
-
     private void SetupSkipButton()
     {
         if (skipTurnButton == null && endTurnButton != null)
         {
-            // No button assigned: make one by copying the End Turn button, so it already matches your style (and font).
             skipTurnButton = Instantiate(endTurnButton, endTurnButton.transform.parent);
             skipTurnButton.name = "SkipTurnButton";
-            skipTurnButton.onClick = new Button.ButtonClickedEvent(); // drop the copied End Turn click
+            skipTurnButton.onClick = new Button.ButtonClickedEvent();
 
             TMP_Text label = skipTurnButton.GetComponentInChildren<TMP_Text>(true);
             if (label != null) label.text = "Skip Turn";
 
             RectTransform rt = skipTurnButton.GetComponent<RectTransform>();
-            rt.anchoredPosition += new Vector2(-(rt.sizeDelta.x + 30f), 0f); // next to End Turn
+            rt.anchoredPosition += new Vector2(-(rt.sizeDelta.x + 30f), 0f);
         }
 
         if (skipTurnButton != null)
@@ -479,20 +448,18 @@ public class EndTurnManager : NetworkBehaviour
     {
         if (skipTurnButton == null) return;
 
-        // The skip button is only for the play phase, i.e. after this round's draw window has finished.
         if (timerManager != null && timerManager.IsDrawPhaseActive) drawPhaseSeen = true;
 
         if (Time.unscaledTime < nextSkipCheck) return;
         nextSkipCheck = Time.unscaledTime + 0.25f;
 
-        bool show = IsSpawned && !isMatchOver && !localTurnSubmitted && !isResolvingCombat
+        bool show = (IsSpawned || isOfflineAIRival) && !isMatchOver && !localTurnSubmitted && !isResolvingCombat
                     && drawPhaseSeen && timerManager != null && !timerManager.IsDrawPhaseActive
                     && LocalPlayerHasNoPlayableCard();
 
         if (skipTurnButton.gameObject.activeSelf != show) skipTurnButton.gameObject.SetActive(show);
     }
 
-    /// <summary>True when every card in the player's hand is a Weapon or Artefact (or the hand is empty).</summary>
     private bool LocalPlayerHasNoPlayableCard()
     {
         DeckManager deck = FindFirstObjectByType<DeckManager>();
@@ -504,15 +471,15 @@ public class EndTurnManager : NetworkBehaviour
             if (selectedHandTransform != null && card.transform.IsChildOf(selectedHandTransform)) continue;
             if (opponentSelectedHandTransform != null && card.transform.IsChildOf(opponentSelectedHandTransform)) continue;
 
-            if (card.Category == CardCategory.Support) return false;          // Support cards can always be played
+            if (card.Category == CardCategory.Support) return false;
 
             ActionCardData data = deck.loadedActionCards.Find(c => c.Id == card.CardId);
-            if (data == null) return false;                                    // unknown card: don't offer a skip
+            if (data == null) return false;
 
             string cat = (data.Category ?? "").Trim();
             bool needsPartner = cat.Equals("Weapon", StringComparison.OrdinalIgnoreCase)
                              || cat.Equals("Artefact", StringComparison.OrdinalIgnoreCase);
-            if (!needsPartner) return false;                                   // a Character or Monster is playable
+            if (!needsPartner) return false;
         }
         return true;
     }
@@ -524,7 +491,6 @@ public class EndTurnManager : NetworkBehaviour
         PlayerHandManager localHandManager = GetLocalHandManager();
         if (localHandManager == null || !LocalPlayerHasNoPlayableCard()) return;
 
-        // Put back any card the player had selected, then lock the hand like a normal End Turn.
         foreach (BalatroCardController c in localHandManager.GetSelectedCards()) c.ForceDeselect();
 
         localTurnSubmitted = true;
@@ -534,7 +500,14 @@ public class EndTurnManager : NetworkBehaviour
         if (endTurnButton != null) endTurnButton.gameObject.SetActive(false);
         if (skipTurnButton != null) skipTurnButton.gameObject.SetActive(false);
 
-        SubmitTurnServerRpc(Array.Empty<int>());   // an empty turn: no cards played this round
+        if (isOfflineAIRival)
+        {
+            ResolveOfflineAITurn(Array.Empty<int>());
+        }
+        else
+        {
+            SubmitTurnServerRpc(Array.Empty<int>());
+        }
     }
 
     public void OnEndTurnClicked()
@@ -549,12 +522,11 @@ public class EndTurnManager : NetworkBehaviour
             return;
         }
 
-        // Weapons need a Character, Artefacts need a card of the same element (see CardRules).
         DeckManager rulesDeck = FindFirstObjectByType<DeckManager>();
         if (rulesDeck != null && !CardRules.IsPlayAllowed(selectedIds, rulesDeck.loadedActionCards, out string invalidReason))
         {
             ShowInvalidPlayMessage(invalidReason);
-            return; // nothing is submitted; the player keeps their selection and can change it
+            return;
         }
 
         localTurnSubmitted = true;
@@ -565,12 +537,74 @@ public class EndTurnManager : NetworkBehaviour
 
         if (endTurnButton != null) endTurnButton.gameObject.SetActive(false);
 
-        SubmitTurnServerRpc(selectedIds);
+        if (isOfflineAIRival)
+        {
+            ResolveOfflineAITurn(selectedIds);
+        }
+        else
+        {
+            SubmitTurnServerRpc(selectedIds);
+        }
     }
 
-    // ---------- "you can't play that" message ----------
-    [Header("Invalid Play Message (optional)")]
-    [Tooltip("Shows why a selection can't be played. Leave empty and a simple text is created above the End Turn button.")]
+    private void ResolveOfflineAITurn(int[] playerSelectedIds)
+    {
+        var deckMgr = FindFirstObjectByType<DeckManager>();
+
+        List<int> aiCardIds = new List<int>();
+        if (deckMgr != null && deckMgr.loadedActionCards != null && deckMgr.loadedActionCards.Count > 0)
+        {
+            int countToPick = UnityEngine.Random.Range(1, 3);
+            for (int i = 0; i < countToPick; i++)
+            {
+                var randCard = deckMgr.loadedActionCards[UnityEngine.Random.Range(0, deckMgr.loadedActionCards.Count)];
+                aiCardIds.Add(randCard.Id);
+            }
+        }
+        int[] opponentCards = aiCardIds.ToArray();
+
+        SupportEffectResolver.Resolve(
+            playerSelectedIds, opponentCards, deckMgr,
+            GetSupportState(0), new SupportMatchState(),
+            out SideOutcome outPlayer, out SideOutcome outOpponent);
+
+        int finalPlayerHP = Mathf.Max(0, currentPlayerHP - outOpponent.DamageDealt);
+        int finalOpponentHP = Mathf.Max(0, currentOpponentHP - outPlayer.DamageDealt);
+
+        var result = new TurnResultData
+        {
+            playerCardIds = playerSelectedIds,
+            opponentCardIds = opponentCards,
+            playerAttack = outPlayer.Attack,
+            playerDefense = outPlayer.Defense,
+            opponentAttack = outOpponent.Attack,
+            opponentDefense = outOpponent.Defense,
+            netDamageToPlayer = outOpponent.DamageDealt,
+            netDamageToOpponent = outPlayer.DamageDealt,
+            finalPlayerHP = finalPlayerHP,
+            finalOpponentHP = finalOpponentHP,
+            playerDiscardedCardIds = outPlayer.DiscardedNetIds.ToArray(),
+            opponentDiscardedCardIds = outOpponent.DiscardedNetIds.ToArray()
+        };
+
+        StartCoroutine(Routine_ResolveCombatSequenceOffline(result));
+    }
+
+    private IEnumerator Routine_ResolveCombatSequenceOffline(TurnResultData result)
+    {
+        yield return StartCoroutine(Routine_ResolveCombatSequence(result));
+
+        if (isOfflineAIRival && !isMatchOver)
+        {
+            currentRound++;
+            if (timerManager != null)
+            {
+                timerManager.RequestStartRound(currentRound);
+            }
+        }
+    }
+
+    [Header("Invalid Play Message")]
     [SerializeField] private TextMeshProUGUI invalidPlayText;
     [SerializeField] private float invalidPlayMessageSeconds = 3f;
     private Coroutine invalidPlayRoutine;
@@ -618,22 +652,13 @@ public class EndTurnManager : NetworkBehaviour
     [ServerRpc(RequireOwnership = false)]
     private void SubmitTurnServerRpc(int[] selectedCardIds, ServerRpcParams rpcParams = default)
     {
-        if (isMatchOver || GameEnded.Value)
-        {
-            Debug.LogWarning($"[Server] Ignoring turn submission from Client {rpcParams.Receive.SenderClientId} because match is over.");
-            return;
-        }
+        if (isMatchOver || GameEnded.Value) return;
 
         ulong clientId = rpcParams.Receive.SenderClientId;
-
-        // Ignore a repeat submission from the same player (it would otherwise remove card backs twice).
         if (pendingTurns.ContainsKey(clientId)) return;
 
         pendingTurns[clientId] = selectedCardIds ?? Array.Empty<int>();
-        Debug.Log($"[Server] Received turn from Client {clientId} with {pendingTurns[clientId].Length} cards.");
 
-        // Tell the other player how many cards just left this player's hand. ONLY the count is sent, never the
-        // card IDs, so what was played stays hidden until the reveal.
         var others = new List<ulong>();
         foreach (ulong id in NetworkManager.Singleton.ConnectedClientsIds)
             if (id != clientId) others.Add(id);
@@ -655,7 +680,6 @@ public class EndTurnManager : NetworkBehaviour
     [ClientRpc]
     private void OpponentPlayedCardsClientRpc(int cardCount, ClientRpcParams rpcParams = default)
     {
-        // Opponent's cards moved from their hand to the table: remove that many card backs.
         foreach (GachaUI ui in FindObjectsByType<GachaUI>(FindObjectsSortMode.None))
             ui.RemoveOpponentCardBacks(cardCount);
     }
@@ -670,22 +694,12 @@ public class EndTurnManager : NetworkBehaviour
         int[] cardsB = pendingTurns[idB];
 
         bool aIsPlayer1 = IsPlayer1Id(idA);
-
         var deckMgr = FindFirstObjectByType<DeckManager>();
-        if (deckMgr == null)
-        {
-            Debug.LogError("[EndTurnManager] DeckManager not found on Server! Damage calculation will fail.");
-        }
 
-        // One calculation for BOTH players, so the two clients always agree. Attack/defense totals and damage already
-        // include every Support effect (see SupportEffectResolver for the rules).
         SupportEffectResolver.Resolve(
             cardsA, cardsB, deckMgr,
             GetSupportState(idA), GetSupportState(idB),
             out SideOutcome outA, out SideOutcome outB);
-
-        LogSupportNotes(idA, outA);
-        LogSupportNotes(idB, outB);
 
         int currentHpA = aIsPlayer1 ? Player1_HP.Value : Player2_HP.Value;
         int currentHpB = aIsPlayer1 ? Player2_HP.Value : Player1_HP.Value;
@@ -739,7 +753,6 @@ public class EndTurnManager : NetworkBehaviour
         SendResultToClient(idA, resultA);
         SendResultToClient(idB, resultB);
 
-        // Token rewards from Support effects (Paimon, Vanarana, Katheryne).
         GrantTokens(idA, outA.TokenReward);
         GrantTokens(idB, outB.TokenReward);
 
@@ -763,7 +776,6 @@ public class EndTurnManager : NetworkBehaviour
     private void GrantTokens(ulong clientId, int amount)
     {
         if (amount <= 0) return;
-
         if (cachedGachaManager == null) cachedGachaManager = FindFirstObjectByType<GachaManager>();
         if (cachedGachaManager != null) cachedGachaManager.AddTokens(clientId, amount);
     }
@@ -771,19 +783,9 @@ public class EndTurnManager : NetworkBehaviour
     private void ApplyGachaRoundEnd()
     {
         if (pendingRoundEnd.Count == 0) return;
-
         if (cachedGachaManager == null) cachedGachaManager = FindFirstObjectByType<GachaManager>();
         if (cachedGachaManager != null) cachedGachaManager.ApplyRoundEnd(pendingRoundEnd);
-
         pendingRoundEnd.Clear();
-    }
-
-    private void LogSupportNotes(ulong clientId, SideOutcome outcome)
-    {
-        foreach (string note in outcome.Notes)
-        {
-            Debug.Log($"[Support] Client {clientId}: {note}");
-        }
     }
 
     private bool IsPlayer1Id(ulong clientId)
@@ -818,7 +820,6 @@ public class EndTurnManager : NetworkBehaviour
         List<BalatroCardController> playerCards = GetControllersFromTransform(selectedHandTransform);
         List<BalatroCardController> opponentCards = InstantiateOpponentCards(result.opponentCardIds);
 
-        // --- ATTACK PHASE ---
         HighlightCardsByCategory(playerCards, opponentCards, CardCategory.Attack);
         PlayHighlightSFX(CardCategory.Attack);
         ShowReactionPopups(result, true);
@@ -829,7 +830,6 @@ public class EndTurnManager : NetworkBehaviour
         yield return new WaitForSeconds(phaseTransitionPause);
         ResetCardHighlights(playerCards, opponentCards);
 
-        // --- DEFENSE PHASE ---
         HighlightCardsByCategory(playerCards, opponentCards, CardCategory.Defense);
         PlayHighlightSFX(CardCategory.Defense);
         ShowReactionPopups(result, false);
@@ -840,7 +840,6 @@ public class EndTurnManager : NetworkBehaviour
         yield return new WaitForSeconds(phaseTransitionPause);
         ResetCardHighlights(playerCards, opponentCards);
 
-        // --- DIFFERENCE STEP ---
         int maxNetDamage = Mathf.Max(result.netDamageToOpponent, result.netDamageToPlayer);
         if (centerDifferenceText != null && maxNetDamage > 0)
         {
@@ -854,7 +853,6 @@ public class EndTurnManager : NetworkBehaviour
         }
         yield return new WaitForSeconds(phaseTransitionPause);
 
-        // --- PLAYER DAMAGE PHASE ---
         if (result.netDamageToPlayer > 0)
         {
             RectTransform targetTargetRect = playerHPRectTransformOverride != null
@@ -877,7 +875,7 @@ public class EndTurnManager : NetworkBehaviour
                     if (activePlayerShakeCoroutine != null)
                     {
                         StopCoroutine(activePlayerShakeCoroutine);
-                        targetTargetRect.localRotation = Quaternion.identity; // Reset rotation if interrupted
+                        targetTargetRect.localRotation = Quaternion.identity;
                     }
                     activePlayerShakeCoroutine = StartCoroutine(Routine_UIRectShake(targetTargetRect, damageShakeDuration, damageShakeMagnitude, damageShakeRotation, () => activePlayerShakeCoroutine = null));
                 }
@@ -887,7 +885,6 @@ public class EndTurnManager : NetworkBehaviour
             }
         }
 
-        // --- OPPONENT DAMAGE PHASE ---
         if (result.netDamageToOpponent > 0)
         {
             RectTransform targetTargetRect = opponentHPRectTransformOverride != null
@@ -907,7 +904,7 @@ public class EndTurnManager : NetworkBehaviour
                     if (activeOpponentShakeCoroutine != null)
                     {
                         StopCoroutine(activeOpponentShakeCoroutine);
-                        targetTargetRect.localRotation = Quaternion.identity; // Reset rotation if interrupted
+                        targetTargetRect.localRotation = Quaternion.identity;
                     }
                     activeOpponentShakeCoroutine = StartCoroutine(Routine_UIRectShake(targetTargetRect, damageShakeDuration, damageShakeMagnitude, damageShakeRotation, () => activeOpponentShakeCoroutine = null));
                 }
@@ -921,14 +918,13 @@ public class EndTurnManager : NetworkBehaviour
         currentOpponentHP = result.finalOpponentHP;
         UpdateHPUI();
 
-        // Numbers for the Outcome page (this player's point of view).
         MatchStats.RecordRound(result.netDamageToOpponent, result.netDamageToPlayer);
 
         yield return new WaitForSeconds(0.5f);
         yield return StartCoroutine(Routine_CheckNextRoundOrEndGame());
         isResolvingCombat = false;
     }
-    // ---------- elemental reaction pop-ups ("Overload +1 ATK") ----------
+
     private void ShowReactionPopups(TurnResultData result, bool attackPhase)
     {
         DeckManager deck = FindFirstObjectByType<DeckManager>();
@@ -938,15 +934,12 @@ public class EndTurnManager : NetworkBehaviour
         SpawnReactionPopups(result.opponentCardIds, true, attackPhase, opponentAttackText, opponentDefenseText);
     }
 
-    // With a Reaction Popup Template the text stays exactly where the template is and reactions are shown one after the
-    // other (the opponent's are marked "Opponent:"). Without a template they float above the Attack / Defense numbers.
     private float reactionPopupFreeAt = 0f;
 
     private void SpawnReactionPopups(int[] netIds, bool isOpponent, bool attackPhase, TextMeshProUGUI attackText, TextMeshProUGUI defenseText)
     {
         if (netIds == null) return;
 
-        // Same rule as the server (SupportEffectResolver): elements of the played Action cards -> reactions.
         var elements = new HashSet<string>();
         foreach (int netId in netIds)
         {
@@ -965,11 +958,9 @@ public class EndTurnManager : NetworkBehaviour
             string label = who + r.Name + " +" + amount + (attackPhase ? " ATK" : " DEF");
             Color color = attackPhase ? new Color(1f, 0.4f, 0.5f, 1f) : new Color(0.4f, 0.65f, 1f, 1f);
 
-            float delay;
-            float lifetime;
+            float delay, lifetime;
             if (reactionPopupTemplate != null)
             {
-                // one fixed spot: wait until the previous pop-up is gone
                 float start = Mathf.Max(Time.time, reactionPopupFreeAt);
                 delay = start - Time.time;
                 reactionPopupFreeAt = start + 1.1f;
@@ -987,6 +978,7 @@ public class EndTurnManager : NetworkBehaviour
             shown++;
         }
     }
+
     private void PlayHighlightSFX(CardCategory category)
     {
         AudioClip clipToPlay = category switch
@@ -996,14 +988,10 @@ public class EndTurnManager : NetworkBehaviour
             CardCategory.Support => supportHighlightSFX,
             _ => null
         };
-
         SFXPool.Play(clipToPlay, 1f);
     }
 
-    private void PlayFixedDamageSFX()
-    {
-        SFXPool.Play(damageSFX, 1f);
-    }
+    private void PlayFixedDamageSFX() => SFXPool.Play(damageSFX, 1f);
 
     private void HighlightCardsByCategory(List<BalatroCardController> playerList, List<BalatroCardController> opponentList, CardCategory category)
     {
@@ -1017,8 +1005,6 @@ public class EndTurnManager : NetworkBehaviour
         foreach (var card in opponentList) card.ResetHighlight();
     }
 
-    // Same rule the local player's hand uses: Action cards and "Forever" Support cards go back to the hand,
-    // "Immediate" Support cards are spent and gone.
     private int CountOpponentCardsReturningToHand(int[] opponentCardIds, int[] opponentDiscardedIds)
     {
         if (opponentCardIds == null) return 0;
@@ -1039,31 +1025,18 @@ public class EndTurnManager : NetworkBehaviour
             if (supportCard != null && supportCard.EffectType == "Forever") returning++;
         }
 
-        // Cards a Support effect removes after the round (e.g. Kid Kujirai) don't go back to the hand either.
         if (opponentDiscardedIds != null) returning = Mathf.Max(0, returning - opponentDiscardedIds.Length);
-
         return returning;
     }
 
     private List<BalatroCardController> InstantiateOpponentCards(int[] opponentCardIds)
     {
         List<BalatroCardController> opponentCards = new List<BalatroCardController>();
-        if (opponentCardIds == null || opponentSelectedHandTransform == null)
-            return opponentCards;
+        if (opponentCardIds == null || opponentSelectedHandTransform == null) return opponentCards;
 
         var deckMgr = FindFirstObjectByType<DeckManager>();
-        if (deckMgr == null)
-        {
-            Debug.LogError("[InstantiateOpponentCards] DeckManager not found!");
-            return opponentCards;
-        }
-
         PlayerHandManager anyHandManager = FindFirstObjectByType<PlayerHandManager>();
-        if (anyHandManager == null || anyHandManager.cardPrefab == null)
-        {
-            Debug.LogError("[InstantiateOpponentCards] No hand manager / cardPrefab found.");
-            return opponentCards;
-        }
+        if (deckMgr == null || anyHandManager == null || anyHandManager.cardPrefab == null) return opponentCards;
 
         foreach (int netCardId in opponentCardIds)
         {
@@ -1103,20 +1076,14 @@ public class EndTurnManager : NetworkBehaviour
         return opponentCards;
     }
 
-    private Sprite GetCardSprite(int cardId, bool isActionCard)
-    {
-        return PlayerHandManager.GetCardSpriteCached(cardId, isActionCard);
-    }
+    private Sprite GetCardSprite(int cardId, bool isActionCard) => PlayerHandManager.GetCardSpriteCached(cardId, isActionCard);
 
     private List<BalatroCardController> GetControllersFromTransform(RectTransform container)
     {
         List<BalatroCardController> list = new List<BalatroCardController>();
         if (container == null) return list;
-
         foreach (BalatroCardController ctrl in container.GetComponentsInChildren<BalatroCardController>())
-        {
             if (ctrl != null) list.Add(ctrl);
-        }
         return list;
     }
 
@@ -1130,7 +1097,6 @@ public class EndTurnManager : NetworkBehaviour
             float t = maxSteps > 1 ? (float)(step - 1) / (maxSteps - 1) : 1f;
             float currentPitch = Mathf.Lerp(minPitch, maxPitch, t);
 
-            // Pooled so the rising pitch doesn't bend the previous step's sound that is still playing.
             SFXPool.Play(pointCountSFX, currentPitch);
 
             if (step <= playerTargetVal && playerText != null)
@@ -1154,26 +1120,22 @@ public class EndTurnManager : NetworkBehaviour
     {
         if (currentOpponentHP <= 0 && currentPlayerHP <= 0)
         {
-            Debug.Log("[Match Over] BOTH PLAYERS KNOCKED OUT! DRAW GAME!");
             TriggerLocalGameOver(false, true);
             yield break;
         }
         if (currentOpponentHP <= 0)
         {
-            Debug.Log("[Match Over] PLAYER WINS BY KNOCKOUT!");
             TriggerLocalGameOver(true, false);
             yield break;
         }
         if (currentPlayerHP <= 0)
         {
-            Debug.Log("[Match Over] OPPONENT WINS BY KNOCKOUT!");
             TriggerLocalGameOver(false, false);
             yield break;
         }
 
         if (currentRound >= maxRounds)
         {
-            Debug.Log($"[Match Over] MAX ROUNDS ({maxRounds}) REACHED! Evaluating winner based on HP.");
             EvaluateWinnerByHP();
             yield break;
         }
@@ -1185,18 +1147,19 @@ public class EndTurnManager : NetworkBehaviour
         if (timerManager != null)
         {
             PlayerHandManager localHandManager = GetLocalHandManager();
-            if (localHandManager != null)
-            {
-                localHandManager.SetAllCardsInteractable(true);
-            }
+            if (localHandManager != null) localHandManager.SetAllCardsInteractable(true);
 
             currentRound++;
 
-            // Only the host could start rounds, and it did so as soon as *the host's* animations finished, which
-            // is earlier than the joining player's. The new round (and its countdown) then started on top of the
-            // joiner's unfinished combat animation. Now each player reports "ready" and the server starts the
-            // round when both have.
-            ReadyForNextRoundServerRpc(currentRound);
+            if (isOfflineAIRival)
+            {
+                ApplyGachaRoundEnd();
+                timerManager.RequestStartRound(currentRound);
+            }
+            else
+            {
+                ReadyForNextRoundServerRpc(currentRound);
+            }
         }
     }
 
@@ -1210,32 +1173,16 @@ public class EndTurnManager : NetworkBehaviour
         if (clientsReadyForNextRound.Count >= NetworkManager.Singleton.ConnectedClientsIds.Count)
         {
             clientsReadyForNextRound.Clear();
-
-            // Both players finished the resolution animation: hand out the pull/economy Support effects
-            // (free cards, Seymour, Frostmoon Enclave...) BEFORE the next draw window opens.
             ApplyGachaRoundEnd();
-
             if (timerManager != null) timerManager.RequestStartRound(nextRound);
         }
     }
 
     private void EvaluateWinnerByHP()
     {
-        if (currentPlayerHP > currentOpponentHP)
-        {
-            Debug.Log("[Match Over] PLAYER WINS BY HP!");
-            TriggerLocalGameOver(true, false);
-        }
-        else if (currentOpponentHP > currentPlayerHP)
-        {
-            Debug.Log("[Match Over] OPPONENT WINS BY HP!");
-            TriggerLocalGameOver(false, false);
-        }
-        else
-        {
-            Debug.Log("[Match Over] DRAW BY HP!");
-            TriggerLocalGameOver(false, true);
-        }
+        if (currentPlayerHP > currentOpponentHP) TriggerLocalGameOver(true, false);
+        else if (currentOpponentHP > currentPlayerHP) TriggerLocalGameOver(false, false);
+        else TriggerLocalGameOver(false, true);
     }
 
     private void TriggerLocalGameOver(bool isPlayerWinner, bool isDraw)
@@ -1243,32 +1190,17 @@ public class EndTurnManager : NetworkBehaviour
         isMatchOver = true;
         isResolvingCombat = false;
 
-        // GameEnded is server-write-only. A joining client writing to it throws an exception, which skipped the
-        // rest of this method (so the client never saw its game-over screen). Clients ask the server instead.
         if (IsServer) GameEnded.Value = true;
         else NotifyServerGameOverServerRpc();
 
         StopAllCoroutines();
 
         if (gameOverPanel != null) gameOverPanel.SetActive(true);
-
         if (resultText != null)
         {
             resultText.gameObject.SetActive(true);
-            if (isDraw)
-            {
-                resultText.text = "DRAW";
-            }
-            else if (isPlayerWinner)
-            {
-                resultText.text = "VICTORY!";
-            }
-            else
-            {
-                resultText.text = "DEFEAT";
-            }
+            resultText.text = isDraw ? "DRAW" : (isPlayerWinner ? "VICTORY!" : "DEFEAT");
         }
-
         if (returnToLobbyButton != null) returnToLobbyButton.gameObject.SetActive(true);
     }
 
@@ -1277,7 +1209,6 @@ public class EndTurnManager : NetworkBehaviour
     {
         isMatchOver = true;
         GameEnded.Value = true;
-        Debug.Log($"[Server] Match over flagged by client {rpcParams.Receive.SenderClientId}. Locking further turns.");
     }
 
     private void ResetTurnUI()
@@ -1288,7 +1219,6 @@ public class EndTurnManager : NetworkBehaviour
         if (opponentDefenseText != null) opponentDefenseText.text = "0";
         if (centerDifferenceText != null) centerDifferenceText.text = "";
 
-        // New round: the skip button waits for this round's draw window again.
         drawPhaseSeen = false;
         if (skipTurnButton != null) skipTurnButton.gameObject.SetActive(false);
     }
@@ -1300,39 +1230,22 @@ public class EndTurnManager : NetworkBehaviour
             PlayerHandManager localHandManager = GetLocalHandManager();
             if (localHandManager != null)
             {
-                // Removes spent "immediate" supports from the hand manager's lists AND destroys them, so the
-                // returning cards aren't fanned around a card that is about to disappear (that left a gap).
                 localHandManager.DiscardSubmittedImmediateSupports();
-
-                // Cards a Support effect removes this round (e.g. Kid Kujirai) are destroyed instead of returning.
                 localHandManager.DiscardSubmittedCardsByNetId(pendingOwnDiscardNetIds);
                 pendingOwnDiscardNetIds = null;
-
                 localHandManager.ReturnSubmittedCardsToHand(selectedHandTransform);
             }
-            else
-            {
-                foreach (var card in selectedHandTransform.GetComponentsInChildren<BalatroCardController>())
-                {
-                    if (card != null && card.Category == CardCategory.Support && !card.IsForever)
-                        Destroy(card.gameObject);
-                }
-            }
-
             yield return new WaitForSeconds(0.3f);
         }
 
         if (opponentSelectedHandTransform != null)
         {
-            BalatroCardController[] oppCards = opponentSelectedHandTransform.GetComponentsInChildren<BalatroCardController>();
-            foreach (var card in oppCards)
+            foreach (var card in opponentSelectedHandTransform.GetComponentsInChildren<BalatroCardController>())
             {
                 if (card != null) Destroy(card.gameObject);
             }
         }
 
-        // The opponent's non-spent cards go back to their hand, so their card-back stack grows back by that many.
-        // Spent Immediate Support cards are not added back, so they stay gone from the stack.
         if (opponentCardsReturningToHand > 0)
         {
             foreach (GachaUI ui in FindObjectsByType<GachaUI>(FindObjectsSortMode.None))
@@ -1343,24 +1256,17 @@ public class EndTurnManager : NetworkBehaviour
         yield return null;
     }
 
-    // Only ONE pop per text at a time. A pop lasts longer than the count interval, so overlapping pops used to
-    // write to the same scale at once and the older one snapped the newer one back to base size (flicker).
     private void PopText(Transform textTransform, Vector3 baseScale)
     {
         if (textTransform == null) return;
-
-        if (activePops.TryGetValue(textTransform, out Coroutine running) && running != null)
-            StopCoroutine(running);
-
+        if (activePops.TryGetValue(textTransform, out Coroutine running) && running != null) StopCoroutine(running);
         textTransform.localScale = baseScale;
         activePops[textTransform] = StartCoroutine(Routine_PopText(textTransform, baseScale));
     }
 
-    // Same idea for the camera: overlapping shakes used to reset the camera while another one was still running.
     private void ShakeCamera()
     {
         if (mainCamera == null) return;
-
         if (activeCameraShake != null) StopCoroutine(activeCameraShake);
         mainCamera.transform.localPosition = originalCamPos;
         activeCameraShake = StartCoroutine(Routine_CameraShake());
@@ -1389,11 +1295,9 @@ public class EndTurnManager : NetworkBehaviour
     private IEnumerator Routine_DamageFlash()
     {
         if (damageFlashImage == null) yield break;
-
         Color flashColor = damageFlashImage.color;
         float elapsed = 0f;
 
-        // Flash In
         while (elapsed < flashInDuration)
         {
             elapsed += Time.unscaledDeltaTime;
@@ -1406,7 +1310,6 @@ public class EndTurnManager : NetworkBehaviour
         damageFlashImage.color = flashColor;
         elapsed = 0f;
 
-        // Fade Out
         while (elapsed < flashOutDuration)
         {
             elapsed += Time.unscaledDeltaTime;
@@ -1423,9 +1326,6 @@ public class EndTurnManager : NetworkBehaviour
     {
         if (targetRect == null) yield break;
 
-        // Always return to the SAME rest position. Reading the current position here meant that when a shake was
-        // interrupted mid-way (every damage tick), the next shake treated the displaced position as "home" and the
-        // HP text slowly drifted across the screen.
         if (!restPositions.TryGetValue(targetRect, out Vector2 originalAnchoredPos))
         {
             originalAnchoredPos = targetRect.anchoredPosition;
@@ -1438,7 +1338,6 @@ public class EndTurnManager : NetworkBehaviour
             while (elapsed < duration)
             {
                 float damping = 1f - (elapsed / duration);
-
                 float offsetX = UnityEngine.Random.Range(-1f, 1f) * positionMagnitude * damping;
                 float offsetY = UnityEngine.Random.Range(-1f, 1f) * positionMagnitude * damping;
                 targetRect.anchoredPosition = originalAnchoredPos + new Vector2(offsetX, offsetY);
@@ -1452,7 +1351,6 @@ public class EndTurnManager : NetworkBehaviour
         }
         finally
         {
-            // Reset position and force rotation back to 0 on all axes
             targetRect.anchoredPosition = originalAnchoredPos;
             targetRect.localRotation = Quaternion.identity;
             onComplete?.Invoke();
@@ -1485,29 +1383,22 @@ public class EndTurnManager : NetworkBehaviour
 
     public void OnForfeit()
     {
-        if (!IsSpawned || GameEnded.Value)
-            return;
-
+        if (!IsSpawned || GameEnded.Value) return;
         if (IsGamePaused.Value && IsServer)
         {
             IsGamePaused.Value = false;
             PauseRequesterClientId.Value = 0;
             Time.timeScale = 1f;
         }
-
         SubmitForfeitServerRpc();
     }
 
-    public void PlayerForfeit()
-    {
-        OnForfeit();
-    }
+    public void PlayerForfeit() => OnForfeit();
 
     [ServerRpc(RequireOwnership = false)]
     void SubmitForfeitServerRpc(ServerRpcParams rpcParams = default)
     {
-        if (GameEnded.Value)
-            return;
+        if (GameEnded.Value) return;
 
         ulong senderClientId = rpcParams.Receive.SenderClientId;
         var allClients = new List<ulong>(NetworkManager.Singleton.ConnectedClientsIds);
@@ -1516,20 +1407,15 @@ public class EndTurnManager : NetworkBehaviour
         int forfeitingPlayer = (senderClientId == allClients[0]) ? 1 : 2;
         int winner = (forfeitingPlayer == 1) ? 2 : 1;
 
-        Debug.Log($"Player {forfeitingPlayer} forfeited. Player {winner} wins.");
-
         GameEnded.Value = true;
         isMatchOver = true;
-
         GameOverDueToForfeitClientRpc(winner, senderClientId);
     }
 
     [ClientRpc]
     void GameOverDueToForfeitClientRpc(int winner, ulong forfeiterId)
     {
-        // If we are the one leaving, don't show a game-over screen or stop the coroutine that is taking us to the lobby.
         if (leavingToLobby) return;
-
         isMatchOver = true;
         StopAllCoroutines();
         ResetPauseState();
@@ -1542,16 +1428,11 @@ public class EndTurnManager : NetworkBehaviour
             resultText.gameObject.SetActive(true);
             resultText.text = isLocalPlayerWinner ? "VICTORY! (Opponent Forfeited)" : "DEFEAT (You Forfeited)";
         }
-
         if (returnToLobbyButton != null) returnToLobbyButton.gameObject.SetActive(true);
     }
 
-    // ============================ LEAVE TO LOBBY ============================
-
     private bool IsMatchRunning => IsSpawned && !isMatchOver && !GameEnded.Value;
 
-    // The pause menu freezes time (Time.timeScale = 0) on BOTH players. Always un-freeze before leaving or showing
-    // a game-over screen, otherwise the lobby scene would load frozen.
     private void ResetPauseState()
     {
         Time.timeScale = 1f;
@@ -1559,20 +1440,14 @@ public class EndTurnManager : NetworkBehaviour
         if (leaveConfirmPanel != null) leaveConfirmPanel.SetActive(false);
     }
 
-    /// <summary>
-    /// Hook this to a "Leave" button. Mid-match it asks for confirmation first (if a confirm panel is assigned),
-    /// because leaving counts as a forfeit. After the match it just leaves.
-    /// </summary>
     public void OnLeaveClicked()
     {
         if (leavingToLobby) return;
-
         if (IsMatchRunning && leaveConfirmPanel != null)
         {
             leaveConfirmPanel.SetActive(true);
             return;
         }
-
         OnGoToLobby();
     }
 
@@ -1581,41 +1456,29 @@ public class EndTurnManager : NetworkBehaviour
         if (leaveConfirmPanel != null) leaveConfirmPanel.SetActive(false);
     }
 
-    /// <summary>
-    /// Leaves for the lobby right now. Works mid-match (counts as a forfeit, the opponent is told they won)
-    /// and after the match has ended (no forfeit needed).
-    /// </summary>
     public void OnGoToLobby()
     {
         if (leavingToLobby) return;
         leavingToLobby = true;
 
         bool matchWasRunning = IsMatchRunning;
-
         isMatchOver = true;
         isResolvingCombat = false;
-
-        // Stop the combat animation etc. The leave routine is started AFTER this, so it isn't stopped too.
         StopAllCoroutines();
         ResetPauseState();
 
-        // Mid-match: tell the server so the opponent gets a proper VICTORY screen instead of a dead game.
         if (matchWasRunning) SubmitForfeitServerRpc();
-
         StartCoroutine(Routine_LeaveToLobby(matchWasRunning));
     }
 
     private IEnumerator Routine_LeaveToLobby(bool sentForfeit)
     {
-        // Let the forfeit message actually leave before the connection closes (messages go out at the end of the frame).
         if (sentForfeit) yield return new WaitForSecondsRealtime(0.35f);
 
         NetworkManager nm = NetworkManager.Singleton;
         if (nm != null && nm.IsListening)
         {
             nm.Shutdown();
-
-            // Wait (briefly) for the shutdown to finish before changing scene.
             float waited = 0f;
             while (nm != null && nm.IsListening && waited < 2f)
             {
@@ -1629,48 +1492,24 @@ public class EndTurnManager : NetworkBehaviour
 
     public void RequestPause()
     {
-        if (!IsSpawned || GameEnded.Value)
-            return;
-
-        if (Time.time - lastPauseRequestTime < PAUSE_COOLDOWN)
-        {
-            Debug.Log("Pause on cooldown");
-            return;
-        }
-
+        if (!IsSpawned || GameEnded.Value) return;
+        if (Time.time - lastPauseRequestTime < PAUSE_COOLDOWN) return;
         lastPauseRequestTime = Time.time;
         RequestPauseServerRpc();
     }
 
     public void RequestResume()
     {
-        if (!IsSpawned || GameEnded.Value)
-            return;
-
+        if (!IsSpawned || GameEnded.Value) return;
         ulong localClientId = NetworkManager.Singleton.LocalClientId;
-
-        if (IsServer || PauseRequesterClientId.Value == localClientId)
-        {
-            RequestResumeServerRpc();
-        }
-        else
-        {
-            Debug.Log("Only the player who paused can resume the game");
-        }
+        if (IsServer || PauseRequesterClientId.Value == localClientId) RequestResumeServerRpc();
     }
 
     [ServerRpc(RequireOwnership = false)]
     void RequestPauseServerRpc(ServerRpcParams rpcParams = default)
     {
-        if (IsGamePaused.Value || GameEnded.Value)
-        {
-            Debug.Log("Game is already paused or ended");
-            return;
-        }
-
+        if (IsGamePaused.Value || GameEnded.Value) return;
         ulong requesterId = rpcParams.Receive.SenderClientId;
-        Debug.Log($"Player {requesterId} requested pause");
-
         IsGamePaused.Value = true;
         PauseRequesterClientId.Value = requesterId;
         PauseStateChangedClientRpc(true, requesterId);
@@ -1679,25 +1518,15 @@ public class EndTurnManager : NetworkBehaviour
     [ServerRpc(RequireOwnership = false)]
     void RequestResumeServerRpc(ServerRpcParams rpcParams = default)
     {
-        if (!IsGamePaused.Value)
-        {
-            Debug.Log("Game is not paused");
-            return;
-        }
-
+        if (!IsGamePaused.Value) return;
         ulong requesterId = rpcParams.Receive.SenderClientId;
         ulong pauseRequesterId = PauseRequesterClientId.Value;
 
         if (IsServer || requesterId == pauseRequesterId)
         {
-            Debug.Log($"Resuming game. Requested by: {requesterId}");
             IsGamePaused.Value = false;
             PauseRequesterClientId.Value = 0;
             PauseStateChangedClientRpc(false, 0);
-        }
-        else
-        {
-            Debug.Log($"Player {requesterId} cannot resume - only player {pauseRequesterId} can");
         }
     }
 
@@ -1707,42 +1536,28 @@ public class EndTurnManager : NetworkBehaviour
         if (isPaused)
         {
             timerRunning = false;
-            if (pausePanel != null)
-                pausePanel.SetActive(true);
-
+            if (pausePanel != null) pausePanel.SetActive(true);
             SetGameBoardInteractable(false);
             Time.timeScale = 0f;
         }
         else
         {
             timerRunning = true;
-            if (pausePanel != null)
-                pausePanel.SetActive(false);
-
+            if (pausePanel != null) pausePanel.SetActive(false);
             SetGameBoardInteractable(true);
             Time.timeScale = 1f;
         }
     }
 
-    // Should the player's hand cards be clickable right now, ignoring the pause menu?
-    // (Not during the draw window, not after they've ended their turn, not once the match is over.)
     private bool ShouldHandBeInteractable()
     {
         if (isMatchOver || localTurnSubmitted) return false;
-        if (timerManager != null && timerManager.IsDrawPhaseActive) return false;
         return true;
     }
 
     void SetGameBoardInteractable(bool enabled)
     {
-        // `enabled` is the pause state this client was just told about, so use it directly.
-        // This used to also read IsGamePaused.Value. That is a NetworkVariable, and the update that says "resumed"
-        // can reach this client AFTER the resume message does, so on resume it still held the old value (true),
-        // the board stayed locked and the player could not interact after pressing Resume.
-        if (endTurnButton != null)
-        {
-            endTurnButton.interactable = enabled;
-        }
+        if (endTurnButton != null) endTurnButton.interactable = enabled;
         if (skipTurnButton != null) skipTurnButton.interactable = enabled;
 
         PlayerHandManager localHandManager = GetLocalHandManager();
@@ -1754,15 +1569,11 @@ public class EndTurnManager : NetworkBehaviour
 
     public void QuitGame()
     {
-        Debug.Log("Quitting game...");
-
         Time.timeScale = 1f;
-
         if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsConnectedClient)
         {
             NetworkManager.Singleton.Shutdown();
         }
-
 #if UNITY_EDITOR
         UnityEditor.EditorApplication.isPlaying = false;
 #else

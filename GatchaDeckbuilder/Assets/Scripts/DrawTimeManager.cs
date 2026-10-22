@@ -6,6 +6,9 @@ using UnityEngine;
 
 public class DrawTimerManager : NetworkBehaviour
 {
+    [Header("Game Mode Settings")]
+    [SerializeField] private bool isAIMode = true;
+
     [Header("Round Display UI")]
     [SerializeField] private TextMeshProUGUI roundDisplayText;
     [SerializeField] private CanvasGroup roundDisplayCanvasGroup;
@@ -13,7 +16,7 @@ public class DrawTimerManager : NetworkBehaviour
     [SerializeField] private float roundTextHoldDuration = 0.6f;
 
     [Header("Timer Settings")]
-    [SerializeField] private float drawWindowDuration = 10f; // Updated to 10s window
+    [SerializeField] private float drawWindowDuration = 10f;
 
     [Header("Countdown Juice")]
     [SerializeField] private TextMeshProUGUI countdownText;
@@ -22,18 +25,17 @@ public class DrawTimerManager : NetworkBehaviour
     [SerializeField] private float shrinkSpeed = 10f;
 
     [Header("Countdown Audio")]
-    [Tooltip("No longer used (sounds now play through SFXPool so pitch changes can't bend other sounds). Kept so your Inspector reference isn't lost.")]
     [SerializeField] private AudioSource audioSource;
     [SerializeField] private AudioClip countdownBeepClip;
-    [SerializeField] private AudioClip timerTickClip; // Optional distinct tick SFX (falls back to countdownBeepClip if null)
+    [SerializeField] private AudioClip timerTickClip;
     [SerializeField] private float normalPitch = 1.0f;
     [SerializeField] private float drawPitch = 1.4f;
     [SerializeField] private float urgentTickPitch = 1.2f;
 
     [Header("Timer Audio Juice")]
-    [SerializeField] private float urgentThreshold = 5f; // Seconds remaining to double tick rate
-    [SerializeField] private float normalTickInterval = 1.0f; // 1 tick per second
-    [SerializeField] private float urgentTickInterval = 0.5f; // 2 ticks per second
+    [SerializeField] private float urgentThreshold = 5f;
+    [SerializeField] private float normalTickInterval = 1.0f;
+    [SerializeField] private float urgentTickInterval = 0.5f;
 
     [Header("Timer UI References")]
     [SerializeField] private TextMeshProUGUI timerText;
@@ -44,7 +46,6 @@ public class DrawTimerManager : NetworkBehaviour
 
     private int currentRound = 1;
     private bool isTimerRunning = false;
-    private bool playerHasDrawn = false;
     private float timeRemaining;
     private int lastTickIndex = -1;
 
@@ -54,54 +55,54 @@ public class DrawTimerManager : NetworkBehaviour
 
     private void Awake()
     {
-        // Netcode needs this: an unfocused instance (e.g. the 2nd player window on the same PC) otherwise
-        // stops updating and looks like it is lagging / frozen.
         Application.runInBackground = true;
-
-        // Hide all UI elements initially
         if (countdownText != null) countdownText.gameObject.SetActive(false);
-        if (timerText != null) timerText.gameObject.SetActive(false); // Hide timer until draw phase
-
+        if (timerText != null) timerText.gameObject.SetActive(false);
         UpdateTimerUI(1f, drawWindowDuration);
+    }
+
+    private void Start()
+    {
+        if (isAIMode)
+        {
+            Debug.Log("[DrawTimer] AI Mode active: Auto-starting Round 1.");
+            RequestStartRound(1);
+        }
     }
 
     public void RequestStartRound(int roundNumber = 1)
     {
-        if (!IsSpawned)
+        if (isAIMode)
         {
-            Debug.LogError("[DrawTimer] RequestStartRound called, but this NetworkBehaviour is not spawned!");
+            StartLocalRoundSequence(roundNumber);
             return;
         }
 
+        if (!IsSpawned) return;
+
         if (IsServer)
         {
-            Debug.Log($"[DrawTimer] Host/Server requesting start for Round {roundNumber}");
             RequestStartRoundServerRpc(roundNumber);
-        }
-        else
-        {
-            Debug.LogWarning("[DrawTimer] Client tried to start round. Only server can initiate.");
         }
     }
 
     [ServerRpc(RequireOwnership = false)]
     private void RequestStartRoundServerRpc(int roundNumber)
     {
-        Debug.Log("[DrawTimer] ServerRPC received. Starting round sequence.");
         StartRoundClientRpc(roundNumber, NetworkManager.Singleton.LocalTime.Time);
     }
 
     [ClientRpc]
     private void StartRoundClientRpc(int roundNumber, double startTime)
     {
-        Debug.Log($"[DrawTimer] ClientRPC received. Starting sequence for Round {roundNumber}");
+        StartLocalRoundSequence(roundNumber);
+    }
+
+    private void StartLocalRoundSequence(int roundNumber)
+    {
         currentRound = roundNumber;
-        playerHasDrawn = false;
-        isTimerRunning = false; // Keep false until the countdown actually finishes
-        if (preGamePanel != null)
-        {
-            preGamePanel.SetActive(true);
-        }
+        isTimerRunning = false;
+        if (preGamePanel != null) preGamePanel.SetActive(true);
         StartCoroutine(Routine_StartRoundSequence());
     }
 
@@ -120,9 +121,6 @@ public class DrawTimerManager : NetworkBehaviour
                 roundDisplayCanvasGroup.alpha = Mathf.Lerp(1f, 0f, elapsed / roundTextFadeDuration);
                 yield return null;
             }
-
-            // Was "= 1f": the text faded out and then instantly popped back to full opacity.
-            // (alpha is set back to 1 at the START of the next round's sequence above.)
             roundDisplayCanvasGroup.alpha = 0f;
         }
 
@@ -137,10 +135,9 @@ public class DrawTimerManager : NetworkBehaviour
             yield return StartCoroutine(Routine_AnimateWord("READY", normalPitch));
             yield return StartCoroutine(Routine_AnimateWord("SET", normalPitch));
             yield return StartCoroutine(Routine_AnimateWord("DRAW!", drawPitch));
-            countdownText.gameObject.SetActive(false); // Countdown disappears
+            countdownText.gameObject.SetActive(false);
         }
 
-        // NOW start the actual timer
         StartDrawPhase();
     }
 
@@ -150,7 +147,6 @@ public class DrawTimerManager : NetworkBehaviour
         RectTransform textRect = countdownText.rectTransform;
         textRect.localScale = Vector3.one * popStartScaleMultiplier;
 
-        // Play the intro countdown sound
         PlaySound(countdownBeepClip, pitch);
 
         float elapsedTime = 0f;
@@ -164,34 +160,33 @@ public class DrawTimerManager : NetworkBehaviour
         textRect.localScale = Vector3.one;
     }
 
-    private void PlaySound(AudioClip clip, float pitch)
-    {
-        SFXPool.Play(clip, pitch);
-    }
+    private void PlaySound(AudioClip clip, float pitch) => SFXPool.Play(clip, pitch);
 
     private void StartDrawPhase()
     {
-        playerHasDrawn = false;
         isTimerRunning = true;
         lastTickIndex = -1;
         timeRemaining = drawWindowDuration;
 
-        if (timerText != null)
+        if (timerText != null) timerText.gameObject.SetActive(true);
+
+        // Notify subscribers that the draw phase has started
+        OnDrawPhaseChanged?.Invoke(true);
+
+        // Ensure hand manager explicitly unlocks cards immediately when draw phase begins
+        PlayerHandManager localHandManager = FindFirstObjectByType<PlayerHandManager>();
+        if (localHandManager != null)
         {
-            timerText.gameObject.SetActive(true);
+            localHandManager.SetAllCardsInteractable(true);
         }
 
-        OnDrawPhaseChanged?.Invoke(true);
-        Debug.Log("[DrawTimer] Draw phase officially ACTIVE. Timer started.");
+        Debug.Log("[DrawTimer] Draw phase active. Multiple card pulls allowed.");
     }
 
     private void Update()
     {
         if (!isTimerRunning) return;
 
-        // Plain local countdown. This used to read NetworkManager.LocalTime, which on a joining client is
-        // continuously re-synced by Netcode (and can hard-reset), so the timer could stutter or jump.
-        // It also now pauses properly when Time.timeScale = 0 (pause menu).
         timeRemaining -= Time.deltaTime;
 
         if (timeRemaining <= 0f)
@@ -210,12 +205,10 @@ public class DrawTimerManager : NetworkBehaviour
 
     private void ProcessTimerAudioTicks(float elapsedSeconds, float remaining)
     {
-        // Calculate effective tick rate based on remaining time threshold
         bool isUrgent = remaining <= urgentThreshold;
         float interval = isUrgent ? urgentTickInterval : normalTickInterval;
         float currentPitch = isUrgent ? urgentTickPitch : normalPitch;
 
-        // Determine current discrete tick index
         int currentTickIndex = Mathf.FloorToInt(elapsedSeconds / interval);
 
         if (currentTickIndex > lastTickIndex)
@@ -228,14 +221,7 @@ public class DrawTimerManager : NetworkBehaviour
 
     public void NotifyCardsDrawn()
     {
-        // Local flag only. Each player's timer decides for THEMSELVES whether they get the auto-draw penalty.
-        // (The old version also sent a ServerRpc that set this flag on the HOST's copy of this component, so
-        // whenever the client drew, the host was wrongly excused from the penalty.)
-        if (isTimerRunning)
-        {
-            playerHasDrawn = true;
-            Debug.Log("[DrawTimer] Local instance registered: Player drew cards!");
-        }
+        // Continuous drawing permitted during play phase.
     }
 
     private void EndDrawPhase()
@@ -244,54 +230,9 @@ public class DrawTimerManager : NetworkBehaviour
         OnDrawPhaseChanged?.Invoke(false);
 
         if (preGamePanel != null) preGamePanel.SetActive(false);
-
         if (timerText != null) timerText.gameObject.SetActive(false);
 
-        if (!playerHasDrawn)
-        {
-            Debug.Log("[DrawTimer] Time expired! Executing random auto-draw penalty.");
-            ExecuteAutoDrawPenalty();
-        }
-
         UpdateTimerUI(0f, 0f);
-    }
-
-    private void ExecuteAutoDrawPenalty()
-    {
-        // No free card once the match is over.
-        EndTurnManager endTurn = FindFirstObjectByType<EndTurnManager>();
-        if (endTurn != null && endTurn.IsMatchOver)
-        {
-            Debug.Log("[DrawTimer] Match is over: no auto-draw.");
-            return;
-        }
-
-        // Only draw from a deck the player can still pay for. No tokens left = no auto-draw at all.
-        GachaUI ui = FindFirstObjectByType<GachaUI>();
-        bool canAction = ui == null || ui.CanAffordPull(DeckType.Action);
-        bool canSupport = ui == null || ui.CanAffordPull(DeckType.Support);
-        if (!canAction && !canSupport)
-        {
-            Debug.Log("[DrawTimer] No tokens left: no auto-draw.");
-            return;
-        }
-
-        DeckType deckToPull = (canAction && canSupport)
-            ? (UnityEngine.Random.value > 0.5f ? DeckType.Action : DeckType.Support)
-            : (canAction ? DeckType.Action : DeckType.Support);
-
-        PlayerHandManager handManager = FindFirstObjectByType<PlayerHandManager>();
-
-        if (handManager != null)
-        {
-            Debug.Log($"[DrawTimer] Time expired! Executing random auto-draw penalty: 1 {deckToPull} card.");
-            handManager.DealCardsFromTokens(1, deckToPull);
-        }
-        else
-        {
-            Debug.LogError("[DrawTimer] PlayerHandManager not found! Cannot execute auto-draw penalty.");
-            NotifyCardsDrawn();
-        }
     }
 
     private void UpdateTimerUI(float fillRatio, float remaining)
