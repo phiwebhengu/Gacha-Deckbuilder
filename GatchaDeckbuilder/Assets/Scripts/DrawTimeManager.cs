@@ -44,14 +44,20 @@ public class DrawTimerManager : NetworkBehaviour
     [Header("System References")]
     [SerializeField] private GachaManager gachaManager;
 
-    private int currentRound = 1;
+    // Network-aware authoritative round state
+    public NetworkVariable<int> NetworkCurrentRound = new NetworkVariable<int>(1, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
+
     private bool isTimerRunning = false;
     private float timeRemaining;
     private int lastTickIndex = -1;
 
     public bool IsDrawPhaseActive => isTimerRunning;
-    public int CurrentRound => currentRound;
+    public int CurrentRound => IsSpawned ? NetworkCurrentRound.Value : currentRoundFallback;
+    private int currentRoundFallback = 1;
+
     public event Action<bool> OnDrawPhaseChanged;
+
+    private bool hasInitializedOfflineRound = false;
 
     private void Awake()
     {
@@ -61,19 +67,40 @@ public class DrawTimerManager : NetworkBehaviour
         UpdateTimerUI(1f, drawWindowDuration);
     }
 
+    public override void OnNetworkSpawn()
+    {
+        NetworkCurrentRound.OnValueChanged += OnRoundValueChanged;
+        if (IsServer && NetworkCurrentRound.Value == 0)
+        {
+            NetworkCurrentRound.Value = 1;
+        }
+    }
+
+    public override void OnNetworkDespawn()
+    {
+        NetworkCurrentRound.OnValueChanged -= OnRoundValueChanged;
+    }
+
+    private void OnRoundValueChanged(int oldRound, int newRound)
+    {
+        StartLocalRoundSequence(newRound);
+    }
+
     private void Start()
     {
-        if (isAIMode)
+        if (isAIMode && !hasInitializedOfflineRound)
         {
+            hasInitializedOfflineRound = true;
             Debug.Log("[DrawTimer] AI Mode active: Auto-starting Round 1.");
             RequestStartRound(1);
         }
     }
 
-    public void RequestStartRound(int roundNumber = 1)
+    public void RequestStartRound(int roundNumber)
     {
         if (isAIMode)
         {
+            currentRoundFallback = roundNumber;
             StartLocalRoundSequence(roundNumber);
             return;
         }
@@ -82,35 +109,23 @@ public class DrawTimerManager : NetworkBehaviour
 
         if (IsServer)
         {
-            RequestStartRoundServerRpc(roundNumber);
+            NetworkCurrentRound.Value = roundNumber;
         }
-    }
-
-    [ServerRpc(RequireOwnership = false)]
-    private void RequestStartRoundServerRpc(int roundNumber)
-    {
-        StartRoundClientRpc(roundNumber, NetworkManager.Singleton.LocalTime.Time);
-    }
-
-    [ClientRpc]
-    private void StartRoundClientRpc(int roundNumber, double startTime)
-    {
-        StartLocalRoundSequence(roundNumber);
     }
 
     private void StartLocalRoundSequence(int roundNumber)
     {
-        currentRound = roundNumber;
+        currentRoundFallback = roundNumber;
         isTimerRunning = false;
         if (preGamePanel != null) preGamePanel.SetActive(true);
-        StartCoroutine(Routine_StartRoundSequence());
+        StartCoroutine(Routine_StartRoundSequence(roundNumber));
     }
 
-    private IEnumerator Routine_StartRoundSequence()
+    private IEnumerator Routine_StartRoundSequence(int roundNumber)
     {
         if (roundDisplayText != null && roundDisplayCanvasGroup != null)
         {
-            roundDisplayText.text = $"Round {currentRound}";
+            roundDisplayText.text = $"Round {roundNumber}";
             roundDisplayCanvasGroup.alpha = 1f;
             yield return new WaitForSeconds(roundTextHoldDuration);
 
@@ -169,18 +184,13 @@ public class DrawTimerManager : NetworkBehaviour
         timeRemaining = drawWindowDuration;
 
         if (timerText != null) timerText.gameObject.SetActive(true);
-
-        // Notify subscribers that the draw phase has started
         OnDrawPhaseChanged?.Invoke(true);
 
-        // Ensure hand manager explicitly unlocks cards immediately when draw phase begins
         PlayerHandManager localHandManager = FindFirstObjectByType<PlayerHandManager>();
         if (localHandManager != null)
         {
             localHandManager.SetAllCardsInteractable(true);
         }
-
-        Debug.Log("[DrawTimer] Draw phase active. Multiple card pulls allowed.");
     }
 
     private void Update()
@@ -219,10 +229,7 @@ public class DrawTimerManager : NetworkBehaviour
         }
     }
 
-    public void NotifyCardsDrawn()
-    {
-        // Continuous drawing permitted during play phase.
-    }
+    public void NotifyCardsDrawn() { }
 
     private void EndDrawPhase()
     {

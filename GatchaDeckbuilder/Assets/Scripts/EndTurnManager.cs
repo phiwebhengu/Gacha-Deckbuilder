@@ -137,6 +137,7 @@ public class EndTurnManager : NetworkBehaviour
 
     [Header("System References")]
     [SerializeField] private DrawTimerManager timerManager;
+    [SerializeField] private GachaUI gachaUI;
 
     [Header("Game Over UI")]
     [SerializeField] private GameObject gameOverPanel;
@@ -189,7 +190,7 @@ public class EndTurnManager : NetworkBehaviour
     private readonly Dictionary<Transform, Coroutine> activePops = new Dictionary<Transform, Coroutine>();
     private readonly Dictionary<RectTransform, Vector2> restPositions = new Dictionary<RectTransform, Vector2>();
     private Coroutine activeCameraShake;
-    private int currentRound = 1;
+    private int offlineCurrentRound = 1;
     private bool timerRunning = true;
     private float lastPauseRequestTime = 0f;
     private const float PAUSE_COOLDOWN = 5f;
@@ -211,6 +212,10 @@ public class EndTurnManager : NetworkBehaviour
     private PlayerHandManager _cachedLocalHandManager;
     private bool _hasCachedHandManager = false;
 
+    // AI State Tracking
+    private readonly List<int> aiHandNetIds = new List<int>();
+    private int aiTokens = 10;
+
     public override void OnNetworkSpawn()
     {
         isPlayer1 = IsServer;
@@ -219,6 +224,7 @@ public class EndTurnManager : NetworkBehaviour
         {
             currentPlayerHP = startingHP;
             currentOpponentHP = startingHP;
+            aiTokens = 10;
         }
         else
         {
@@ -252,6 +258,71 @@ public class EndTurnManager : NetworkBehaviour
         GameEnded.OnValueChanged -= OnGameEndedChanged;
 
         if (!IsServer) ShowMatchEndedByDisconnect("DISCONNECTED (Host left the match)");
+    }
+
+    private void OnEnable()
+    {
+        if (timerManager != null)
+        {
+            timerManager.OnDrawPhaseChanged += HandleDrawPhaseChanged;
+        }
+    }
+
+    private void OnDisable()
+    {
+        if (timerManager != null)
+        {
+            timerManager.OnDrawPhaseChanged -= HandleDrawPhaseChanged;
+        }
+    }
+
+    private void HandleDrawPhaseChanged(bool isDrawPhase)
+    {
+        if (isOfflineAIRival && isDrawPhase && !isMatchOver)
+        {
+            StartCoroutine(Routine_AIDrawCardsPhase());
+        }
+    }
+
+    private IEnumerator Routine_AIDrawCardsPhase()
+    {
+        yield return new WaitForSeconds(0.5f);
+
+        var deckMgr = FindFirstObjectByType<DeckManager>();
+        if (deckMgr == null || deckMgr.loadedActionCards == null || deckMgr.loadedActionCards.Count == 0) yield break;
+
+        aiHandNetIds.Clear();
+
+        // Calculate max allowed pulls based on available tokens
+        int maxPossiblePulls = Mathf.Min(3, aiTokens);
+        if (maxPossiblePulls <= 0) yield break;
+
+        // Decide pull count with variety (1 to maxPossiblePulls)
+        int pullCount = UnityEngine.Random.Range(1, maxPossiblePulls + 1);
+
+        if (gachaUI == null) gachaUI = FindFirstObjectByType<GachaUI>();
+
+        for (int i = 0; i < pullCount; i++)
+        {
+            if (aiTokens <= 0) break;
+
+            bool preferSupport = UnityEngine.Random.value > 0.6f && deckMgr.loadedSupportCards != null && deckMgr.loadedSupportCards.Count > 0;
+
+            int cardId = preferSupport
+                ? deckMgr.loadedSupportCards[UnityEngine.Random.Range(0, deckMgr.loadedSupportCards.Count)].Id
+                : deckMgr.loadedActionCards[UnityEngine.Random.Range(0, deckMgr.loadedActionCards.Count)].Id;
+
+            int netId = CardNetId.Encode(cardId, preferSupport);
+            aiHandNetIds.Add(netId);
+            aiTokens--; // Deduct token for pull
+
+            if (gachaUI != null)
+            {
+                gachaUI.AddOpponentCardBacks(1);
+            }
+
+            yield return new WaitForSeconds(0.4f);
+        }
     }
 
     private void OnGameEndedChanged(bool oldVal, bool newVal)
@@ -321,6 +392,7 @@ public class EndTurnManager : NetworkBehaviour
         {
             currentPlayerHP = startingHP;
             currentOpponentHP = startingHP;
+            aiTokens = 10;
         }
 
         if (audioSource == null)
@@ -352,7 +424,7 @@ public class EndTurnManager : NetworkBehaviour
         UpdateEndTurnButtonVisibility();
         ClearOpponentPanel();
 
-        currentRound = 1;
+        offlineCurrentRound = 1;
         SetupSkipButton();
     }
 
@@ -551,17 +623,20 @@ public class EndTurnManager : NetworkBehaviour
     {
         var deckMgr = FindFirstObjectByType<DeckManager>();
 
-        List<int> aiCardIds = new List<int>();
-        if (deckMgr != null && deckMgr.loadedActionCards != null && deckMgr.loadedActionCards.Count > 0)
+        if (aiHandNetIds.Count == 0 && deckMgr != null && deckMgr.loadedActionCards != null && deckMgr.loadedActionCards.Count > 0 && aiTokens > 0)
         {
-            int countToPick = UnityEngine.Random.Range(1, 3);
-            for (int i = 0; i < countToPick; i++)
-            {
-                var randCard = deckMgr.loadedActionCards[UnityEngine.Random.Range(0, deckMgr.loadedActionCards.Count)];
-                aiCardIds.Add(randCard.Id);
-            }
+            int randId = deckMgr.loadedActionCards[UnityEngine.Random.Range(0, deckMgr.loadedActionCards.Count)].Id;
+            aiHandNetIds.Add(CardNetId.Encode(randId, false));
+            aiTokens--;
         }
-        int[] opponentCards = aiCardIds.ToArray();
+
+        int[] opponentCards = aiHandNetIds.ToArray();
+
+        if (gachaUI == null) gachaUI = FindFirstObjectByType<GachaUI>();
+        if (gachaUI != null)
+        {
+            gachaUI.RemoveOpponentCardBacks(opponentCards.Length);
+        }
 
         SupportEffectResolver.Resolve(
             playerSelectedIds, opponentCards, deckMgr,
@@ -596,10 +671,11 @@ public class EndTurnManager : NetworkBehaviour
 
         if (isOfflineAIRival && !isMatchOver)
         {
-            currentRound++;
+            offlineCurrentRound = (timerManager != null ? timerManager.CurrentRound : offlineCurrentRound) + 1;
+
             if (timerManager != null)
             {
-                timerManager.RequestStartRound(currentRound);
+                timerManager.RequestStartRound(offlineCurrentRound);
             }
         }
     }
@@ -1134,7 +1210,8 @@ public class EndTurnManager : NetworkBehaviour
             yield break;
         }
 
-        if (currentRound >= maxRounds)
+        int activeRound = timerManager != null ? timerManager.CurrentRound : offlineCurrentRound;
+        if (activeRound >= maxRounds)
         {
             EvaluateWinnerByHP();
             yield break;
@@ -1149,32 +1226,38 @@ public class EndTurnManager : NetworkBehaviour
             PlayerHandManager localHandManager = GetLocalHandManager();
             if (localHandManager != null) localHandManager.SetAllCardsInteractable(true);
 
-            currentRound++;
-
             if (isOfflineAIRival)
             {
                 ApplyGachaRoundEnd();
-                timerManager.RequestStartRound(currentRound);
+                timerManager.RequestStartRound(offlineCurrentRound);
             }
             else
             {
-                ReadyForNextRoundServerRpc(currentRound);
+                ReadyForNextRoundServerRpc();
             }
         }
     }
 
     [ServerRpc(RequireOwnership = false)]
-    private void ReadyForNextRoundServerRpc(int nextRound, ServerRpcParams rpcParams = default)
+    private void ReadyForNextRoundServerRpc(ServerRpcParams rpcParams = default)
     {
         if (GameEnded.Value) return;
 
-        clientsReadyForNextRound.Add(rpcParams.Receive.SenderClientId);
+        if (!IsServer) return;
+
+        ulong clientId = rpcParams.Receive.SenderClientId;
+        clientsReadyForNextRound.Add(clientId);
 
         if (clientsReadyForNextRound.Count >= NetworkManager.Singleton.ConnectedClientsIds.Count)
         {
             clientsReadyForNextRound.Clear();
             ApplyGachaRoundEnd();
-            if (timerManager != null) timerManager.RequestStartRound(nextRound);
+
+            if (timerManager != null)
+            {
+                int nextRound = timerManager.CurrentRound + 1;
+                timerManager.RequestStartRound(nextRound);
+            }
         }
     }
 
