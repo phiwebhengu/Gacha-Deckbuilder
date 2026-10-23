@@ -212,8 +212,8 @@ public class EndTurnManager : NetworkBehaviour
     private PlayerHandManager _cachedLocalHandManager;
     private bool _hasCachedHandManager = false;
 
-    // AI State Tracking
-    private readonly List<int> aiHandNetIds = new List<int>();
+    // AI Persistent Hand & Token State
+    private readonly List<int> aiPersistentHandNetIds = new List<int>();
     private int aiTokens = 10;
 
     public override void OnNetworkSpawn()
@@ -225,6 +225,7 @@ public class EndTurnManager : NetworkBehaviour
             currentPlayerHP = startingHP;
             currentOpponentHP = startingHP;
             aiTokens = 10;
+            aiPersistentHandNetIds.Clear();
         }
         else
         {
@@ -278,10 +279,30 @@ public class EndTurnManager : NetworkBehaviour
 
     private void HandleDrawPhaseChanged(bool isDrawPhase)
     {
-        if (isOfflineAIRival && isDrawPhase && !isMatchOver)
+        if (isDrawPhase && !isMatchOver)
         {
-            StartCoroutine(Routine_AIDrawCardsPhase());
+            ResetForNewRound();
+
+            if (isOfflineAIRival)
+            {
+                StartCoroutine(Routine_AIDrawCardsPhase());
+            }
         }
+    }
+
+    private void ResetForNewRound()
+    {
+        localTurnSubmitted = false;
+        drawPhaseSeen = false;
+        ResetTurnUI();
+
+        PlayerHandManager localHandManager = GetLocalHandManager();
+        if (localHandManager != null)
+        {
+            localHandManager.SetAllCardsInteractable(true);
+        }
+
+        UpdateEndTurnButtonVisibility();
     }
 
     private IEnumerator Routine_AIDrawCardsPhase()
@@ -291,13 +312,9 @@ public class EndTurnManager : NetworkBehaviour
         var deckMgr = FindFirstObjectByType<DeckManager>();
         if (deckMgr == null || deckMgr.loadedActionCards == null || deckMgr.loadedActionCards.Count == 0) yield break;
 
-        aiHandNetIds.Clear();
-
-        // Calculate max allowed pulls based on available tokens
         int maxPossiblePulls = Mathf.Min(3, aiTokens);
         if (maxPossiblePulls <= 0) yield break;
 
-        // Decide pull count with variety (1 to maxPossiblePulls)
         int pullCount = UnityEngine.Random.Range(1, maxPossiblePulls + 1);
 
         if (gachaUI == null) gachaUI = FindFirstObjectByType<GachaUI>();
@@ -313,8 +330,8 @@ public class EndTurnManager : NetworkBehaviour
                 : deckMgr.loadedActionCards[UnityEngine.Random.Range(0, deckMgr.loadedActionCards.Count)].Id;
 
             int netId = CardNetId.Encode(cardId, preferSupport);
-            aiHandNetIds.Add(netId);
-            aiTokens--; // Deduct token for pull
+            aiPersistentHandNetIds.Add(netId);
+            aiTokens--;
 
             if (gachaUI != null)
             {
@@ -393,6 +410,7 @@ public class EndTurnManager : NetworkBehaviour
             currentPlayerHP = startingHP;
             currentOpponentHP = startingHP;
             aiTokens = 10;
+            aiPersistentHandNetIds.Clear();
         }
 
         if (audioSource == null)
@@ -462,7 +480,20 @@ public class EndTurnManager : NetworkBehaviour
         if (_hasCachedHandManager && _cachedLocalHandManager != null)
             return _cachedLocalHandManager;
 
-        int myPlayerSlot = isPlayer1 ? 1 : 2;
+        // Use NetworkManager's actual client ID index instead of just IsServer check
+        bool localIsPlayer1 = true;
+        if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening)
+        {
+            var allClients = new List<ulong>(NetworkManager.Singleton.ConnectedClientsIds);
+            allClients.Sort();
+            localIsPlayer1 = allClients.Count > 0 && NetworkManager.Singleton.LocalClientId == allClients[0];
+        }
+        else
+        {
+            localIsPlayer1 = IsServer;
+        }
+
+        int myPlayerSlot = localIsPlayer1 ? 1 : 2;
         PlayerSlot[] allSlots = FindObjectsByType<PlayerSlot>(FindObjectsSortMode.None);
 
         foreach (PlayerSlot slotObj in allSlots)
@@ -490,7 +521,7 @@ public class EndTurnManager : NetworkBehaviour
         if (localHandManager == null || endTurnButton == null) return;
 
         int selectedCount = localHandManager.GetSelectedCards().Count;
-        endTurnButton.gameObject.SetActive(selectedCount > 0);
+        endTurnButton.gameObject.SetActive(selectedCount > 0 && !localTurnSubmitted);
     }
 
     private void SetupSkipButton()
@@ -623,14 +654,25 @@ public class EndTurnManager : NetworkBehaviour
     {
         var deckMgr = FindFirstObjectByType<DeckManager>();
 
-        if (aiHandNetIds.Count == 0 && deckMgr != null && deckMgr.loadedActionCards != null && deckMgr.loadedActionCards.Count > 0 && aiTokens > 0)
+        if (aiPersistentHandNetIds.Count == 0 && deckMgr != null && deckMgr.loadedActionCards != null && deckMgr.loadedActionCards.Count > 0 && aiTokens > 0)
         {
             int randId = deckMgr.loadedActionCards[UnityEngine.Random.Range(0, deckMgr.loadedActionCards.Count)].Id;
-            aiHandNetIds.Add(CardNetId.Encode(randId, false));
+            aiPersistentHandNetIds.Add(CardNetId.Encode(randId, false));
             aiTokens--;
         }
 
-        int[] opponentCards = aiHandNetIds.ToArray();
+        int cardsToPlayCount = Mathf.Min(UnityEngine.Random.Range(1, 3), aiPersistentHandNetIds.Count);
+        if (cardsToPlayCount < 1 && aiPersistentHandNetIds.Count > 0) cardsToPlayCount = 1;
+
+        List<int> chosenCards = new List<int>();
+        for (int i = 0; i < cardsToPlayCount; i++)
+        {
+            int randomIndex = UnityEngine.Random.Range(0, aiPersistentHandNetIds.Count);
+            chosenCards.Add(aiPersistentHandNetIds[randomIndex]);
+            aiPersistentHandNetIds.RemoveAt(randomIndex);
+        }
+
+        int[] opponentCards = chosenCards.ToArray();
 
         if (gachaUI == null) gachaUI = FindFirstObjectByType<GachaUI>();
         if (gachaUI != null)
@@ -815,9 +857,9 @@ public class EndTurnManager : NetworkBehaviour
             playerCardIds = cardsB,
             opponentCardIds = cardsA,
             playerAttack = outB.Attack,
-            playerDefense = outB.Defense,
+            playerDefense = outA.Defense,
             opponentAttack = outA.Attack,
-            opponentDefense = outA.Defense,
+            opponentDefense = outB.Defense,
             netDamageToPlayer = outA.DamageDealt,
             netDamageToOpponent = outB.DamageDealt,
             finalPlayerHP = finalHpB,
@@ -1218,14 +1260,9 @@ public class EndTurnManager : NetworkBehaviour
         }
 
         yield return StartCoroutine(Routine_ClearAllSubmittedCards());
-        localTurnSubmitted = false;
-        ResetTurnUI();
 
         if (timerManager != null)
         {
-            PlayerHandManager localHandManager = GetLocalHandManager();
-            if (localHandManager != null) localHandManager.SetAllCardsInteractable(true);
-
             if (isOfflineAIRival)
             {
                 ApplyGachaRoundEnd();
@@ -1233,6 +1270,8 @@ public class EndTurnManager : NetworkBehaviour
             }
             else
             {
+                // Unlocks local state immediately after combat animation finishes
+                ResetForNewRound();
                 ReadyForNextRoundServerRpc();
             }
         }
@@ -1241,14 +1280,14 @@ public class EndTurnManager : NetworkBehaviour
     [ServerRpc(RequireOwnership = false)]
     private void ReadyForNextRoundServerRpc(ServerRpcParams rpcParams = default)
     {
-        if (GameEnded.Value) return;
-
-        if (!IsServer) return;
+        if (GameEnded.Value || !IsServer) return;
 
         ulong clientId = rpcParams.Receive.SenderClientId;
         clientsReadyForNextRound.Add(clientId);
 
-        if (clientsReadyForNextRound.Count >= NetworkManager.Singleton.ConnectedClientsIds.Count)
+        int connectedClientCount = NetworkManager.Singleton != null ? NetworkManager.Singleton.ConnectedClientsIds.Count : 0;
+
+        if (connectedClientCount > 0 && clientsReadyForNextRound.Count >= connectedClientCount)
         {
             clientsReadyForNextRound.Clear();
             ApplyGachaRoundEnd();

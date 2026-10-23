@@ -19,6 +19,9 @@ public class MatchPullSetup : NetworkBehaviour
             deckManager.loadedActionCards != null && deckManager.loadedActionCards.Count > 0 &&
             deckManager.loadedSupportCards != null && deckManager.loadedSupportCards.Count > 0);
 
+        // Give joining clients an extra frame to fully synchronize and spawn UI components
+        yield return new WaitForSeconds(0.75f);
+
         var rng = new System.Random();
 
         // 2. Find all Legendary cards

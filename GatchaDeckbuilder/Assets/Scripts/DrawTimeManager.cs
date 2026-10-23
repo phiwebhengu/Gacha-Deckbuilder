@@ -7,7 +7,7 @@ using UnityEngine;
 public class DrawTimerManager : NetworkBehaviour
 {
     [Header("Game Mode Settings")]
-    [SerializeField] private bool isAIMode = true;
+    [SerializeField] private bool isAIMode = false;
 
     [Header("Round Display UI")]
     [SerializeField] private TextMeshProUGUI roundDisplayText;
@@ -59,17 +59,10 @@ public class DrawTimerManager : NetworkBehaviour
 
     private bool hasInitializedOfflineRound = false;
 
-    private void Awake()
-    {
-        Application.runInBackground = true;
-        if (countdownText != null) countdownText.gameObject.SetActive(false);
-        if (timerText != null) timerText.gameObject.SetActive(false);
-        UpdateTimerUI(1f, drawWindowDuration);
-    }
-
     public override void OnNetworkSpawn()
     {
-        NetworkCurrentRound.OnValueChanged += OnRoundValueChanged;
+        NetworkCurrentRound.OnValueChanged += HandleNetworkRoundChanged;
+
         if (IsServer && NetworkCurrentRound.Value == 0)
         {
             NetworkCurrentRound.Value = 1;
@@ -78,12 +71,23 @@ public class DrawTimerManager : NetworkBehaviour
 
     public override void OnNetworkDespawn()
     {
-        NetworkCurrentRound.OnValueChanged -= OnRoundValueChanged;
+        NetworkCurrentRound.OnValueChanged -= HandleNetworkRoundChanged;
     }
 
-    private void OnRoundValueChanged(int oldRound, int newRound)
+    private void HandleNetworkRoundChanged(int previousValue, int newValue)
     {
-        StartLocalRoundSequence(newRound);
+        if (!isAIMode && IsClient)
+        {
+            StartLocalRoundSequence(newValue);
+        }
+    }
+
+    private void Awake()
+    {
+        Application.runInBackground = true;
+        if (countdownText != null) countdownText.gameObject.SetActive(false);
+        if (timerText != null) timerText.gameObject.SetActive(false);
+        UpdateTimerUI(1f, drawWindowDuration);
     }
 
     private void Start()
@@ -105,12 +109,16 @@ public class DrawTimerManager : NetworkBehaviour
             return;
         }
 
-        if (!IsSpawned) return;
+        if (!IsSpawned || !IsServer) return;
 
-        if (IsServer)
-        {
-            NetworkCurrentRound.Value = roundNumber;
-        }
+        NetworkCurrentRound.Value = roundNumber;
+        StartRoundClientRpc(roundNumber);
+    }
+
+    [ClientRpc]
+    private void StartRoundClientRpc(int roundNumber)
+    {
+        StartLocalRoundSequence(roundNumber);
     }
 
     private void StartLocalRoundSequence(int roundNumber)
@@ -118,6 +126,8 @@ public class DrawTimerManager : NetworkBehaviour
         currentRoundFallback = roundNumber;
         isTimerRunning = false;
         if (preGamePanel != null) preGamePanel.SetActive(true);
+
+        StopAllCoroutines();
         StartCoroutine(Routine_StartRoundSequence(roundNumber));
     }
 

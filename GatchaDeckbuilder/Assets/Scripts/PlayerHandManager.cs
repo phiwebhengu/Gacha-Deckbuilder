@@ -917,7 +917,8 @@ public class PlayerHandManager : MonoBehaviour
 
     private void HandleDrawPhaseChanged(bool isDrawPhaseActive)
     {
-        bool shouldBeInteractable = !isDrawPhaseActive;
+        // Cards should be interactable during draw phase AND combat selection phase
+        bool shouldBeInteractable = true;
         SetAllCardsInteractable(shouldBeInteractable);
     }
 
