@@ -220,6 +220,10 @@ public class EndTurnManager : NetworkBehaviour
     {
         isPlayer1 = IsServer;
 
+        // BULLETPROOF: Clear any stale ready states from previous matches or role swaps
+        clientsReadyForNextRound.Clear();
+        pendingTurns.Clear();
+
         if (isOfflineAIRival)
         {
             currentPlayerHP = startingHP;
@@ -1286,6 +1290,13 @@ public class EndTurnManager : NetworkBehaviour
         clientsReadyForNextRound.Add(clientId);
 
         int connectedClientCount = NetworkManager.Singleton != null ? NetworkManager.Singleton.ConnectedClientsIds.Count : 0;
+
+        // If for any reason the count exceeds connected clients (e.g., reconnect/role swap), sanitize it
+        if (clientsReadyForNextRound.Count > connectedClientCount)
+        {
+            clientsReadyForNextRound.Clear();
+            clientsReadyForNextRound.Add(clientId);
+        }
 
         if (connectedClientCount > 0 && clientsReadyForNextRound.Count >= connectedClientCount)
         {

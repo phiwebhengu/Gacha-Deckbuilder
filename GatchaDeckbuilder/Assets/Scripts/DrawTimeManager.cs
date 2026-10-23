@@ -63,9 +63,18 @@ public class DrawTimerManager : NetworkBehaviour
     {
         NetworkCurrentRound.OnValueChanged += HandleNetworkRoundChanged;
 
-        if (IsServer && NetworkCurrentRound.Value == 0)
+        if (IsServer)
         {
-            NetworkCurrentRound.Value = 1;
+            if (NetworkCurrentRound.Value == 0)
+            {
+                NetworkCurrentRound.Value = 1;
+            }
+        }
+        else
+        {
+            // BULLETPROOF HANDSHAKE: As soon as client finishes spawning, 
+            // request an immediate round state sync from the server.
+            RequestRoundSyncServerRpc();
         }
     }
 
@@ -74,9 +83,30 @@ public class DrawTimerManager : NetworkBehaviour
         NetworkCurrentRound.OnValueChanged -= HandleNetworkRoundChanged;
     }
 
+    [ServerRpc(RequireOwnership = false)]
+    private void RequestRoundSyncServerRpc(ServerRpcParams rpcParams = default)
+    {
+        if (!IsServer) return;
+
+        int activeRound = NetworkCurrentRound.Value > 0 ? NetworkCurrentRound.Value : 1;
+
+        ClientRpcParams targetParams = new ClientRpcParams
+        {
+            Send = new ClientRpcSendParams { TargetClientIds = new[] { rpcParams.Receive.SenderClientId } }
+        };
+
+        SyncRoundToClientRpc(activeRound, targetParams);
+    }
+
+    [ClientRpc]
+    private void SyncRoundToClientRpc(int roundNumber, ClientRpcParams rpcParams = default)
+    {
+        StartLocalRoundSequence(roundNumber);
+    }
+
     private void HandleNetworkRoundChanged(int previousValue, int newValue)
     {
-        if (!isAIMode && IsClient)
+        if (!isAIMode && IsClient && newValue > 0)
         {
             StartLocalRoundSequence(newValue);
         }
