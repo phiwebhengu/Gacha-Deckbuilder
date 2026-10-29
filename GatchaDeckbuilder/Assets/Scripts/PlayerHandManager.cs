@@ -6,9 +6,6 @@ using UnityEngine.UI;
 
 public class PlayerHandManager : MonoBehaviour
 {
-    [Header("Game Mode Settings")]
-    [SerializeField] public bool isOfflineAIRival = false;
-
     [Header("UI References")]
     [SerializeField] public GameObject cardPrefab;
     [SerializeField] private RectTransform handTransform;
@@ -63,7 +60,7 @@ public class PlayerHandManager : MonoBehaviour
     private List<BalatroCardController> cardsInHand = new List<BalatroCardController>();
     private List<BalatroCardController> submittedCards = new List<BalatroCardController>();
 
-    // Results from the server (or local generator in AI mode), in the order requested.
+    // Results from GachaManager, in the order requested.
     private Queue<PullResult> pendingPulls = new Queue<PullResult>();
     private int abandonedRequests = 0;
 
@@ -100,7 +97,7 @@ public class PlayerHandManager : MonoBehaviour
 
     private void OnEnable()
     {
-        if (gachaManager != null && !isOfflineAIRival)
+        if (gachaManager != null)
         {
             gachaManager.OnMyPullResolved += HandlePullResolved;
             gachaManager.OnPullFailed += HandlePullFailed;
@@ -116,7 +113,7 @@ public class PlayerHandManager : MonoBehaviour
 
     private void OnDisable()
     {
-        if (gachaManager != null && !isOfflineAIRival)
+        if (gachaManager != null)
         {
             gachaManager.OnMyPullResolved -= HandlePullResolved;
             gachaManager.OnPullFailed -= HandlePullFailed;
@@ -148,7 +145,7 @@ public class PlayerHandManager : MonoBehaviour
             if (timerManager == null) Debug.LogError("[PlayerHandManager] Could not find DrawTimerManager in the scene!");
         }
 
-        if (gachaManager == null && !isOfflineAIRival)
+        if (gachaManager == null)
         {
             gachaManager = FindFirstObjectByType<GachaManager>();
             if (gachaManager == null) Debug.LogWarning("[PlayerHandManager] Could not find GachaManager in the scene!");
@@ -232,7 +229,7 @@ public class PlayerHandManager : MonoBehaviour
 
     private IEnumerator Routine_DealCards(int count, DeckType deckToPull, RectTransform sourceButton)
     {
-        if (!isOfflineAIRival && gachaManager == null)
+        if (gachaManager == null)
         {
             Debug.LogError("[PlayerHandManager] gachaManager is null!");
             yield break;
@@ -259,66 +256,9 @@ public class PlayerHandManager : MonoBehaviour
 
         for (int i = 0; i < count; i++)
         {
-            // ---- 1. REQUEST OR GENERATE CARD PULL ----
-            if (isOfflineAIRival)
-            {
-                DeckManager deckMgr = FindFirstObjectByType<DeckManager>();
-                PullResult localResult = null;
-
-                if (deckMgr != null)
-                {
-                    if (deckToPull == DeckType.Action && deckMgr.loadedActionCards != null && deckMgr.loadedActionCards.Count > 0)
-                    {
-                        var cardData = deckMgr.loadedActionCards[UnityEngine.Random.Range(0, deckMgr.loadedActionCards.Count)];
-
-                        // Parse cardData.Tier (string or enum) safely into the Rarity enum
-                        Rarity cardTier = Rarity.Common;
-                        if (cardData.Tier != null)
-                        {
-                            Enum.TryParse(cardData.Tier.ToString(), true, out cardTier);
-                        }
-
-                        localResult = new PullResult
-                        {
-                            CardId = cardData.Id,
-                            Deck = DeckType.Action,
-                            Tier = cardTier,
-                            ActionData = cardData
-                        };
-                    }
-                    else if (deckToPull == DeckType.Support && deckMgr.loadedSupportCards != null && deckMgr.loadedSupportCards.Count > 0)
-                    {
-                        var cardData = deckMgr.loadedSupportCards[UnityEngine.Random.Range(0, deckMgr.loadedSupportCards.Count)];
-
-                        Rarity cardTier = Rarity.Common;
-                        if (cardData.Tier != null)
-                        {
-                            Enum.TryParse(cardData.Tier.ToString(), true, out cardTier);
-                        }
-
-                        localResult = new PullResult
-                        {
-                            CardId = cardData.Id,
-                            Deck = DeckType.Support,
-                            Tier = cardTier,
-                            SupportData = cardData
-                        };
-                    }
-                }
-
-                if (localResult == null)
-                {
-                    Debug.LogError("[PlayerHandManager] Failed to generate local offline card pull!");
-                    yield break;
-                }
-
-                pendingPulls.Enqueue(localResult);
-            }
-            else
-            {
-                if (deckToPull == DeckType.Support) gachaManager.RequestPullSupport();
-                else gachaManager.RequestPullAction();
-            }
+            // ---- 1. REQUEST THE PULL (GachaManager answers from the server, or locally in an offline match) ----
+            if (deckToPull == DeckType.Support) gachaManager.RequestPullSupport();
+            else gachaManager.RequestPullAction();
 
             // ---- 2. SPAWN CARD PREFAB ----
             Transform spawnParent = targetCanvas != null ? targetCanvas.transform : handTransform;

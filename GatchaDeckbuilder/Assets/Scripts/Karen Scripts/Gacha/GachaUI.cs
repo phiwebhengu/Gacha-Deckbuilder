@@ -6,9 +6,6 @@ using System.Collections.Generic;
 
 public class GachaUI : MonoBehaviour
 {
-    [Header("Game Mode Settings")]
-    [SerializeField] public bool isOfflineAIRival = false;
-
     [Header("Token Display")]
     public TMP_Text tokenText;
     public string tokenFormat = "Tokens: {0}";
@@ -95,37 +92,8 @@ public class GachaUI : MonoBehaviour
 
     private IEnumerator SubscribeWhenReady()
     {
-        if (isOfflineAIRival)
-        {
-            var gachaMgr = FindFirstObjectByType<GachaManager>();
-            serverTokens = gachaMgr != null ? gachaMgr.startingTokens : 10;
-            pullsInFlight = 0;
-            totalInFlightCost = 0;
-            freePullCredits = 0;
-            supportPullDiscount = 0;
-            RefreshTokenText();
-            RefreshFreePullsText();
-
-            if (gachaMgr != null)
-            {
-                gachaMgr.OnPityUpdated += HandlePityUpdated;
-                var offlineActionPity = gachaMgr.GetLocalPlayerPity(true);
-                HandlePityUpdated(offlineActionPity.pulls, offlineActionPity.threshold, true);
-
-                var offlineSupportPity = gachaMgr.GetLocalPlayerPity(false);
-                HandlePityUpdated(offlineSupportPity.pulls, offlineSupportPity.threshold, false);
-            }
-
-            if (drawTimerManager != null)
-            {
-                drawTimerManager.OnDrawPhaseChanged += UpdateButtonInteractability;
-                isDrawPhaseActive = drawTimerManager.IsDrawPhaseActive;
-            }
-            UpdateButtonInteractability(isDrawPhaseActive);
-            yield break;
-        }
-
-        while (mgr == null || !mgr.IsSpawned)
+        // Offline (AI / Tutorial) the GachaManager is never spawned, so only wait for it to exist.
+        while (mgr == null || (!mgr.isOfflineAIRival && !mgr.IsSpawned))
         {
             mgr = FindFirstObjectByType<GachaManager>();
             yield return null;

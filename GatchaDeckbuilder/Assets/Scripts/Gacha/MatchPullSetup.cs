@@ -11,7 +11,10 @@ public class MatchPullSetup : NetworkBehaviour
 
     private IEnumerator Start()
     {
-        if (!IsServer) yield break; // Only run on server
+        var gachaManager = FindFirstObjectByType<GachaManager>();
+        bool offline = gachaManager != null && gachaManager.isOfflineAIRival;
+
+        if (!IsServer && !offline) yield break; // Online, only the server picks the featured cards
 
         // 1. Wait for decks to finish loading
         yield return new WaitUntil(() =>
@@ -40,8 +43,14 @@ public class MatchPullSetup : NetworkBehaviour
 
         Debug.Log($"[MatchSetup] Featured Action card this match: ID {featuredAction} | Featured Support card: ID {featuredSupport}");
 
-        // 4. Tell the GachaManager about the featured cards
-        var gachaManager = FindFirstObjectByType<GachaManager>();
+        // 4. Tell the GachaManager about the featured cards.
+        // Offline, the DrawTimerManager starts Round 1 by itself (its AI mode), so only the featured cards are set here.
+        if (offline)
+        {
+            gachaManager.SetFeaturedCards(featuredAction, featuredSupport);
+            yield break;
+        }
+
         if (gachaManager != null && gachaManager.IsServer)
         {
             gachaManager.SetFeaturedCards(featuredAction, featuredSupport);

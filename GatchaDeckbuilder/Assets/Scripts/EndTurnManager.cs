@@ -155,6 +155,8 @@ public class EndTurnManager : NetworkBehaviour
     [Header("Scene Settings")]
     [SerializeField] private string gameType = "Game";
     [SerializeField] private string lobbySceneName = "Lobby";
+    [Tooltip("Where Home / Return goes in an offline match (AI or Tutorial). There is no lobby offline.")]
+    [SerializeField] private string offlineExitSceneName = "Menu";
 
     [Header("Match Settings")]
     [SerializeField] private int maxRounds = 10;
@@ -283,6 +285,8 @@ public class EndTurnManager : NetworkBehaviour
 
     private void HandleDrawPhaseChanged(bool isDrawPhase)
     {
+        if (!isDrawPhase) UpdateEndTurnButtonVisibility();
+
         if (isDrawPhase && !isMatchOver)
         {
             ResetForNewRound();
@@ -417,6 +421,12 @@ public class EndTurnManager : NetworkBehaviour
             aiPersistentHandNetIds.Clear();
         }
 
+        if (isOfflineAIRival)
+        {
+            if (cachedGachaManager == null) cachedGachaManager = FindFirstObjectByType<GachaManager>();
+            if (cachedGachaManager != null) cachedGachaManager.SetOfflineOpponentHand(aiPersistentHandNetIds);
+        }
+
         if (audioSource == null)
         {
             audioSource = GetComponent<AudioSource>();
@@ -524,8 +534,10 @@ public class EndTurnManager : NetworkBehaviour
         PlayerHandManager localHandManager = GetLocalHandManager();
         if (localHandManager == null || endTurnButton == null) return;
 
+        // Cards can be picked while the draw window is open, but the turn is only locked in after it closes.
+        bool drawWindowOpen = timerManager != null && timerManager.IsDrawPhaseActive;
         int selectedCount = localHandManager.GetSelectedCards().Count;
-        endTurnButton.gameObject.SetActive(selectedCount > 0 && !localTurnSubmitted);
+        endTurnButton.gameObject.SetActive(selectedCount > 0 && !localTurnSubmitted && !drawWindowOpen);
     }
 
     private void SetupSkipButton()
@@ -619,6 +631,8 @@ public class EndTurnManager : NetworkBehaviour
 
     public void OnEndTurnClicked()
     {
+        if (timerManager != null && timerManager.IsDrawPhaseActive) return;
+
         PlayerHandManager localHandManager = GetLocalHandManager();
         if (localHandManager == null || selectedHandTransform == null) return;
 
@@ -665,18 +679,7 @@ public class EndTurnManager : NetworkBehaviour
             aiTokens--;
         }
 
-        int cardsToPlayCount = Mathf.Min(UnityEngine.Random.Range(1, 3), aiPersistentHandNetIds.Count);
-        if (cardsToPlayCount < 1 && aiPersistentHandNetIds.Count > 0) cardsToPlayCount = 1;
-
-        List<int> chosenCards = new List<int>();
-        for (int i = 0; i < cardsToPlayCount; i++)
-        {
-            int randomIndex = UnityEngine.Random.Range(0, aiPersistentHandNetIds.Count);
-            chosenCards.Add(aiPersistentHandNetIds[randomIndex]);
-            aiPersistentHandNetIds.RemoveAt(randomIndex);
-        }
-
-        int[] opponentCards = chosenCards.ToArray();
+        int[] opponentCards = ChooseAICards(deckMgr);
 
         if (gachaUI == null) gachaUI = FindFirstObjectByType<GachaUI>();
         if (gachaUI != null)
@@ -686,8 +689,21 @@ public class EndTurnManager : NetworkBehaviour
 
         SupportEffectResolver.Resolve(
             playerSelectedIds, opponentCards, deckMgr,
-            GetSupportState(0), new SupportMatchState(),
+            GetSupportState(GachaManager.OfflinePlayerId), GetSupportState(GachaManager.OfflineOpponentId),
             out SideOutcome outPlayer, out SideOutcome outOpponent);
+
+        // Like the player's, the AI's Action and Forever cards go back to its hand; spent and discarded ones leave.
+        foreach (PlayedSupportInfo played in outOpponent.PlayedSupports)
+            if (played.Spent) aiPersistentHandNetIds.Remove(played.NetId);
+        foreach (int discarded in outOpponent.DiscardedNetIds)
+            aiPersistentHandNetIds.Remove(discarded);
+
+        GrantTokens(GachaManager.OfflinePlayerId, outPlayer.TokenReward);
+        aiTokens += Mathf.Max(0, outOpponent.TokenReward);
+
+        pendingRoundEnd.Clear();
+        pendingRoundEnd.Add(new GachaManager.RoundEndInfo { ClientId = GachaManager.OfflinePlayerId, Outcome = outPlayer });
+        pendingRoundEnd.Add(new GachaManager.RoundEndInfo { ClientId = GachaManager.OfflineOpponentId, Outcome = outOpponent });
 
         int finalPlayerHP = Mathf.Max(0, currentPlayerHP - outOpponent.DamageDealt);
         int finalOpponentHP = Mathf.Max(0, currentOpponentHP - outPlayer.DamageDealt);
@@ -708,22 +724,36 @@ public class EndTurnManager : NetworkBehaviour
             opponentDiscardedCardIds = outOpponent.DiscardedNetIds.ToArray()
         };
 
-        StartCoroutine(Routine_ResolveCombatSequenceOffline(result));
+        StartCoroutine(Routine_ResolveCombatSequence(result));
     }
 
-    private IEnumerator Routine_ResolveCombatSequenceOffline(TurnResultData result)
+    /// <summary>One or two random cards from the AI's hand that the card rules allow together (a Weapon needs a Character...).</summary>
+    private int[] ChooseAICards(DeckManager deckMgr)
     {
-        yield return StartCoroutine(Routine_ResolveCombatSequence(result));
+        List<ActionCardData> actionCards = deckMgr != null ? deckMgr.loadedActionCards : null;
 
-        if (isOfflineAIRival && !isMatchOver)
+        for (int attempt = 0; attempt < 10; attempt++)
         {
-            offlineCurrentRound = (timerManager != null ? timerManager.CurrentRound : offlineCurrentRound) + 1;
+            int count = Mathf.Min(UnityEngine.Random.Range(1, 3), aiPersistentHandNetIds.Count);
+            var pool = new List<int>(aiPersistentHandNetIds);
+            var pick = new List<int>();
 
-            if (timerManager != null)
+            for (int i = 0; i < count; i++)
             {
-                timerManager.RequestStartRound(offlineCurrentRound);
+                int index = UnityEngine.Random.Range(0, pool.Count);
+                pick.Add(pool[index]);
+                pool.RemoveAt(index);
             }
+
+            if (pick.Count > 0 && CardRules.IsPlayAllowed(pick, actionCards, out _)) return pick.ToArray();
         }
+
+        foreach (int netId in aiPersistentHandNetIds)
+        {
+            if (CardRules.IsPlayAllowed(new[] { netId }, actionCards, out _)) return new[] { netId };
+        }
+
+        return Array.Empty<int>();
     }
 
     [Header("Invalid Play Message")]
@@ -861,9 +891,9 @@ public class EndTurnManager : NetworkBehaviour
             playerCardIds = cardsB,
             opponentCardIds = cardsA,
             playerAttack = outB.Attack,
-            playerDefense = outA.Defense,
+            playerDefense = outB.Defense,
             opponentAttack = outA.Attack,
-            opponentDefense = outB.Defense,
+            opponentDefense = outA.Defense,
             netDamageToPlayer = outA.DamageDealt,
             netDamageToOpponent = outB.DamageDealt,
             finalPlayerHP = finalHpB,
@@ -1270,6 +1300,7 @@ public class EndTurnManager : NetworkBehaviour
             if (isOfflineAIRival)
             {
                 ApplyGachaRoundEnd();
+                offlineCurrentRound = activeRound + 1;
                 timerManager.RequestStartRound(offlineCurrentRound);
             }
             else
@@ -1323,8 +1354,11 @@ public class EndTurnManager : NetworkBehaviour
         isMatchOver = true;
         isResolvingCombat = false;
 
-        if (IsServer) GameEnded.Value = true;
-        else NotifyServerGameOverServerRpc();
+        if (!isOfflineAIRival)
+        {
+            if (IsServer) GameEnded.Value = true;
+            else NotifyServerGameOverServerRpc();
+        }
 
         StopAllCoroutines();
 
@@ -1516,6 +1550,15 @@ public class EndTurnManager : NetworkBehaviour
 
     public void OnForfeit()
     {
+        if (isOfflineAIRival)
+        {
+            if (isMatchOver) return;
+            ResetPauseState();
+            TriggerLocalGameOver(false, false);
+            if (resultText != null) resultText.text = "DEFEAT (You Forfeited)";
+            return;
+        }
+
         if (!IsSpawned || GameEnded.Value) return;
         if (IsGamePaused.Value && IsServer)
         {
@@ -1564,7 +1607,7 @@ public class EndTurnManager : NetworkBehaviour
         if (returnToLobbyButton != null) returnToLobbyButton.gameObject.SetActive(true);
     }
 
-    private bool IsMatchRunning => IsSpawned && !isMatchOver && !GameEnded.Value;
+    private bool IsMatchRunning => (IsSpawned || isOfflineAIRival) && !isMatchOver && !GameEnded.Value;
 
     private void ResetPauseState()
     {
@@ -1600,8 +1643,9 @@ public class EndTurnManager : NetworkBehaviour
         StopAllCoroutines();
         ResetPauseState();
 
-        if (matchWasRunning) SubmitForfeitServerRpc();
-        StartCoroutine(Routine_LeaveToLobby(matchWasRunning));
+        bool sendForfeit = matchWasRunning && !isOfflineAIRival;
+        if (sendForfeit) SubmitForfeitServerRpc();
+        StartCoroutine(Routine_LeaveToLobby(sendForfeit));
     }
 
     private IEnumerator Routine_LeaveToLobby(bool sentForfeit)
@@ -1620,11 +1664,17 @@ public class EndTurnManager : NetworkBehaviour
             }
         }
 
-        UnityEngine.SceneManagement.SceneManager.LoadScene(lobbySceneName);
+        UnityEngine.SceneManagement.SceneManager.LoadScene(isOfflineAIRival ? offlineExitSceneName : lobbySceneName);
     }
 
     public void RequestPause()
     {
+        if (isOfflineAIRival)
+        {
+            if (!isMatchOver) ApplyPauseState(true);
+            return;
+        }
+
         if (!IsSpawned || GameEnded.Value) return;
         if (Time.time - lastPauseRequestTime < PAUSE_COOLDOWN) return;
         lastPauseRequestTime = Time.time;
@@ -1633,6 +1683,12 @@ public class EndTurnManager : NetworkBehaviour
 
     public void RequestResume()
     {
+        if (isOfflineAIRival)
+        {
+            ApplyPauseState(false);
+            return;
+        }
+
         if (!IsSpawned || GameEnded.Value) return;
         ulong localClientId = NetworkManager.Singleton.LocalClientId;
         if (IsServer || PauseRequesterClientId.Value == localClientId) RequestResumeServerRpc();
@@ -1664,7 +1720,9 @@ public class EndTurnManager : NetworkBehaviour
     }
 
     [ClientRpc]
-    void PauseStateChangedClientRpc(bool isPaused, ulong requesterId)
+    void PauseStateChangedClientRpc(bool isPaused, ulong requesterId) => ApplyPauseState(isPaused);
+
+    private void ApplyPauseState(bool isPaused)
     {
         if (isPaused)
         {
