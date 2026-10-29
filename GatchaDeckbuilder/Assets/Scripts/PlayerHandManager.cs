@@ -76,6 +76,9 @@ public class PlayerHandManager : MonoBehaviour
     private Coroutine bonusRoutine;
     private int dealsInProgress = 0;
 
+    /// <summary>Where the player's cards sit. Read by the tutorial to find and highlight cards.</summary>
+    public RectTransform HandArea => handTransform;
+
     public float CardSpacing => cardSpacing;
     public float MaxFanAngle => maxFanAngle;
     public float ArcHeight => arcHeight;

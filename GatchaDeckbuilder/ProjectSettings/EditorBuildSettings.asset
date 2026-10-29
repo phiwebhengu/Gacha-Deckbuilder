@@ -15,11 +15,11 @@ EditorBuildSettings:
     path: Assets/Scenes/Lobby.unity
     guid: 40fb5c54557ae7646a2d7daa739688f5
   - enabled: 1
+    path: Assets/Scenes/Tutorial.unity
+    guid: c9027eef5022f5540bc3433bc608a856
+  - enabled: 1
     path: Assets/Scenes/Game.unity
     guid: 8e7dce8aee4f761478a10cff19d326d7
-  - enabled: 1
-    path: Assets/Scenes/Tutorial.unity
-    guid: 44c53769e1c928e46b46762ce1a1dd46
   - enabled: 1
     path: Assets/Scenes/AIMode.unity
     guid: 94e8638e8f7931b4e8ec6c3bda3c73c0

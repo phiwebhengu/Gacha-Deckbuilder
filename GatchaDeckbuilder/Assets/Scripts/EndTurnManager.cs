@@ -218,6 +218,38 @@ public class EndTurnManager : NetworkBehaviour
     private readonly List<int> aiPersistentHandNetIds = new List<int>();
     private int aiTokens = 10;
 
+    // ----- Tutorial hooks (off by default) -----
+
+    /// <summary>A play was refused (CardRules or ExtraPlayRule). The string is the message shown to the player.</summary>
+    public event Action<string> OnInvalidPlay;
+
+    /// <summary>The local player locked in these cards (network ids).</summary>
+    public event Action<int[]> OnTurnSubmitted;
+
+    /// <summary>A round's reveal finished; HP is already updated. Fires before the played cards are cleared.</summary>
+    public event Action<TurnResultData> OnRoundResolved;
+
+    /// <summary>While true, the played cards stay on the table after a round instead of clearing for the next one.</summary>
+    public bool HoldAfterRound { get; set; }
+
+    /// <summary>An extra rule checked when End Turn is pressed: return a message to refuse the play, or null to allow it.</summary>
+    public Func<int[], string> ExtraPlayRule;
+
+    /// <summary>Offline only. Given the round number, the cards the AI draws that round (network ids), or null to draw normally.</summary>
+    public Func<int, int[]> ScriptedAIDraw;
+
+    /// <summary>Offline only. Given the round number, the cards the AI plays that round (network ids), or null to choose normally.</summary>
+    public Func<int, int[]> ScriptedAITurn;
+
+    public Button EndTurnButton => endTurnButton;
+    public RectTransform PlayerPlayedArea => selectedHandTransform;
+    public RectTransform OpponentPlayedArea => opponentSelectedHandTransform;
+    public TextMeshProUGUI PlayerHPText => playerHPText;
+    public TextMeshProUGUI OpponentHPText => opponentHPText;
+    public int PlayerHP => currentPlayerHP;
+    public int OpponentHP => currentOpponentHP;
+    private int CurrentRoundNumber => timerManager != null ? timerManager.CurrentRound : offlineCurrentRound;
+
     public override void OnNetworkSpawn()
     {
         isPlayer1 = IsServer;
@@ -320,12 +352,24 @@ public class EndTurnManager : NetworkBehaviour
         var deckMgr = FindFirstObjectByType<DeckManager>();
         if (deckMgr == null || deckMgr.loadedActionCards == null || deckMgr.loadedActionCards.Count == 0) yield break;
 
+        if (gachaUI == null) gachaUI = FindFirstObjectByType<GachaUI>();
+
+        int[] scriptedDraw = ScriptedAIDraw != null ? ScriptedAIDraw(CurrentRoundNumber) : null;
+        if (scriptedDraw != null)
+        {
+            foreach (int netId in scriptedDraw)
+            {
+                aiPersistentHandNetIds.Add(netId);
+                if (gachaUI != null) gachaUI.AddOpponentCardBacks(1);
+                yield return new WaitForSeconds(0.4f);
+            }
+            yield break;
+        }
+
         int maxPossiblePulls = Mathf.Min(3, aiTokens);
         if (maxPossiblePulls <= 0) yield break;
 
         int pullCount = UnityEngine.Random.Range(1, maxPossiblePulls + 1);
-
-        if (gachaUI == null) gachaUI = FindFirstObjectByType<GachaUI>();
 
         for (int i = 0; i < pullCount; i++)
         {
@@ -650,6 +694,13 @@ public class EndTurnManager : NetworkBehaviour
             return;
         }
 
+        string extraRuleMessage = ExtraPlayRule != null ? ExtraPlayRule(selectedIds) : null;
+        if (!string.IsNullOrEmpty(extraRuleMessage))
+        {
+            ShowInvalidPlayMessage(extraRuleMessage);
+            return;
+        }
+
         localTurnSubmitted = true;
         drawPhaseSeen = false;
         if (skipTurnButton != null) skipTurnButton.gameObject.SetActive(false);
@@ -657,6 +708,8 @@ public class EndTurnManager : NetworkBehaviour
         localHandManager.SubmitSelectedCardsToHand(selectedHandTransform);
 
         if (endTurnButton != null) endTurnButton.gameObject.SetActive(false);
+
+        OnTurnSubmitted?.Invoke(selectedIds);
 
         if (isOfflineAIRival)
         {
@@ -730,6 +783,18 @@ public class EndTurnManager : NetworkBehaviour
     /// <summary>One or two random cards from the AI's hand that the card rules allow together (a Weapon needs a Character...).</summary>
     private int[] ChooseAICards(DeckManager deckMgr)
     {
+        int[] scriptedTurn = ScriptedAITurn != null ? ScriptedAITurn(CurrentRoundNumber) : null;
+        if (scriptedTurn != null)
+        {
+            var available = new List<int>(aiPersistentHandNetIds);
+            var play = new List<int>();
+            foreach (int netId in scriptedTurn)
+            {
+                if (available.Remove(netId)) play.Add(netId);
+            }
+            return play.ToArray();
+        }
+
         List<ActionCardData> actionCards = deckMgr != null ? deckMgr.loadedActionCards : null;
 
         for (int attempt = 0; attempt < 10; attempt++)
@@ -763,6 +828,8 @@ public class EndTurnManager : NetworkBehaviour
 
     private void ShowInvalidPlayMessage(string message)
     {
+        OnInvalidPlay?.Invoke(message);
+
         if (invalidPlayText == null)
         {
             if (endTurnButton == null) { Debug.LogWarning("[EndTurnManager] " + message); return; }
@@ -1071,6 +1138,9 @@ public class EndTurnManager : NetworkBehaviour
         UpdateHPUI();
 
         MatchStats.RecordRound(result.netDamageToOpponent, result.netDamageToPlayer);
+
+        OnRoundResolved?.Invoke(result);
+        while (HoldAfterRound) yield return null;
 
         yield return new WaitForSeconds(0.5f);
         yield return StartCoroutine(Routine_CheckNextRoundOrEndGame());

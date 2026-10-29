@@ -103,6 +103,14 @@ public class GachaManager : NetworkBehaviour
 
     public int PullCost => pullCost;
 
+    // ----- Tutorial hook (null by default) -----
+
+    /// <summary>
+    /// Asked before every pull: return a card id to hand out that exact card, or 0 to roll normally.
+    /// Pity, the 50/50 and the guarantee still update as if the card had been rolled, so the counters stay honest.
+    /// </summary>
+    public Func<DeckType, int> ScriptedPullCardId;
+
     /// <summary>True where the game rules run: the host in an online match, or this machine in an offline one.</summary>
     private bool RunsGameRules => isOfflineAIRival || IsServer;
 
@@ -320,12 +328,70 @@ public class GachaManager : NetworkBehaviour
     {
         if (actionCardSource == null || supportCardSource == null) LoadDeckSources();
 
+        int scriptedId = ScriptedPullCardId != null ? ScriptedPullCardId(isActionDeck ? DeckType.Action : DeckType.Support) : 0;
+        if (scriptedId > 0)
+        {
+            PullResult scripted = BuildScriptedPull(state, isActionDeck, scriptedId);
+            if (scripted != null) return scripted;
+        }
+
         if (isActionDeck)
             return GachaEngine.PullAction(pullConfig, state.ActionPity, state.Rng, actionCardSource, state.FeaturedActionCardId,
                                           state.LuckBonusPercent, forcedTier);
 
         return GachaEngine.PullSupport(pullConfig, state.SupportPity, state.Rng, supportCardSource, state.FeaturedSupportCardId,
                                        state.LuckBonusPercent, forcedTier);
+    }
+
+    /// <summary>
+    /// A chosen card, with pity and the 50/50 updated the same way GachaEngine would update them.
+    /// It doesn't enforce pity: script a Legendary when the counter is full, or the counter goes past the threshold.
+    /// </summary>
+    private PullResult BuildScriptedPull(PlayerGachaState state, bool isActionDeck, int cardId)
+    {
+        var result = new PullResult { Deck = isActionDeck ? DeckType.Action : DeckType.Support, CardId = cardId };
+        string tierText;
+
+        if (isActionDeck)
+        {
+            ActionCardData card = actionCardSource != null ? actionCardSource.Find(c => c.Id == cardId) : null;
+            if (card == null) return null;
+            result.ActionData = card;
+            result.CardName = card.Name;
+            tierText = card.Tier;
+        }
+        else
+        {
+            SupportCardData card = supportCardSource != null ? supportCardSource.Find(c => c.Id == cardId) : null;
+            if (card == null) return null;
+            result.SupportData = card;
+            result.CardName = card.Name;
+            tierText = card.Tier;
+        }
+
+        Enum.TryParse(tierText, true, out Rarity tier);
+        result.Tier = tier;
+
+        PityState pity = isActionDeck ? state.ActionPity : state.SupportPity;
+        int featuredId = isActionDeck ? state.FeaturedActionCardId : state.FeaturedSupportCardId;
+        int threshold = pullConfig != null ? pullConfig.pityThreshold : 0;
+
+        result.PityTriggered = threshold > 0 && pity.PullsSinceLegendary >= threshold;
+
+        if (tier == Rarity.Legendary)
+        {
+            result.Was5050Roll = true;
+            result.Won5050 = cardId == featuredId;
+            pity.GuaranteedFeaturedNext = !result.Won5050;
+            pity.RegisterLegendaryPull();
+        }
+        else
+        {
+            pity.RegisterNonLegendaryPull();
+        }
+
+        Debug.Log($"[Pull] Scripted {result.Deck} -> {result.Tier} -> {result.CardName}{(result.PityTriggered ? " [PITY]" : "")}");
+        return result;
     }
 
     private static int PityOf(PlayerGachaState state, bool isActionDeck)

@@ -57,6 +57,22 @@ public class DrawTimerManager : NetworkBehaviour
 
     public event Action<bool> OnDrawPhaseChanged;
 
+    // ----- Tutorial hooks (off by default) -----
+
+    /// <summary>While true, the next round waits before showing its title and countdown.</summary>
+    public bool HoldRoundStart { get; set; }
+
+    /// <summary>While true, the draw window stays open and its timer stops counting down.</summary>
+    public bool HoldTimer { get; set; }
+
+    public TextMeshProUGUI TimerText => timerText;
+
+    /// <summary>Closes the draw window now, as if the timer had run out.</summary>
+    public void EndDrawPhaseNow()
+    {
+        if (isTimerRunning) EndDrawPhase();
+    }
+
     private bool hasInitializedOfflineRound = false;
 
     public override void OnNetworkSpawn()
@@ -163,6 +179,8 @@ public class DrawTimerManager : NetworkBehaviour
 
     private IEnumerator Routine_StartRoundSequence(int roundNumber)
     {
+        while (HoldRoundStart) yield return null;
+
         if (roundDisplayText != null && roundDisplayCanvasGroup != null)
         {
             roundDisplayText.text = $"Round {roundNumber}";
@@ -235,7 +253,7 @@ public class DrawTimerManager : NetworkBehaviour
 
     private void Update()
     {
-        if (!isTimerRunning) return;
+        if (!isTimerRunning || HoldTimer) return;
 
         timeRemaining -= Time.deltaTime;
 
