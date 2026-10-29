@@ -867,7 +867,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d5a57f767e5e46a458fc5d3c628d0cbb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Unity.Netcode.Runtime::Unity.Netcode.NetworkObject
-  GlobalObjectIdHash: 480700611
+  GlobalObjectIdHash: 1351411139
   InScenePlacedSourceGlobalObjectIdHash: 0
   m_InScenePlacedDisabledByDefault: 0
   DeferredDespawnTick: 0
@@ -2910,6 +2910,52 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 540510825}
   m_CullTransparentMesh: 1
+--- !u!1 &553105785
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 553105786}
+  - component: {fileID: 553105787}
+  m_Layer: 0
+  m_Name: TutorialDirector
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &553105786
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 553105785}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &553105787
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 553105785}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fb5c06c049a6220498190161db0268bd, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TutorialDirector
+  menuSceneName: Menu
+  aiSceneName: AIMode
 --- !u!1 &573214508
 GameObject:
   m_ObjectHideFlags: 0
@@ -3746,7 +3792,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: Opponent
+  m_text: Dummy
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: d704b2e9442f02e47915bf8ad0ad8277, type: 2}
   m_sharedMaterial: {fileID: -7062871132170041075, guid: d704b2e9442f02e47915bf8ad0ad8277, type: 2}
@@ -9045,6 +9091,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::DrawTimerManager
   ShowTopMostFoldoutHeaderGroup: 1
+  isAIMode: 1
   roundDisplayText: {fileID: 1595749860}
   roundDisplayCanvasGroup: {fileID: 1595749862}
   roundTextFadeDuration: 0.8
@@ -9066,6 +9113,11 @@ MonoBehaviour:
   timerText: {fileID: 540510828}
   preGamePanel: {fileID: 670217865}
   gachaManager: {fileID: 8834658468697125924}
+  NetworkCurrentRound:
+    UpdateTraits:
+      MinSecondsBetweenUpdates: 0
+      MaxSecondsBetweenUpdates: 0
+    m_InternalValue: 1
 --- !u!114 &1243131125
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -9078,7 +9130,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d5a57f767e5e46a458fc5d3c628d0cbb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Unity.Netcode.Runtime::Unity.Netcode.NetworkObject
-  GlobalObjectIdHash: 2072902961
+  GlobalObjectIdHash: 2726728648
   InScenePlacedSourceGlobalObjectIdHash: 0
   m_InScenePlacedDisabledByDefault: 0
   DeferredDespawnTick: 0
@@ -11980,7 +12032,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d5a57f767e5e46a458fc5d3c628d0cbb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Unity.Netcode.Runtime::Unity.Netcode.NetworkObject
-  GlobalObjectIdHash: 2753527609
+  GlobalObjectIdHash: 1766177355
   InScenePlacedSourceGlobalObjectIdHash: 0
   m_InScenePlacedDisabledByDefault: 0
   DeferredDespawnTick: 0
@@ -12008,6 +12060,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::EndTurnManager
   ShowTopMostFoldoutHeaderGroup: 1
+  isOfflineAIRival: 1
   startingHP: 20
   Player1_HP:
     UpdateTraits:
@@ -12072,6 +12125,7 @@ MonoBehaviour:
   opponentSelectedHandTransform: {fileID: 1558225250}
   opponentCardPrefab: {fileID: 2682837092641137224, guid: e0404b1aa65ff5a44a38dc1d1b668b37, type: 3}
   timerManager: {fileID: 1243131124}
+  gachaUI: {fileID: 0}
   gameOverPanel: {fileID: 1995158680}
   resultText: {fileID: 481970524}
   returnToLobbyButton: {fileID: 731207560}
@@ -12081,6 +12135,7 @@ MonoBehaviour:
   leaveConfirmPanel: {fileID: 1470162069}
   gameType: CardGame
   lobbySceneName: Lobby
+  offlineExitSceneName: Menu
   maxRounds: 4
   popupFont: {fileID: 11400000, guid: 56108573b0d7ce34bbb779ce6706fa51, type: 2}
   reactionPopupFontSize: 40
@@ -13208,7 +13263,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d5a57f767e5e46a458fc5d3c628d0cbb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Unity.Netcode.Runtime::Unity.Netcode.NetworkObject
-  GlobalObjectIdHash: 1897673416
+  GlobalObjectIdHash: 2669567103
   InScenePlacedSourceGlobalObjectIdHash: 0
   m_InScenePlacedDisabledByDefault: 0
   DeferredDespawnTick: 0
@@ -14709,6 +14764,10 @@ PrefabInstance:
       propertyPath: pullConfig
       value: 
       objectReference: {fileID: 11400000, guid: 7ba318713d874a24d8eae06da0a8fd00, type: 2}
+    - target: {fileID: 2279671653430329266, guid: 97d9b1ebd7f7032439205fd452ec7c0b, type: 3}
+      propertyPath: isOfflineAIRival
+      value: 1
+      objectReference: {fileID: 0}
     - target: {fileID: 2792843375164433175, guid: 97d9b1ebd7f7032439205fd452ec7c0b, type: 3}
       propertyPath: m_LocalPosition.x
       value: 0
@@ -14755,7 +14814,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 3848431227081366576, guid: 97d9b1ebd7f7032439205fd452ec7c0b, type: 3}
       propertyPath: GlobalObjectIdHash
-      value: 3026525265
+      value: 4225317467
       objectReference: {fileID: 0}
     - target: {fileID: 3848431227081366576, guid: 97d9b1ebd7f7032439205fd452ec7c0b, type: 3}
       propertyPath: InScenePlacedSourceGlobalObjectIdHash
@@ -14790,3 +14849,4 @@ SceneRoots:
   - {fileID: 276195056}
   - {fileID: 1335181986}
   - {fileID: 586899575}
+  - {fileID: 553105786}

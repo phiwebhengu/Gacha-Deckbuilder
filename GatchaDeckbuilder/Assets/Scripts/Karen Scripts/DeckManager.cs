@@ -50,4 +50,5 @@ public class DeckManager : MonoBehaviour
         string folder = isActionCard ? "CardSprites/Action/" : "CardSprites/Support/";
         return Resources.Load<Sprite>($"{folder}{cardId}");
     }
+
 }

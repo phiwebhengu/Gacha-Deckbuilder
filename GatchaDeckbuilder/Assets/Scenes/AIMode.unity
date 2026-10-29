@@ -837,6 +837,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: fe1630bb216a8df40885ae3138db4d9c, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PlayerHandManager
+  isOfflineAIRival: 0
   cardPrefab: {fileID: 2682837092641137224, guid: e0404b1aa65ff5a44a38dc1d1b668b37, type: 3}
   handTransform: {fileID: 105399622}
   targetCanvas: {fileID: 763330711}
@@ -867,7 +868,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d5a57f767e5e46a458fc5d3c628d0cbb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Unity.Netcode.Runtime::Unity.Netcode.NetworkObject
-  GlobalObjectIdHash: 480700611
+  GlobalObjectIdHash: 86961527
   InScenePlacedSourceGlobalObjectIdHash: 0
   m_InScenePlacedDisabledByDefault: 0
   DeferredDespawnTick: 0
@@ -2211,6 +2212,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 264af338c0ce46346ab43e59156079aa, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::GachaUI
+  isOfflineAIRival: 1
   tokenText: {fileID: 807381251}
   tokenFormat: 'Tokens: {0}'
   actionPityText: {fileID: 1363648337}
@@ -9045,6 +9047,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::DrawTimerManager
   ShowTopMostFoldoutHeaderGroup: 1
+  isAIMode: 1
   roundDisplayText: {fileID: 1595749860}
   roundDisplayCanvasGroup: {fileID: 1595749862}
   roundTextFadeDuration: 0.8
@@ -9078,7 +9081,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d5a57f767e5e46a458fc5d3c628d0cbb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Unity.Netcode.Runtime::Unity.Netcode.NetworkObject
-  GlobalObjectIdHash: 2072902961
+  GlobalObjectIdHash: 3835623719
   InScenePlacedSourceGlobalObjectIdHash: 0
   m_InScenePlacedDisabledByDefault: 0
   DeferredDespawnTick: 0
@@ -11980,7 +11983,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d5a57f767e5e46a458fc5d3c628d0cbb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Unity.Netcode.Runtime::Unity.Netcode.NetworkObject
-  GlobalObjectIdHash: 2753527609
+  GlobalObjectIdHash: 4293390132
   InScenePlacedSourceGlobalObjectIdHash: 0
   m_InScenePlacedDisabledByDefault: 0
   DeferredDespawnTick: 0
@@ -12008,6 +12011,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::EndTurnManager
   ShowTopMostFoldoutHeaderGroup: 1
+  isOfflineAIRival: 1
   startingHP: 20
   Player1_HP:
     UpdateTraits:
@@ -13208,7 +13212,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d5a57f767e5e46a458fc5d3c628d0cbb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Unity.Netcode.Runtime::Unity.Netcode.NetworkObject
-  GlobalObjectIdHash: 1897673416
+  GlobalObjectIdHash: 1530690024
   InScenePlacedSourceGlobalObjectIdHash: 0
   m_InScenePlacedDisabledByDefault: 0
   DeferredDespawnTick: 0
@@ -14709,6 +14713,10 @@ PrefabInstance:
       propertyPath: pullConfig
       value: 
       objectReference: {fileID: 11400000, guid: 7ba318713d874a24d8eae06da0a8fd00, type: 2}
+    - target: {fileID: 2279671653430329266, guid: 97d9b1ebd7f7032439205fd452ec7c0b, type: 3}
+      propertyPath: isOfflineAIRival
+      value: 1
+      objectReference: {fileID: 0}
     - target: {fileID: 2792843375164433175, guid: 97d9b1ebd7f7032439205fd452ec7c0b, type: 3}
       propertyPath: m_LocalPosition.x
       value: 0
@@ -14755,7 +14763,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 3848431227081366576, guid: 97d9b1ebd7f7032439205fd452ec7c0b, type: 3}
       propertyPath: GlobalObjectIdHash
-      value: 3026525265
+      value: 2836181955
       objectReference: {fileID: 0}
     - target: {fileID: 3848431227081366576, guid: 97d9b1ebd7f7032439205fd452ec7c0b, type: 3}
       propertyPath: InScenePlacedSourceGlobalObjectIdHash

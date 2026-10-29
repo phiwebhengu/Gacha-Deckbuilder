@@ -60,15 +60,13 @@ public class PlayerHandManager : MonoBehaviour
     private List<BalatroCardController> cardsInHand = new List<BalatroCardController>();
     private List<BalatroCardController> submittedCards = new List<BalatroCardController>();
 
-    // Results from the server, in the order they were requested. A null entry means "server refused this pull".
+    // Results from GachaManager, in the order requested.
     private Queue<PullResult> pendingPulls = new Queue<PullResult>();
-    // If we stop waiting for a pull (timeout), its late answer must be dropped so the queue stays aligned.
     private int abandonedRequests = 0;
 
     private Coroutine activeFanCoroutine;
     private Coroutine activePlayedRowCoroutine;
 
-    // Cards a Support effect gives the player (free pulls, Seymour's copy...). They are shown one at a time.
     private class BonusCard
     {
         public PullResult Result;
@@ -76,18 +74,17 @@ public class PlayerHandManager : MonoBehaviour
     }
     private readonly Queue<BonusCard> bonusQueue = new Queue<BonusCard>();
     private Coroutine bonusRoutine;
-    private int dealsInProgress = 0; // how many pull animations are running (bonus cards wait for them)
+    private int dealsInProgress = 0;
 
-    // Read-only access so the opponent's card-back fan (GachaUI) can use exactly the same layout numbers.
+    /// <summary>Where the player's cards sit. Read by the tutorial to find and highlight cards.</summary>
+    public RectTransform HandArea => handTransform;
+
     public float CardSpacing => cardSpacing;
     public float MaxFanAngle => maxFanAngle;
     public float ArcHeight => arcHeight;
     public float FanLerpSpeed => fanLerpSpeed;
     private EndTurnManager cachedEndTurnManager;
 
-    // ---------- Sprite cache ----------
-    // Resources.Load is synchronous and hitches the frame the first time a big card texture is loaded.
-    // We warm this cache in the background at scene start, and everything else reads from it.
     private static readonly Dictionary<string, Sprite> spriteCache = new Dictionary<string, Sprite>();
 
     public static Sprite GetCardSpriteCached(int cardId, bool isActionCard)
@@ -154,7 +151,7 @@ public class PlayerHandManager : MonoBehaviour
         if (gachaManager == null)
         {
             gachaManager = FindFirstObjectByType<GachaManager>();
-            if (gachaManager == null) Debug.LogError("[PlayerHandManager] Could not find GachaManager in the scene!");
+            if (gachaManager == null) Debug.LogWarning("[PlayerHandManager] Could not find GachaManager in the scene!");
         }
 
         if (juiceFXManager == null)
@@ -162,7 +159,6 @@ public class PlayerHandManager : MonoBehaviour
             juiceFXManager = FindFirstObjectByType<JuiceFXManager>();
         }
 
-        // Disable layout group if present to prevent position conflict
         DisableLayoutGroupsOnHand();
     }
 
@@ -173,7 +169,7 @@ public class PlayerHandManager : MonoBehaviour
 
     private IEnumerator Routine_PreloadSprites()
     {
-        yield return null; // let DeckManager finish loading the CSVs
+        yield return null;
         var deck = FindFirstObjectByType<DeckManager>();
         if (deck == null) yield break;
 
@@ -221,7 +217,6 @@ public class PlayerHandManager : MonoBehaviour
         StartCoroutine(Routine_DealCardsTracked(count, deckToPull, sourceButton));
     }
 
-    // Counts running pull animations so a bonus card (from a Support effect) doesn't fly over the same spot at the same time.
     private IEnumerator Routine_DealCardsTracked(int count, DeckType deckToPull, RectTransform sourceButton)
     {
         dealsInProgress++;
@@ -237,9 +232,12 @@ public class PlayerHandManager : MonoBehaviour
 
     private IEnumerator Routine_DealCards(int count, DeckType deckToPull, RectTransform sourceButton)
     {
-        if (gachaManager == null) { Debug.LogError("[PlayerHandManager] gachaManager is null!"); yield break; }
+        if (gachaManager == null)
+        {
+            Debug.LogError("[PlayerHandManager] gachaManager is null!");
+            yield break;
+        }
 
-        // Validate the prefab BEFORE spending a token on the server.
         if (cardPrefab == null ||
             cardPrefab.GetComponent<BalatroCardController>() == null ||
             cardPrefab.GetComponentInChildren<CardVisual>(true) == null)
@@ -250,7 +248,6 @@ public class PlayerHandManager : MonoBehaviour
 
         if (cachedEndTurnManager == null) cachedEndTurnManager = FindFirstObjectByType<EndTurnManager>();
 
-        // Nothing to deal when the match is over or the player can't pay: no card back should fly out.
         if (cachedEndTurnManager != null && cachedEndTurnManager.IsMatchOver) yield break;
 
         GachaUI gachaUi = FindFirstObjectByType<GachaUI>();
@@ -262,11 +259,11 @@ public class PlayerHandManager : MonoBehaviour
 
         for (int i = 0; i < count; i++)
         {
-            // ---- 1. ASK THE SERVER *IMMEDIATELY* ----
+            // ---- 1. REQUEST THE PULL (GachaManager answers from the server, or locally in an offline match) ----
             if (deckToPull == DeckType.Support) gachaManager.RequestPullSupport();
             else gachaManager.RequestPullAction();
 
-            // ---- 2. SPAWN THE CARD *IMMEDIATELY* (hides the network round trip for the joining player) ----
+            // ---- 2. SPAWN CARD PREFAB ----
             Transform spawnParent = targetCanvas != null ? targetCanvas.transform : handTransform;
             GameObject newCardObj = Instantiate(cardPrefab, spawnParent);
             RectTransform cardRect = newCardObj.GetComponent<RectTransform>();
@@ -275,14 +272,14 @@ public class PlayerHandManager : MonoBehaviour
 
             if (cachedEndTurnManager != null) controller.SetEndTurnManager(cachedEndTurnManager);
 
-            controller.LockForFlight(); // no hover/click events while flying (they fought the flight animation)
+            controller.LockForFlight();
             if (cardBackSprite != null && visual.cardImage != null) visual.cardImage.sprite = cardBackSprite;
 
             cardRect.position = sourceButton != null ? sourceButton.position : handTransform.position;
             cardRect.localScale = Vector3.one * 0.3f;
             cardRect.rotation = Quaternion.identity;
 
-            // ---- 3. FLY TO SCREEN CENTER (while the server answers) ----
+            // ---- 3. FLY TO SCREEN CENTER ----
             Vector3 centerPosition = targetCanvas != null ? targetCanvas.transform.position : Vector3.zero;
             Vector3 targetCenterScale = Vector3.one * revealScale;
 
@@ -305,7 +302,7 @@ public class PlayerHandManager : MonoBehaviour
             cardRect.position = centerPosition;
             cardRect.localScale = targetCenterScale;
 
-            // ---- 4. WAIT FOR THE RESULT (usually already here by now) ----
+            // ---- 4. WAIT FOR RESULT ----
             float waited = 0f;
             while (pendingPulls.Count == 0 && waited < pullTimeout)
             {
@@ -324,12 +321,11 @@ public class PlayerHandManager : MonoBehaviour
             PullResult result = pendingPulls.Dequeue();
             if (result == null)
             {
-                // Server refused the pull (out of tokens / not ready). Remove the placeholder card.
                 Destroy(newCardObj);
                 continue;
             }
 
-            // ---- 5. REVEAL ----
+            // ---- 5. REVEAL CARD ----
             bool isAction = result.Deck == DeckType.Action;
             Sprite sprite = GetCardSpriteCached(result.CardId, isAction);
 
@@ -342,8 +338,6 @@ public class PlayerHandManager : MonoBehaviour
                 controller.SetCategory(result.ActionData.Role == "Attack" ? CardCategory.Attack : CardCategory.Defense);
             else if (!isAction)
             {
-                // Always mark Support cards as Support, even if the CSV row wasn't found, because the deck type
-                // is what gets sent to the server / opponent.
                 controller.SetCategory(CardCategory.Support);
                 if (result.SupportData != null)
                     controller.SetCardMetadata(result.SupportData.EffectType == "Forever");
@@ -362,7 +356,6 @@ public class PlayerHandManager : MonoBehaviour
 
             yield return new WaitForSeconds(centerPauseDuration);
 
-            // Knights of Favonius Library: "discard this pull and pull again". The card is shown, then thrown away.
             if (result.AutoDiscard)
             {
                 yield return StartCoroutine(Routine_ShrinkAndDestroy(newCardObj));
@@ -384,8 +377,6 @@ public class PlayerHandManager : MonoBehaviour
                 yield return null;
             }
 
-            // Re-parent KEEPING the world position. (SetParent(..., false) kept the old canvas-space numbers,
-            // so the card teleported before sliding into the fan.)
             Vector3 arrivalWorldPos = cardRect.position;
             newCardObj.transform.SetParent(handTransform, true);
 
@@ -395,8 +386,6 @@ public class PlayerHandManager : MonoBehaviour
             cardRect.position = arrivalWorldPos;
             cardRect.localScale = Vector3.one;
 
-            // Re-check interactability NOW. It used to be decided at spawn time, so a card still animating when
-            // the draw window closed stayed locked forever.
             controller.SetInteractable(timerManager == null || !timerManager.IsDrawPhaseActive);
 
             controller.SelectionChanged -= OnCardSelectionChanged;
@@ -426,7 +415,6 @@ public class PlayerHandManager : MonoBehaviour
     {
         while (bonusQueue.Count > 0)
         {
-            // Let a pull the player just made finish its animation first (but never wait forever).
             float waited = 0f;
             while (dealsInProgress > 0 && waited < 4f)
             {
@@ -441,8 +429,6 @@ public class PlayerHandManager : MonoBehaviour
         bonusRoutine = null;
     }
 
-    // Same look as a normal pull (fly to the centre, reveal, fly to the hand) but there is nothing to wait for:
-    // the server already told us what the card is.
     private IEnumerator Routine_ReceiveBonusCard(PullResult result, string reason)
     {
         if (cardPrefab == null ||
@@ -471,7 +457,6 @@ public class PlayerHandManager : MonoBehaviour
         cardRect.localScale = Vector3.one * 0.3f;
         cardRect.rotation = Quaternion.identity;
 
-        // ---- fly to the centre ----
         Vector3 centerPosition = targetCanvas != null ? targetCanvas.transform.position : Vector3.zero;
         Vector3 targetCenterScale = Vector3.one * revealScale;
         float movePhaseDuration = Mathf.Max(0.01f, (totalDrawDuration - centerPauseDuration) * 0.5f);
@@ -493,7 +478,6 @@ public class PlayerHandManager : MonoBehaviour
         cardRect.position = centerPosition;
         cardRect.localScale = targetCenterScale;
 
-        // ---- reveal ----
         bool isAction = result.Deck == DeckType.Action;
         Sprite sprite = GetCardSpriteCached(result.CardId, isAction);
 
@@ -526,7 +510,6 @@ public class PlayerHandManager : MonoBehaviour
             yield break;
         }
 
-        // ---- fly into the hand ----
         t = 0f;
         startPos = cardRect.position;
         startScale = cardRect.localScale;
@@ -561,7 +544,6 @@ public class PlayerHandManager : MonoBehaviour
         yield return new WaitForSeconds(dealDelay);
     }
 
-    // The card is thrown away: it shrinks to nothing, then is destroyed.
     private IEnumerator Routine_ShrinkAndDestroy(GameObject cardObj)
     {
         if (cardObj == null) yield break;
@@ -582,7 +564,6 @@ public class PlayerHandManager : MonoBehaviour
         if (cardObj != null) Destroy(cardObj);
     }
 
-    // A Support effect (Frostmoon Enclave) took cards out of the hand. Ids are network ids (see CardNetId).
     private void HandleHandCardsRemoved(int[] netIds)
     {
         DiscardHandCardsByNetId(netIds);
@@ -604,7 +585,6 @@ public class PlayerHandManager : MonoBehaviour
 
                 if (CardNetId.Encode(card.CardId, card.Category == CardCategory.Support) == netId)
                 {
-                    // Out of the list first, so the fan closes the gap while the card shrinks away.
                     cardsInHand.RemoveAt(i);
                     card.SetInteractable(false);
                     StartCoroutine(Routine_ShrinkAndDestroy(card.gameObject));
@@ -657,17 +637,12 @@ public class PlayerHandManager : MonoBehaviour
 
             if (controller.IsSelected)
             {
-                // Encode which deck the card is from (Action and Support Ids can overlap).
                 ids.Add(CardNetId.Encode(controller.CardId, controller.Category == CardCategory.Support));
             }
         }
         return ids;
     }
 
-    /// <summary>
-    /// True if the hand holds at least one card that can be played on its own: a Character, a Monster or a Support.
-    /// Weapons and Artefacts can't be played alone (see CardRules), so a hand of only those (or an empty hand) is "stuck".
-    /// </summary>
     public bool HasPlayableCard(List<ActionCardData> actionCards)
     {
         CleanupHandList();
@@ -677,7 +652,7 @@ public class PlayerHandManager : MonoBehaviour
             if (c.Category == CardCategory.Support) return true;
 
             ActionCardData data = actionCards != null ? actionCards.Find(a => a.Id == c.CardId) : null;
-            if (data == null) return true; // unknown card: don't lock the player out
+            if (data == null) return true;
             string cat = (data.Category ?? "").Trim();
             if (!cat.Equals("Weapon", System.StringComparison.OrdinalIgnoreCase) &&
                 !cat.Equals("Artefact", System.StringComparison.OrdinalIgnoreCase)) return true;
@@ -695,8 +670,6 @@ public class PlayerHandManager : MonoBehaviour
             cardsInHand.Remove(controller);
             submittedCards.Add(controller);
 
-            // Locked-in cards get a neutral look (no leftover "selected" scale/green tint) so the combat
-            // highlights come back to the same look the opponent's revealed cards have.
             controller.ResetVisualsOnly();
 
             controller.transform.SetParent(selectedHandTarget, true);
@@ -707,9 +680,6 @@ public class PlayerHandManager : MonoBehaviour
         LayoutPlayedCards(selectedHandTarget);
     }
 
-    /// <summary>
-    /// Locked-in cards sit in a plain horizontal row (no arc, no tilt), centred on the played-cards area.
-    /// </summary>
     private void LayoutPlayedCards(RectTransform target)
     {
         if (activePlayedRowCoroutine != null)
@@ -721,7 +691,6 @@ public class PlayerHandManager : MonoBehaviour
         submittedCards.RemoveAll(c => c == null);
         if (target == null || submittedCards.Count == 0) return;
 
-        // A layout group on the played area would fight the manual positions (same as on the hand).
         LayoutGroup layoutGroup = target.GetComponent<LayoutGroup>();
         if (layoutGroup != null)
         {
@@ -734,7 +703,6 @@ public class PlayerHandManager : MonoBehaviour
 
     private IEnumerator Routine_AnimatePlayedRow(RectTransform target)
     {
-        // Snapshot: the live list changes when cards are returned / discarded.
         List<BalatroCardController> cards = new List<BalatroCardController>(submittedCards);
         int count = cards.Count;
 
@@ -780,11 +748,6 @@ public class PlayerHandManager : MonoBehaviour
         activePlayedRowCoroutine = null;
     }
 
-    /// <summary>
-    /// Removes spent "immediate" support cards from the submitted list AND destroys them.
-    /// (Destroy() only takes effect at the end of the frame, so destroying them from outside left them
-    /// in our lists for one more layout pass, which put a gap in the fan.)
-    /// </summary>
     public void DiscardSubmittedImmediateSupports()
     {
         for (int i = submittedCards.Count - 1; i >= 0; i--)
@@ -801,11 +764,6 @@ public class PlayerHandManager : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Destroys specific played cards instead of returning them to the hand, one card per entry.
-    /// Ids are network ids (Support ids are offset, see CardNetId). Used by Support effects that remove a card
-    /// after the round, e.g. Kid Kujirai.
-    /// </summary>
     public void DiscardSubmittedCardsByNetId(int[] netIds)
     {
         if (netIds == null || netIds.Length == 0) return;
@@ -853,10 +811,8 @@ public class PlayerHandManager : MonoBehaviour
             RectTransform cardRect = controller.GetComponent<RectTransform>();
             Vector3 worldPos = cardRect != null ? cardRect.position : Vector3.zero;
 
-            // 1. Re-parent to hand transform (keep world position so the card visibly flies back into the fan)
             controller.transform.SetParent(handTransform, true);
 
-            // 2. Enable controller AND all attached UI components
             controller.enabled = true;
             MonoBehaviour[] scripts = controller.GetComponents<MonoBehaviour>();
             foreach (var script in scripts)
@@ -864,13 +820,9 @@ public class PlayerHandManager : MonoBehaviour
                 if (script != null) script.enabled = true;
             }
 
-            // 3. Re-enable interactability & raycast target
             controller.SetInteractable(true);
-
-            // 4. Reset scale, hover flags, and deselection flags cleanly
             controller.ResetCardState();
 
-            // 5. Ensure scale and anchors are completely normalized
             if (cardRect != null)
             {
                 cardRect.anchorMin = new Vector2(0.5f, 0.5f);
@@ -908,7 +860,8 @@ public class PlayerHandManager : MonoBehaviour
 
     private void HandleDrawPhaseChanged(bool isDrawPhaseActive)
     {
-        bool shouldBeInteractable = !isDrawPhaseActive;
+        // Cards should be interactable during draw phase AND combat selection phase
+        bool shouldBeInteractable = true;
         SetAllCardsInteractable(shouldBeInteractable);
     }
 
@@ -918,8 +871,6 @@ public class PlayerHandManager : MonoBehaviour
     {
         CleanupHandList();
 
-        // Always stop the old animation first, even when the hand is now empty. Otherwise a running
-        // animation keeps dragging cards that were just moved to the "submitted" area.
         if (activeFanCoroutine != null)
         {
             StopCoroutine(activeFanCoroutine);
@@ -938,8 +889,6 @@ public class PlayerHandManager : MonoBehaviour
 
     private IEnumerator Routine_AnimateFanLayout()
     {
-        // Work on a snapshot. The live list can be modified mid-animation (cards destroyed / added),
-        // which used to shift indices and make cards jump to someone else's slot.
         List<BalatroCardController> cards = new List<BalatroCardController>(cardsInHand);
         int cardCount = cards.Count;
 
@@ -960,7 +909,6 @@ public class PlayerHandManager : MonoBehaviour
                 zAngle = -normalizedIndex * maxFanAngle;
             }
 
-            // Selected cards are lifted as part of the layout (this also covers a hand of exactly one card).
             if (cards[i] != null && cards[i].IsSelected)
             {
                 yPos += cards[i].SelectYOffset;
@@ -970,8 +918,6 @@ public class PlayerHandManager : MonoBehaviour
             targetRotations[i] = Quaternion.Euler(0f, 0f, zAngle);
         }
 
-        // NOTE: scale is intentionally NOT touched here any more. CardJuice owns hover/selected scale; the fan used to
-        // pull every card back to 1.0 each frame, which made hovered/selected cards jitter and kept this loop alive forever.
         bool isAnimating = true;
         while (isAnimating)
         {
@@ -997,7 +943,6 @@ public class PlayerHandManager : MonoBehaviour
             yield return null;
         }
 
-        // Final snap
         for (int i = 0; i < cardCount; i++)
         {
             if (!IsInHand(cards[i])) continue;

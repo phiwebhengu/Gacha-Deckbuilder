@@ -7,11 +7,14 @@ using Unity.Netcode;
 public class MatchPullSetup : NetworkBehaviour
 {
     [SerializeField] private DeckManager deckManager;
-    [SerializeField] private DrawTimerManager drawTimerManager; // ADD THIS
+    [SerializeField] private DrawTimerManager drawTimerManager;
 
     private IEnumerator Start()
     {
-        if (!IsServer) yield break; // Only run on server
+        var gachaManager = FindFirstObjectByType<GachaManager>();
+        bool offline = gachaManager != null && gachaManager.isOfflineAIRival;
+
+        if (!IsServer && !offline) yield break; // Online, only the server picks the featured cards
 
         // 1. Wait for decks to finish loading
         yield return new WaitUntil(() =>
@@ -19,11 +22,14 @@ public class MatchPullSetup : NetworkBehaviour
             deckManager.loadedActionCards != null && deckManager.loadedActionCards.Count > 0 &&
             deckManager.loadedSupportCards != null && deckManager.loadedSupportCards.Count > 0);
 
+        // Give joining clients an extra frame to fully synchronize and spawn UI components
+        yield return new WaitForSeconds(0.75f);
+
         var rng = new System.Random();
 
         // 2. Find all Legendary cards
-        var legendaryActions = deckManager.loadedActionCards.Where(c => c.Tier == "Legendary").ToList();
-        var legendarySupports = deckManager.loadedSupportCards.Where(c => c.Tier == "Legendary").ToList();
+        var legendaryActions = deckManager.loadedActionCards.Where(c => c.Tier.ToString().Equals("Legendary", System.StringComparison.OrdinalIgnoreCase)).ToList();
+        var legendarySupports = deckManager.loadedSupportCards.Where(c => c.Tier.ToString().Equals("Legendary", System.StringComparison.OrdinalIgnoreCase)).ToList();
 
         if (legendaryActions.Count == 0 || legendarySupports.Count == 0)
         {
@@ -37,8 +43,14 @@ public class MatchPullSetup : NetworkBehaviour
 
         Debug.Log($"[MatchSetup] Featured Action card this match: ID {featuredAction} | Featured Support card: ID {featuredSupport}");
 
-        // 4. Tell the GachaManager about the featured cards
-        var gachaManager = FindFirstObjectByType<GachaManager>();
+        // 4. Tell the GachaManager about the featured cards.
+        // Offline, the DrawTimerManager starts Round 1 by itself (its AI mode), so only the featured cards are set here.
+        if (offline)
+        {
+            gachaManager.SetFeaturedCards(featuredAction, featuredSupport);
+            yield break;
+        }
+
         if (gachaManager != null && gachaManager.IsServer)
         {
             gachaManager.SetFeaturedCards(featuredAction, featuredSupport);

@@ -7,6 +7,10 @@ public class GachaManager : NetworkBehaviour
 {
     public static GachaManager Instance { get; private set; }
 
+    [Header("Game Mode Settings")]
+    [Tooltip("On for the AI and Tutorial scenes. The same pull, pity, token and Support-effect rules run locally, without a network.")]
+    [SerializeField] public bool isOfflineAIRival = false;
+
     [Header("Pull Config (ScriptableObject)")]
     public PullConfig pullConfig;
 
@@ -27,6 +31,10 @@ public class GachaManager : NetworkBehaviour
 
     [Tooltip("Safety limit for Knights of Favonius Library re-pulling Knights of Favonius Library again and again.")]
     public int maxKnightsChain = 10;
+
+    /// <summary>In an offline match the local player is "client" 0 and the AI is "client" 1.</summary>
+    public const ulong OfflinePlayerId = 0;
+    public const ulong OfflineOpponentId = 1;
 
     private class PlayerGachaState
     {
@@ -71,6 +79,9 @@ public class GachaManager : NetworkBehaviour
     private List<SupportCardData> supportCardSource;
     private readonly Dictionary<ulong, PlayerGachaState> playerStates = new Dictionary<ulong, PlayerGachaState>();
 
+    // Offline only: the AI's hand (network ids, oldest first), owned by EndTurnManager. Seymour copies from it.
+    private List<int> offlineOpponentHand;
+
     public event Action<int> OnMyTokensChanged;
     public event Action<PullResult> OnMyPullResolved;
     public event Action<string> OnPullFailed;
@@ -92,18 +103,51 @@ public class GachaManager : NetworkBehaviour
 
     public int PullCost => pullCost;
 
+    // ----- Tutorial hook (null by default) -----
+
+    /// <summary>
+    /// Asked before every pull: return a card id to hand out that exact card, or 0 to roll normally.
+    /// Pity, the 50/50 and the guarantee still update as if the card had been rolled, so the counters stay honest.
+    /// </summary>
+    public Func<DeckType, int> ScriptedPullCardId;
+
+    /// <summary>True where the game rules run: the host in an online match, or this machine in an offline one.</summary>
+    private bool RunsGameRules => isOfflineAIRival || IsServer;
+
     private void Awake()
     {
-        if (IsClient) Instance = this;
+        Instance = this;
     }
 
     public override void OnNetworkSpawn()
     {
+        if (isOfflineAIRival) return;
+
         // New match: clear the numbers shown on the Outcome page (every client keeps its own stats).
         if (IsClient) MatchStats.Reset(startingTokens);
 
         if (!IsServer) return;
 
+        LoadDeckSources();
+
+        foreach (ulong clientId in NetworkManager.Singleton.ConnectedClientsIds)
+            RegisterPlayer(clientId);
+
+        NetworkManager.Singleton.SceneManager.OnSynchronizeComplete += HandleSynchronizeComplete;
+        NetworkManager.Singleton.OnClientDisconnectCallback += UnregisterPlayer;
+    }
+
+    private void Start()
+    {
+        if (!isOfflineAIRival) return;
+
+        MatchStats.Reset(startingTokens);
+        LoadDeckSources();
+        RegisterPlayer(OfflinePlayerId);
+    }
+
+    private void LoadDeckSources()
+    {
         var deckMgr = FindFirstObjectByType<DeckManager>();
         if (deckMgr != null)
         {
@@ -115,17 +159,11 @@ public class GachaManager : NetworkBehaviour
             Debug.LogWarning("⚠️ GachaManager: Action deck not loaded.");
         if (supportCardSource == null || supportCardSource.Count == 0)
             Debug.LogWarning("⚠️ GachaManager: Support deck not loaded.");
-
-        foreach (ulong clientId in NetworkManager.Singleton.ConnectedClientsIds)
-            RegisterPlayer(clientId);
-
-        NetworkManager.Singleton.SceneManager.OnSynchronizeComplete += HandleSynchronizeComplete;
-        NetworkManager.Singleton.OnClientDisconnectCallback += UnregisterPlayer;
     }
 
     public override void OnNetworkDespawn()
     {
-        if (!IsServer || NetworkManager.Singleton == null) return;
+        if (isOfflineAIRival || !IsServer || NetworkManager.Singleton == null) return;
         if (NetworkManager.Singleton.SceneManager != null)
             NetworkManager.Singleton.SceneManager.OnSynchronizeComplete -= HandleSynchronizeComplete;
         NetworkManager.Singleton.OnClientDisconnectCallback -= UnregisterPlayer;
@@ -142,41 +180,55 @@ public class GachaManager : NetworkBehaviour
             Tokens = startingTokens,
             Rng = new System.Random(seed)
         };
-        SendTokensClientRpc(startingTokens, ToTarget(clientId));
+        SendTokens(clientId, startingTokens);
     }
 
     private void UnregisterPlayer(ulong clientId) => playerStates.Remove(clientId);
 
-    /// <summary>Server only. Gives a player tokens (used by Support card effects such as Paimon / Katheryne / Vanarana).</summary>
+    /// <summary>Offline only: lets Seymour copy from the AI's hand. EndTurnManager owns the list.</summary>
+    public void SetOfflineOpponentHand(List<int> hand) => offlineOpponentHand = hand;
+
+    /// <summary>Server / offline only. Gives a player tokens (used by Support card effects such as Paimon / Katheryne / Vanarana).</summary>
     public void AddTokens(ulong clientId, int amount)
     {
-        if (!IsServer || amount == 0) return;
+        if (!RunsGameRules || amount == 0) return;
         if (!playerStates.TryGetValue(clientId, out var state)) return;
 
         state.Tokens = Mathf.Max(0, state.Tokens + amount);
-        SendTokensClientRpc(state.Tokens, ToTarget(clientId));
+        SendTokens(clientId, state.Tokens);
     }
 
     public void SetFeaturedCards(int actionId, int supportId)
     {
-        if (!IsServer) return;
+        if (!RunsGameRules) return;
         foreach (var state in playerStates.Values)
         {
             state.FeaturedActionCardId = actionId;
             state.FeaturedSupportCardId = supportId;
         }
-        NotifyFeaturedCardsClientRpc(actionId, supportId);
+
+        if (isOfflineAIRival) OnFeaturedCardsSet?.Invoke(actionId, supportId);
+        else NotifyFeaturedCardsClientRpc(actionId, supportId);
     }
 
-    // --- NEW METHOD: Allows UI to safely fetch tokens if it missed the initial RPC ---
+    // --- Allows UI to safely fetch tokens if it missed the initial message ---
     public int GetLocalPlayerTokens()
     {
-        if (NetworkManager == null || !NetworkManager.IsListening) return startingTokens;
-        if (playerStates.TryGetValue(NetworkManager.LocalClientId, out var state))
-        {
-            return state.Tokens;
-        }
-        return startingTokens; // Fallback
+        return TryGetLocalState(out var state) ? state.Tokens : startingTokens;
+    }
+
+    public (int pulls, int threshold) GetLocalPlayerPity(bool isActionDeck)
+    {
+        int threshold = pullConfig != null ? pullConfig.pityThreshold : 4;
+        return TryGetLocalState(out var state) ? (PityOf(state, isActionDeck), threshold) : (0, threshold);
+    }
+
+    private bool TryGetLocalState(out PlayerGachaState state)
+    {
+        state = null;
+        if (isOfflineAIRival) return playerStates.TryGetValue(OfflinePlayerId, out state);
+        if (NetworkManager == null || !NetworkManager.IsListening) return false;
+        return playerStates.TryGetValue(NetworkManager.LocalClientId, out state);
     }
 
     // ===================== pull cost (shared by the server and the UI) =====================
@@ -206,8 +258,17 @@ public class GachaManager : NetworkBehaviour
 
     // ===================== pulling =====================
 
-    public void RequestPullAction() => RequestPullActionServerRpc();
-    public void RequestPullSupport() => RequestPullSupportServerRpc();
+    public void RequestPullAction()
+    {
+        if (isOfflineAIRival) HandlePullRequest(OfflinePlayerId, true);
+        else RequestPullActionServerRpc();
+    }
+
+    public void RequestPullSupport()
+    {
+        if (isOfflineAIRival) HandlePullRequest(OfflinePlayerId, false);
+        else RequestPullSupportServerRpc();
+    }
 
     [ServerRpc(RequireOwnership = false)]
     private void RequestPullActionServerRpc(ServerRpcParams rpcParams = default)
@@ -223,13 +284,12 @@ public class GachaManager : NetworkBehaviour
 
     private void HandlePullRequest(ulong clientId, bool isActionDeck)
     {
-        var target = ToTarget(clientId);
-        if (!playerStates.TryGetValue(clientId, out var state)) { SendPullFailedClientRpc("Not ready yet.", target); return; }
+        if (!playerStates.TryGetValue(clientId, out var state)) { SendPullFailed(clientId, "Not ready yet."); return; }
 
         int cost = ResolveCost(pullCost, !isActionDeck, state.FreePullCredits, state.SupportPullDiscount,
                                out bool usesDiscount, out bool usesFreeCredit);
 
-        if (state.Tokens < cost) { SendPullFailedClientRpc("Out of tokens.", target); return; }
+        if (state.Tokens < cost) { SendPullFailed(clientId, "Out of tokens."); return; }
 
         // Pay
         if (usesDiscount) state.SupportPullDiscount--;
@@ -245,10 +305,10 @@ public class GachaManager : NetworkBehaviour
 
         // Order matters: the UI must know the new free-pull numbers before the token message re-enables the buttons.
         if (usesDiscount || usesFreeCredit)
-            SendBenefitsClientRpc(state.FreePullCredits, state.SupportPullDiscount, target);
+            SendBenefits(clientId, state.FreePullCredits, state.SupportPullDiscount);
 
-        SendTokensClientRpc(state.Tokens, target);
-        DispatchPullResult(result, PityOf(state, isActionDeck), target);
+        SendTokens(clientId, state.Tokens);
+        SendPullResult(clientId, result, PityOf(state, isActionDeck));
 
         if (discardedByKnights)
         {
@@ -259,19 +319,79 @@ public class GachaManager : NetworkBehaviour
         else
         {
             AddToHand(state, result);
-            NotifyOpponentDrewCardClientRpc(clientId);
+            NotifyOpponentDrewCard(clientId);
             TriggerHanachirusato(clientId, state, result);
         }
     }
 
     private PullResult RollOne(PlayerGachaState state, bool isActionDeck, Rarity? forcedTier)
     {
+        if (actionCardSource == null || supportCardSource == null) LoadDeckSources();
+
+        int scriptedId = ScriptedPullCardId != null ? ScriptedPullCardId(isActionDeck ? DeckType.Action : DeckType.Support) : 0;
+        if (scriptedId > 0)
+        {
+            PullResult scripted = BuildScriptedPull(state, isActionDeck, scriptedId);
+            if (scripted != null) return scripted;
+        }
+
         if (isActionDeck)
             return GachaEngine.PullAction(pullConfig, state.ActionPity, state.Rng, actionCardSource, state.FeaturedActionCardId,
                                           state.LuckBonusPercent, forcedTier);
 
         return GachaEngine.PullSupport(pullConfig, state.SupportPity, state.Rng, supportCardSource, state.FeaturedSupportCardId,
                                        state.LuckBonusPercent, forcedTier);
+    }
+
+    /// <summary>
+    /// A chosen card, with pity and the 50/50 updated the same way GachaEngine would update them.
+    /// It doesn't enforce pity: script a Legendary when the counter is full, or the counter goes past the threshold.
+    /// </summary>
+    private PullResult BuildScriptedPull(PlayerGachaState state, bool isActionDeck, int cardId)
+    {
+        var result = new PullResult { Deck = isActionDeck ? DeckType.Action : DeckType.Support, CardId = cardId };
+        string tierText;
+
+        if (isActionDeck)
+        {
+            ActionCardData card = actionCardSource != null ? actionCardSource.Find(c => c.Id == cardId) : null;
+            if (card == null) return null;
+            result.ActionData = card;
+            result.CardName = card.Name;
+            tierText = card.Tier;
+        }
+        else
+        {
+            SupportCardData card = supportCardSource != null ? supportCardSource.Find(c => c.Id == cardId) : null;
+            if (card == null) return null;
+            result.SupportData = card;
+            result.CardName = card.Name;
+            tierText = card.Tier;
+        }
+
+        Enum.TryParse(tierText, true, out Rarity tier);
+        result.Tier = tier;
+
+        PityState pity = isActionDeck ? state.ActionPity : state.SupportPity;
+        int featuredId = isActionDeck ? state.FeaturedActionCardId : state.FeaturedSupportCardId;
+        int threshold = pullConfig != null ? pullConfig.pityThreshold : 0;
+
+        result.PityTriggered = threshold > 0 && pity.PullsSinceLegendary >= threshold;
+
+        if (tier == Rarity.Legendary)
+        {
+            result.Was5050Roll = true;
+            result.Won5050 = cardId == featuredId;
+            pity.GuaranteedFeaturedNext = !result.Won5050;
+            pity.RegisterLegendaryPull();
+        }
+        else
+        {
+            pity.RegisterNonLegendaryPull();
+        }
+
+        Debug.Log($"[Pull] Scripted {result.Deck} -> {result.Tier} -> {result.CardName}{(result.PityTriggered ? " [PITY]" : "")}");
+        return result;
     }
 
     private static int PityOf(PlayerGachaState state, bool isActionDeck)
@@ -324,9 +444,7 @@ public class GachaManager : NetworkBehaviour
 
         if (!discardedByKnights) AddToHand(state, result);
 
-        SendBonusCardClientRpc((int)result.Deck, (int)result.Tier, result.CardId, result.CardName,
-                               result.PityTriggered, result.Was5050Roll, result.Won5050,
-                               PityOf(state, isActionDeck), result.AutoDiscard, reason, ToTarget(clientId));
+        SendBonusCard(clientId, result, PityOf(state, isActionDeck), reason);
 
         Debug.Log($"[Support] Client {clientId}: bonus card -> {result.CardName} ({reason}){(discardedByKnights ? " [discarded]" : "")}");
 
@@ -337,7 +455,7 @@ public class GachaManager : NetworkBehaviour
         }
         else
         {
-            NotifyOpponentDrewCardClientRpc(clientId);
+            NotifyOpponentDrewCard(clientId);
         }
     }
 
@@ -347,40 +465,42 @@ public class GachaManager : NetworkBehaviour
         bool isSupport = CardNetId.IsSupport(netId);
         int id = CardNetId.Decode(netId);
 
+        if (actionCardSource == null || supportCardSource == null) LoadDeckSources();
+
+        var result = new PullResult { Deck = isSupport ? DeckType.Support : DeckType.Action, CardId = id };
         string tierText;
-        string cardName;
 
         if (isSupport)
         {
             SupportCardData card = supportCardSource != null ? supportCardSource.Find(c => c.Id == id) : null;
             if (card == null) return;
+            result.SupportData = card;
+            result.CardName = card.Name;
             tierText = card.Tier;
-            cardName = card.Name;
         }
         else
         {
             ActionCardData card = actionCardSource != null ? actionCardSource.Find(c => c.Id == id) : null;
             if (card == null) return;
+            result.ActionData = card;
+            result.CardName = card.Name;
             tierText = card.Tier;
-            cardName = card.Name;
         }
 
-        Rarity tier = Rarity.Common;
-        Enum.TryParse(tierText, true, out tier);
+        Enum.TryParse(tierText, true, out Rarity tier);
+        result.Tier = tier;
 
         state.Hand.Add(netId);
+        SendBonusCard(clientId, result, PityOf(state, !isSupport), reason);
 
-        SendBonusCardClientRpc(isSupport ? (int)DeckType.Support : (int)DeckType.Action, (int)tier, id, cardName,
-                               false, false, false, PityOf(state, !isSupport), false, reason, ToTarget(clientId));
-
-        Debug.Log($"[Support] Client {clientId}: copied {cardName} ({reason})");
-        NotifyOpponentDrewCardClientRpc(clientId);
+        Debug.Log($"[Support] Client {clientId}: copied {result.CardName} ({reason})");
+        NotifyOpponentDrewCard(clientId);
     }
 
     // ===================== end of round: the Support effects that belong to the gacha side =====================
 
     /// <summary>
-    /// Server only. Called once per round, after both players finished the resolution animation and before the next
+    /// Server / offline only. Called once per round, after both players finished the resolution animation and before the next
     /// round starts. Applies the pull/economy Support effects of the cards that were played this round.
     ///
     /// Jade Chamber ............. +10% Legendary chance for the next draw window (per copy played)
@@ -397,10 +517,11 @@ public class GachaManager : NetworkBehaviour
     /// Atea ..................... next Support pull costs 1 token less
     ///
     /// Every number is multiplied by the support's multiplier (Dawn Winery / Tubby / Stormterror's Lair doubling).
+    /// Offline, only the player has gacha state, so the AI's pull-side Supports do nothing yet.
     /// </summary>
     public void ApplyRoundEnd(List<RoundEndInfo> infos)
     {
-        if (!IsServer || infos == null || infos.Count == 0) return;
+        if (!RunsGameRules || infos == null || infos.Count == 0) return;
 
         // 0. Cards that left the hand for good this round, and effects from last round that run out now.
         foreach (RoundEndInfo info in infos)
@@ -465,7 +586,7 @@ public class GachaManager : NetworkBehaviour
                         {
                             opponentState.ActionPity.PullsSinceLegendary = 0;
                             opponentState.SupportPity.PullsSinceLegendary = 0;
-                            SendPityClientRpc(0, 0, ToTarget(opponentId));
+                            SendPity(opponentId, 0, 0);
                             Debug.Log($"[Support] Client {info.ClientId}: Stadium of the Sacred Flame reset client {opponentId}'s pity.");
                         }
                         break;
@@ -503,10 +624,10 @@ public class GachaManager : NetworkBehaviour
             plans.Add(plan);
         }
 
-        // 2. Tell the clients their free pulls / discounts.
+        // 2. Tell the players their free pulls / discounts.
         foreach (RoundEndPlan plan in plans)
         {
-            SendBenefitsClientRpc(plan.State.FreePullCredits, plan.State.SupportPullDiscount, ToTarget(plan.ClientId));
+            SendBenefits(plan.ClientId, plan.State.FreePullCredits, plan.State.SupportPullDiscount);
         }
 
         // 3. Cards: copies, discards, then the free pulls.
@@ -515,9 +636,9 @@ public class GachaManager : NetworkBehaviour
             PlayerGachaState state = plan.State;
 
             // Seymour
-            if (plan.Copies > 0 && playerStates.TryGetValue(OtherClientId(infos, plan.ClientId), out PlayerGachaState opponent))
+            if (plan.Copies > 0)
             {
-                var opponentHand = new List<int>(opponent.Hand);
+                List<int> opponentHand = OpponentHandFor(infos, plan.ClientId);
                 int copies = Mathf.Min(plan.Copies, opponentHand.Count);
                 for (int i = 0; i < copies; i++)
                     GrantCopy(plan.ClientId, state, opponentHand[i], "Seymour: copied the opponent's first card");
@@ -536,8 +657,8 @@ public class GachaManager : NetworkBehaviour
                     state.Hand.RemoveAt(index);
                 }
 
-                SendHandCardsRemovedClientRpc(removed.ToArray(), ToTarget(plan.ClientId));
-                NotifyOpponentLostCardsClientRpc(plan.ClientId, count);
+                SendHandCardsRemoved(plan.ClientId, removed.ToArray());
+                NotifyOpponentLostCards(plan.ClientId, count);
                 AddFreePulls(plan, count, "Frostmoon Enclave: replacement card");
                 Debug.Log($"[Support] Client {plan.ClientId}: Frostmoon Enclave discarded {count} card(s).");
             }
@@ -556,6 +677,16 @@ public class GachaManager : NetworkBehaviour
             state.PullsThisRound = 0;
     }
 
+    private List<int> OpponentHandFor(List<RoundEndInfo> infos, ulong clientId)
+    {
+        if (isOfflineAIRival)
+            return clientId == OfflinePlayerId && offlineOpponentHand != null ? new List<int>(offlineOpponentHand) : new List<int>();
+
+        return playerStates.TryGetValue(OtherClientId(infos, clientId), out PlayerGachaState opponent)
+            ? new List<int>(opponent.Hand)
+            : new List<int>();
+    }
+
     private static void AddFreePulls(RoundEndPlan plan, int count, string reason)
     {
         for (int i = 0; i < count; i++) plan.FreePullReasons.Add(reason);
@@ -568,6 +699,96 @@ public class GachaManager : NetworkBehaviour
             if (info.ClientId != clientId) return info.ClientId;
         }
         return ulong.MaxValue;
+    }
+
+    // ===================== sending results: an RPC online, a direct event offline =====================
+
+    private bool IsOfflinePlayer(ulong clientId) => isOfflineAIRival && clientId == OfflinePlayerId;
+
+    private void SendTokens(ulong clientId, int tokens)
+    {
+        if (IsOfflinePlayer(clientId)) ReceiveTokens(tokens);
+        else if (!isOfflineAIRival) SendTokensClientRpc(tokens, ToTarget(clientId));
+    }
+
+    private void SendPullFailed(ulong clientId, string reason)
+    {
+        if (IsOfflinePlayer(clientId)) OnPullFailed?.Invoke(reason);
+        else if (!isOfflineAIRival) SendPullFailedClientRpc(reason, ToTarget(clientId));
+    }
+
+    private void SendBenefits(ulong clientId, int freePulls, int supportDiscount)
+    {
+        if (IsOfflinePlayer(clientId)) OnMyPullBenefitsChanged?.Invoke(freePulls, supportDiscount);
+        else if (!isOfflineAIRival) SendBenefitsClientRpc(freePulls, supportDiscount, ToTarget(clientId));
+    }
+
+    private void SendHandCardsRemoved(ulong clientId, int[] netIds)
+    {
+        if (IsOfflinePlayer(clientId)) OnMyHandCardsRemoved?.Invoke(netIds);
+        else if (!isOfflineAIRival) SendHandCardsRemovedClientRpc(netIds, ToTarget(clientId));
+    }
+
+    private void SendPity(ulong clientId, int actionPulls, int supportPulls)
+    {
+        if (IsOfflinePlayer(clientId)) ReceivePity(actionPulls, supportPulls);
+        else if (!isOfflineAIRival) SendPityClientRpc(actionPulls, supportPulls, ToTarget(clientId));
+    }
+
+    private void SendPullResult(ulong clientId, PullResult result, int pullsSinceLegendary)
+    {
+        if (IsOfflinePlayer(clientId)) ReceivePullResult(result, pullsSinceLegendary);
+        else if (!isOfflineAIRival)
+            SendPullResultClientRpc((int)result.Deck, (int)result.Tier, result.CardId, result.CardName, result.PityTriggered,
+                                    result.Was5050Roll, result.Won5050, pullsSinceLegendary, result.AutoDiscard, ToTarget(clientId));
+    }
+
+    private void SendBonusCard(ulong clientId, PullResult result, int pullsSinceLegendary, string reason)
+    {
+        if (IsOfflinePlayer(clientId)) ReceiveBonusCard(result, pullsSinceLegendary, reason);
+        else if (!isOfflineAIRival)
+            SendBonusCardClientRpc((int)result.Deck, (int)result.Tier, result.CardId, result.CardName, result.PityTriggered,
+                                   result.Was5050Roll, result.Won5050, pullsSinceLegendary, result.AutoDiscard, reason, ToTarget(clientId));
+    }
+
+    // Offline, the AI's card backs are handled by EndTurnManager, so these two only matter online.
+    private void NotifyOpponentDrewCard(ulong drawerClientId)
+    {
+        if (!isOfflineAIRival) NotifyOpponentDrewCardClientRpc(drawerClientId);
+    }
+
+    private void NotifyOpponentLostCards(ulong loserClientId, int count)
+    {
+        if (!isOfflineAIRival) NotifyOpponentLostCardsClientRpc(loserClientId, count);
+    }
+
+    // ===================== receiving (runs on the player's machine) =====================
+
+    private void ReceiveTokens(int tokens)
+    {
+        MatchStats.RecordTokens(tokens);
+        OnMyTokensChanged?.Invoke(tokens);
+    }
+
+    private void ReceivePity(int actionPulls, int supportPulls)
+    {
+        int threshold = pullConfig != null ? pullConfig.pityThreshold : 4;
+        OnPityUpdated?.Invoke(actionPulls, threshold, true);
+        OnPityUpdated?.Invoke(supportPulls, threshold, false);
+    }
+
+    private void ReceivePullResult(PullResult result, int pullsSinceLegendary)
+    {
+        OnPityUpdated?.Invoke(pullsSinceLegendary, pullConfig.pityThreshold, result.Deck == DeckType.Action);
+        MatchStats.RecordPull(result, true);
+        OnMyPullResolved?.Invoke(result);
+    }
+
+    private void ReceiveBonusCard(PullResult result, int pullsSinceLegendary, string reason)
+    {
+        OnPityUpdated?.Invoke(pullsSinceLegendary, pullConfig.pityThreshold, result.Deck == DeckType.Action);
+        MatchStats.RecordPull(result, false);
+        OnMyBonusCardGranted?.Invoke(result, reason);
     }
 
     // ===================== RPCs =====================
@@ -586,42 +807,22 @@ public class GachaManager : NetworkBehaviour
         if (loserClientId != NetworkManager.Singleton.LocalClientId) OnOpponentLostCards?.Invoke(count);
     }
 
-    [ClientRpc]
-    private void SendTokensClientRpc(int tokens, ClientRpcParams rpcParams = default)
-    {
-        MatchStats.RecordTokens(tokens);
-        OnMyTokensChanged?.Invoke(tokens);
-    }
+    [ClientRpc] private void SendTokensClientRpc(int tokens, ClientRpcParams rpcParams = default) => ReceiveTokens(tokens);
     [ClientRpc] private void SendPullFailedClientRpc(string reason, ClientRpcParams rpcParams = default) => OnPullFailed?.Invoke(reason);
     [ClientRpc] private void SendBenefitsClientRpc(int freePulls, int supportDiscount, ClientRpcParams rpcParams = default) => OnMyPullBenefitsChanged?.Invoke(freePulls, supportDiscount);
     [ClientRpc] private void SendHandCardsRemovedClientRpc(int[] netIds, ClientRpcParams rpcParams = default) => OnMyHandCardsRemoved?.Invoke(netIds);
-
-    [ClientRpc]
-    private void SendPityClientRpc(int actionPulls, int supportPulls, ClientRpcParams rpcParams = default)
-    {
-        int threshold = pullConfig != null ? pullConfig.pityThreshold : 90;
-        OnPityUpdated?.Invoke(actionPulls, threshold, true);
-        OnPityUpdated?.Invoke(supportPulls, threshold, false);
-    }
+    [ClientRpc] private void SendPityClientRpc(int actionPulls, int supportPulls, ClientRpcParams rpcParams = default) => ReceivePity(actionPulls, supportPulls);
 
     [ClientRpc]
     private void SendPullResultClientRpc(int deckType, int tier, int cardId, string cardName, bool pityTriggered, bool was5050Roll, bool won5050, int pullsSinceLegendary, bool autoDiscard, ClientRpcParams rpcParams = default)
     {
-        OnPityUpdated?.Invoke(pullsSinceLegendary, pullConfig.pityThreshold, deckType == 0);
-
-        PullResult result = BuildClientResult(deckType, tier, cardId, cardName, pityTriggered, was5050Roll, won5050, autoDiscard);
-        MatchStats.RecordPull(result, true);
-        OnMyPullResolved?.Invoke(result);
+        ReceivePullResult(BuildClientResult(deckType, tier, cardId, cardName, pityTriggered, was5050Roll, won5050, autoDiscard), pullsSinceLegendary);
     }
 
     [ClientRpc]
     private void SendBonusCardClientRpc(int deckType, int tier, int cardId, string cardName, bool pityTriggered, bool was5050Roll, bool won5050, int pullsSinceLegendary, bool autoDiscard, string reason, ClientRpcParams rpcParams = default)
     {
-        OnPityUpdated?.Invoke(pullsSinceLegendary, pullConfig.pityThreshold, deckType == 0);
-
-        PullResult result = BuildClientResult(deckType, tier, cardId, cardName, pityTriggered, was5050Roll, won5050, autoDiscard);
-        MatchStats.RecordPull(result, false);
-        OnMyBonusCardGranted?.Invoke(result, reason);
+        ReceiveBonusCard(BuildClientResult(deckType, tier, cardId, cardName, pityTriggered, was5050Roll, won5050, autoDiscard), pullsSinceLegendary, reason);
     }
 
     private PullResult BuildClientResult(int deckType, int tier, int cardId, string cardName, bool pityTriggered, bool was5050Roll, bool won5050, bool autoDiscard)
@@ -650,27 +851,8 @@ public class GachaManager : NetworkBehaviour
         return result;
     }
 
-    private void DispatchPullResult(PullResult result, int pullsSinceLegendary, ClientRpcParams rpcParams)
-    {
-        SendPullResultClientRpc((int)result.Deck, (int)result.Tier, result.CardId, result.CardName, result.PityTriggered, result.Was5050Roll, result.Won5050, pullsSinceLegendary, result.AutoDiscard, rpcParams);
-    }
-
     private ClientRpcParams ToTarget(ulong clientId) => new ClientRpcParams
     {
         Send = new ClientRpcSendParams { TargetClientIds = new[] { clientId } }
     };
-
-    public (int pulls, int threshold) GetLocalPlayerPity(bool isActionDeck)
-    {
-        if (NetworkManager == null || !NetworkManager.IsListening)
-            return (0, pullConfig != null ? pullConfig.pityThreshold : 90);
-
-        if (playerStates.TryGetValue(NetworkManager.LocalClientId, out var state))
-        {
-            int pulls = isActionDeck ? state.ActionPity.PullsSinceLegendary : state.SupportPity.PullsSinceLegendary;
-            return (pulls, pullConfig.pityThreshold);
-        }
-
-        return (0, pullConfig != null ? pullConfig.pityThreshold : 90);
-    }
 }
